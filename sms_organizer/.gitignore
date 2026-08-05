@@ -1,0 +1,11 @@
+**/local.properties
+**/*.iml
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+android/.gradle/
+android/local.properties
+android/**/gradle-wrapper.jar
+*.log
