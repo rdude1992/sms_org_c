@@ -124,7 +124,7 @@ class AllMessagesTab extends StatelessWidget {
                                       ),
                                     ),
                                     const SizedBox(height: 4),
-                                    CategoryBadge(category: m.category, compact: true),
+                                    CategoryBadge(category: m.category, compact: true, showLabel: false),
                                   ],
                                 ),
                                 onTap: () {

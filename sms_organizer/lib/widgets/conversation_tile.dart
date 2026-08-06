@@ -123,7 +123,7 @@ class ConversationTile extends StatelessWidget {
                               ),
                             ),
                           ),
-                        CategoryBadge(category: latest.category, compact: true),
+                        CategoryBadge(category: latest.category, compact: true, showLabel: false),
                       ],
                     ),
                   ],
