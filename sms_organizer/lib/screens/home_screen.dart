@@ -2,9 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/sms_provider.dart';
-import 'all_messages_tab.dart';
-import 'conversations_tab.dart';
 import 'compose_screen.dart';
+import 'inbox_screen.dart';
 import 'insights_screen.dart';
 import 'settings_screen.dart';
 import 'thread_screen.dart';
@@ -22,8 +21,7 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<int>? _threadTapSub;
 
   final _tabs = const [
-    ConversationsTab(),
-    AllMessagesTab(),
+    InboxScreen(),
     InsightsScreen(),
     SettingsScreen(),
   ];
@@ -97,7 +95,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onPageChanged: (i) => setState(() => _tabIndex = i),
         children: [for (final tab in _tabs) _KeepAlivePage(child: tab)],
       ),
-      floatingActionButton: _tabIndex <= 1
+      floatingActionButton: _tabIndex == 0
           ? FloatingActionButton(
               onPressed: () => Navigator.push(
                 context,
@@ -110,8 +108,7 @@ class _HomeScreenState extends State<HomeScreen> {
         selectedIndex: _tabIndex,
         onDestinationSelected: _goToTab,
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: 'Chats'),
-          NavigationDestination(icon: Icon(Icons.list_alt_outlined), label: 'All'),
+          NavigationDestination(icon: Icon(Icons.inbox_outlined), label: 'Inbox'),
           NavigationDestination(icon: Icon(Icons.insights_outlined), label: 'Insights'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), label: 'Settings'),
         ],

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/category.dart';
 import '../models/sim_info.dart';
 import '../models/sms_message.dart';
@@ -13,6 +14,12 @@ import '../services/sms_platform_service.dart';
 import '../services/transaction_parser_service.dart';
 
 enum LoadState { idle, loading, ready, error }
+
+/// Which layout the Inbox tab shows — grouped-by-conversation ("Chats") or
+/// a flat chronological list of every message ("Messages"). Persisted via
+/// SmsProvider.setInboxView so the choice survives both switching tabs and
+/// a cold app restart, not just staying alive in widget state.
+enum InboxView { chats, messages }
 
 class SmsProvider extends ChangeNotifier {
   final SmsPlatformService _platform = SmsPlatformService.instance;
@@ -57,6 +64,13 @@ class SmsProvider extends ChangeNotifier {
   // preference the user is setting, not text they'd type independently
   // into two different boxes.
   bool showUnreadOnly = false;
+
+  /// Which layout the Inbox tab is currently showing. Loaded from disk in
+  /// [initialize] and written back on every [setInboxView] call — see
+  /// [InboxView] for why this needs to survive a cold restart, not just a
+  /// tab switch.
+  InboxView inboxView = InboxView.chats;
+  static const _inboxViewPrefKey = 'inbox_view';
 
   List<SmsMessage> get allMessages => _allMessages;
   List<Transaction> get transactions => _transactions;
@@ -134,6 +148,7 @@ class SmsProvider extends ChangeNotifier {
   Future<void> initialize() async {
     isDefaultSmsApp = await _platform.isDefaultSmsApp();
     notifyListeners();
+    await _loadInboxView();
     await contactService.load(_platform);
     await _loadActiveSims();
     await _ensureCacheMatchesCurrentLogic();
@@ -150,6 +165,24 @@ class SmsProvider extends ChangeNotifier {
       _activeSims = [];
     }
     notifyListeners();
+  }
+
+  Future<void> _loadInboxView() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString(_inboxViewPrefKey);
+    inboxView = InboxView.values.firstWhere(
+      (v) => v.name == stored,
+      orElse: () => InboxView.chats,
+    );
+    notifyListeners();
+  }
+
+  Future<void> setInboxView(InboxView view) async {
+    if (inboxView == view) return;
+    inboxView = view;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_inboxViewPrefKey, view.name);
   }
 
   /// Incremental sync deliberately never re-evaluates a cached category
