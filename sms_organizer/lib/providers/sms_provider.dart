@@ -43,6 +43,12 @@ class SmsProvider extends ChangeNotifier {
   // body, sender display name, and raw address.
   String searchQuery = '';
 
+  // Separate free-text search over the "chats" list view — matches contact
+  // display name, raw address, or any message body within the thread. Kept
+  // independent from [searchQuery] so switching tabs doesn't carry a query
+  // over to a list it wasn't typed into.
+  String chatSearchQuery = '';
+
   List<SmsMessage> get allMessages => _allMessages;
   List<Transaction> get transactions => _transactions;
   List<InvestmentEvent> get investments => _investments;
@@ -73,6 +79,16 @@ class SmsProvider extends ChangeNotifier {
     }).toList();
     result.sort((a, b) => b.latest.date.compareTo(a.latest.date));
     return result;
+  }
+
+  List<SmsConversation> get filteredConversations {
+    final query = chatSearchQuery.trim().toLowerCase();
+    if (query.isEmpty) return conversations;
+    return conversations.where((c) {
+      if (displayNameFor(c.address).toLowerCase().contains(query)) return true;
+      if (c.address.toLowerCase().contains(query)) return true;
+      return c.messages.any((m) => m.body.toLowerCase().contains(query));
+    }).toList();
   }
 
   String displayNameFor(String address) => contactService.displayNameFor(address);
@@ -276,6 +292,11 @@ class SmsProvider extends ChangeNotifier {
 
   void setSearchQuery(String query) {
     searchQuery = query;
+    notifyListeners();
+  }
+
+  void setChatSearchQuery(String query) {
+    chatSearchQuery = query;
     notifyListeners();
   }
 

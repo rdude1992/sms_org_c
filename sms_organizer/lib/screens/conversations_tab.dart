@@ -1,18 +1,44 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../models/sms_message.dart';
 import '../providers/sms_provider.dart';
 import '../widgets/conversation_tile.dart';
 import '../widgets/multi_select_bar.dart';
 import 'thread_screen.dart';
 
-class ConversationsTab extends StatelessWidget {
+class ConversationsTab extends StatefulWidget {
   const ConversationsTab({super.key});
+
+  @override
+  State<ConversationsTab> createState() => _ConversationsTabState();
+}
+
+class _ConversationsTabState extends State<ConversationsTab> {
+  bool _isSearching = false;
+  final _searchController = TextEditingController();
+
+  void _startSearch() {
+    setState(() => _isSearching = true);
+  }
+
+  void _stopSearch(SmsProvider provider) {
+    _searchController.clear();
+    provider.setChatSearchQuery('');
+    setState(() => _isSearching = false);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<SmsProvider>(
       builder: (context, provider, _) {
-        final conversations = provider.conversations;
+        final conversations = provider.filteredConversations;
+        final searching = provider.chatSearchQuery.trim().isNotEmpty;
 
         return Scaffold(
           appBar: provider.isSelecting
@@ -24,27 +50,54 @@ class ConversationsTab extends StatelessWidget {
                   onDelete: provider.deleteSelected,
                 )
               : AppBar(
-                  title: const Text('Chats'),
+                  title: _isSearching
+                      ? TextField(
+                          controller: _searchController,
+                          autofocus: true,
+                          textInputAction: TextInputAction.search,
+                          decoration: const InputDecoration(
+                            hintText: 'Search chats',
+                            border: InputBorder.none,
+                          ),
+                          onChanged: provider.setChatSearchQuery,
+                        )
+                      : const Text('Chats'),
                   actions: [
-                    if (!provider.isDefaultSmsApp)
+                    if (_isSearching)
                       IconButton(
-                        icon: const Icon(Icons.warning_amber_outlined, color: Colors.orange),
-                        tooltip: 'Not the default SMS app',
-                        onPressed: () => provider.requestDefaultSmsRole(),
+                        icon: const Icon(Icons.close),
+                        onPressed: () => _stopSearch(provider),
+                      )
+                    else ...[
+                      if (!provider.isDefaultSmsApp)
+                        IconButton(
+                          icon: const Icon(Icons.warning_amber_outlined, color: Colors.orange),
+                          tooltip: 'Not the default SMS app',
+                          onPressed: () => provider.requestDefaultSmsRole(),
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.search),
+                        onPressed: _startSearch,
                       ),
-                    IconButton(
-                      icon: const Icon(Icons.refresh),
-                      onPressed: provider.refresh,
-                    ),
+                      IconButton(
+                        icon: const Icon(Icons.refresh),
+                        onPressed: provider.refresh,
+                      ),
+                    ],
                   ],
                 ),
-          body: _buildBody(context, provider, conversations),
+          body: _buildBody(context, provider, conversations, searching),
         );
       },
     );
   }
 
-  Widget _buildBody(BuildContext context, SmsProvider provider, List conversations) {
+  Widget _buildBody(
+    BuildContext context,
+    SmsProvider provider,
+    List<SmsConversation> conversations,
+    bool searching,
+  ) {
     if (provider.state == LoadState.loading && conversations.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -52,7 +105,14 @@ class ConversationsTab extends StatelessWidget {
       return Center(child: Text('Could not load messages: ${provider.error}'));
     }
     if (conversations.isEmpty) {
-      return const Center(child: Text('No conversations yet.'));
+      return Center(
+        child: Text(
+          searching
+              ? 'No chats match "${provider.chatSearchQuery.trim()}".'
+              : 'No conversations yet.',
+          textAlign: TextAlign.center,
+        ),
+      );
     }
     return RefreshIndicator(
       onRefresh: provider.refresh,
