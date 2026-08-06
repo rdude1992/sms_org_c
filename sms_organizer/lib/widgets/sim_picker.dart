@@ -44,6 +44,7 @@ class SimPicker extends StatelessWidget {
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.6),
             borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -57,11 +58,12 @@ class SimPicker extends StatelessWidget {
       );
     }
 
+    final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
     return Row(
       children: [
-        const Icon(Icons.sim_card_outlined, size: 18, color: Colors.grey),
+        Icon(Icons.sim_card_outlined, size: 18, color: mutedColor),
         const SizedBox(width: 8),
-        const Text('Send from', style: TextStyle(fontSize: 13, color: Colors.grey)),
+        Text('Send from', style: TextStyle(fontSize: 13, color: mutedColor)),
         const SizedBox(width: 12),
         Expanded(
           child: SegmentedButton<int>(

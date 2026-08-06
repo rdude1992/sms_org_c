@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/transaction.dart';
-import '../utils/formatters.dart';
 import '../widgets/transaction_tile.dart';
+import '../widgets/ui/empty_state.dart';
+import '../widgets/ui/total_stat.dart';
 
 /// Drilldown target for Insights — shows a pre-filtered slice of
 /// transactions (by direction, instrument, or month) with its own totals
@@ -56,7 +57,7 @@ class TransactionListScreen extends StatelessWidget {
           ),
         ),
         body: sorted.isEmpty
-            ? const Center(child: Text('No transactions in this range.'))
+            ? const EmptyState(icon: Icons.receipt_long_outlined, title: 'No transactions in this range')
             : Column(
                 children: [
                   Container(
@@ -66,11 +67,11 @@ class TransactionListScreen extends StatelessWidget {
                     child: Row(
                       children: [
                         Expanded(
-                          child: _totalChip('Credited', creditTotal, const Color(0xFF10B981)),
+                          child: TotalStat(label: 'Credited', value: creditTotal, color: const Color(0xFF10B981)),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: _totalChip('Debited', debitTotal, const Color(0xFFEF4444)),
+                          child: TotalStat(label: 'Debited', value: debitTotal, color: const Color(0xFFEF4444)),
                         ),
                         Text(
                           '${sorted.length} txns',
@@ -96,20 +97,6 @@ class TransactionListScreen extends StatelessWidget {
       ),
     );
   }
-
-  Widget _totalChip(String label, double value, Color color) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-        Text(
-          Formatters.currency(value),
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color),
-        ),
-      ],
-    );
-  }
 }
 
 class _TransactionListView extends StatelessWidget {
@@ -121,7 +108,7 @@ class _TransactionListView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (transactions.isEmpty) {
-      return Center(child: Text(emptyText, style: const TextStyle(color: Colors.grey)));
+      return EmptyState(icon: Icons.receipt_long_outlined, title: emptyText);
     }
     return ListView.separated(
       itemCount: transactions.length,

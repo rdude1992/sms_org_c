@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/transaction.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
+import '../widgets/ui/empty_state.dart';
 import 'transaction_list_screen.dart';
 
 /// Segregated "Cards & Accounts" drilldown for the Insights "by card /
@@ -37,12 +38,18 @@ class InstrumentListScreen extends StatelessWidget {
                 preferredSize: const Size.fromHeight(28),
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(subtitle!, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  child: Text(
+                    subtitle!,
+                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
                 ),
               ),
       ),
       body: instruments.isEmpty
-          ? const Center(child: Text('No cards or accounts detected in this range.'))
+          ? const EmptyState(
+              icon: Icons.credit_card_off_outlined,
+              title: 'No cards or accounts detected in this range',
+            )
           : ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
               children: [
@@ -150,7 +157,7 @@ class _Section extends StatelessWidget {
               ),
               const Spacer(),
               Text(Formatters.currency(total),
-                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ],
           ),
         ),

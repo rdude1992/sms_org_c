@@ -6,6 +6,8 @@ import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/transaction_tile.dart';
+import '../widgets/ui/empty_state.dart';
+import '../widgets/ui/filter_chip_bar.dart';
 import 'instrument_list_screen.dart';
 import 'investment_list_screen.dart';
 import 'transaction_list_screen.dart';
@@ -96,18 +98,17 @@ class _InsightsScreenState extends State<InsightsScreen> {
               const Divider(height: 1),
               Expanded(
                 child: provider.transactions.isEmpty
-                    ? const Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(24),
-                          child: Text(
-                            'No transaction SMS detected yet. Once bank/card alerts arrive '
+                    ? const EmptyState(
+                        icon: Icons.insights_outlined,
+                        title: 'No insights yet',
+                        message: 'No transaction SMS detected yet. Once bank/card alerts arrive '
                             '(or after the first sync), spend and investment insights will show up here.',
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
                       )
                     : filteredTransactions.isEmpty
-                        ? const Center(child: Text('No transactions in this range.'))
+                        ? const EmptyState(
+                            icon: Icons.filter_alt_off_outlined,
+                            title: 'No transactions in this range',
+                          )
                         : ListView(
                             padding: const EdgeInsets.all(16),
                             children: [
@@ -161,10 +162,12 @@ class _InsightsScreenState extends State<InsightsScreen> {
                               ),
                               const SizedBox(height: 8),
                               if (summary.byInstrument.isEmpty)
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 8),
-                                  child: Text('No transactions in this range.',
-                                      style: TextStyle(color: Colors.grey)),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  child: Text(
+                                    'No transactions in this range.',
+                                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                  ),
                                 )
                               else
                                 ...summary.byInstrument.take(6).map(
@@ -246,23 +249,11 @@ class _RangeFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 48,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        children: [
-          for (final r in InsightsRange.values)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text(r.label),
-                selected: selected == r,
-                onSelected: (_) => onSelected(r),
-              ),
-            ),
-        ],
-      ),
+    return FilterChipBar<InsightsRange>(
+      values: InsightsRange.values,
+      selected: selected,
+      labelBuilder: (r) => r.label,
+      onSelected: onSelected,
     );
   }
 }
@@ -342,7 +333,10 @@ class _TotalCard extends StatelessWidget {
                 children: [
                   Icon(icon, color: color, size: 18),
                   const SizedBox(width: 6),
-                  Text(label, style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                  Text(
+                    label,
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13),
+                  ),
                 ],
               ),
               const SizedBox(height: 10),
@@ -371,8 +365,9 @@ class _TrendBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
     if (previous == 0 && current == 0) {
-      return const Text('No change', style: TextStyle(fontSize: 11, color: Colors.grey));
+      return Text('No change', style: TextStyle(fontSize: 11, color: mutedColor));
     }
     final delta = current - previous;
     final pct = previous == 0 ? 100.0 : (delta / previous * 100).abs();
@@ -380,7 +375,7 @@ class _TrendBadge extends StatelessWidget {
     final isFlat = delta == 0;
     final favourable = isFlat ? null : (isUp == increaseIsGood);
     final color = isFlat
-        ? Colors.grey
+        ? mutedColor
         : (favourable! ? const Color(0xFF10B981) : const Color(0xFFEF4444));
 
     return Row(
@@ -543,7 +538,10 @@ class _LegendDot extends StatelessWidget {
       children: [
         Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
         const SizedBox(width: 6),
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        Text(
+          label,
+          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
       ],
     );
   }
@@ -625,10 +623,10 @@ class _InvestmentCard extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: _miniStat('Invested', summary.totalInvested, const Color(0xFF3B6DF5)),
+                    child: _miniStat(context, 'Invested', summary.totalInvested, const Color(0xFF3B6DF5)),
                   ),
                   Expanded(
-                    child: _miniStat('Redeemed', summary.totalRedeemed, const Color(0xFFF59E0B)),
+                    child: _miniStat(context, 'Redeemed', summary.totalRedeemed, const Color(0xFFF59E0B)),
                   ),
                 ],
               ),
@@ -636,7 +634,7 @@ class _InvestmentCard extends StatelessWidget {
               Text(
                 '${summary.investmentEventCount} SIP / mutual fund / trade SMS detected'
                 '${onTap != null ? ' · tap to view' : ''}',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -645,11 +643,14 @@ class _InvestmentCard extends StatelessWidget {
     );
   }
 
-  Widget _miniStat(String label, double value, Color color) {
+  Widget _miniStat(BuildContext context, String label, double value, Color color) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        Text(
+          label,
+          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
         Text(Formatters.currency(value),
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
       ],

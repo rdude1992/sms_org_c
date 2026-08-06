@@ -29,6 +29,7 @@ class CategoryBadge extends StatelessWidget {
         color: color.withOpacity(0.12),
         shape: showLabel ? BoxShape.rectangle : BoxShape.circle,
         borderRadius: showLabel ? BorderRadius.circular(999) : null,
+        border: showLabel ? Border.all(color: color.withOpacity(0.24)) : null,
       ),
       child: showLabel
           ? Row(

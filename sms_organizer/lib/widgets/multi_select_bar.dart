@@ -57,7 +57,7 @@ class MultiSelectAppBar extends StatelessWidget implements PreferredSizeWidget {
               Navigator.pop(ctx);
               onDelete();
             },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            child: Text('Delete', style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
           ),
         ],
       ),

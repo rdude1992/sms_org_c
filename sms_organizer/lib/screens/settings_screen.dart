@@ -37,7 +37,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: Icon(
               smsProvider.isDefaultSmsApp ? Icons.check_circle : Icons.error_outline,
-              color: smsProvider.isDefaultSmsApp ? Colors.green : Colors.orange,
+              color: smsProvider.isDefaultSmsApp ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
             ),
             title: Text(smsProvider.isDefaultSmsApp
                 ? 'This app is your default SMS app'
@@ -192,14 +192,14 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
       child: Text(
         title.toUpperCase(),
         style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          color: Theme.of(context).colorScheme.primary,
-          letterSpacing: 0.5,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          letterSpacing: 0.6,
         ),
       ),
     );

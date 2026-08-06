@@ -34,12 +34,8 @@ class MessageBubble extends StatelessWidget {
     final isOutgoing = message.box == SmsBoxType.sent || message.box == SmsBoxType.outbox;
     final scheme = Theme.of(context).colorScheme;
 
-    final bubbleColor = isOutgoing
-        ? scheme.primary
-        : (Theme.of(context).brightness == Brightness.dark
-            ? const Color(0xFF262A30)
-            : Colors.white);
-    final textColor = isOutgoing ? scheme.onPrimary : null;
+    final bubbleColor = isOutgoing ? scheme.primary : scheme.surfaceVariant;
+    final textColor = isOutgoing ? scheme.onPrimary : scheme.onSurface;
 
     // Computed on demand rather than cached on the model — only otp-tagged
     // messages need it, and it's a single cheap regex pass per render.
@@ -90,22 +86,19 @@ class MessageBubble extends StatelessWidget {
                       children: [
                         Text(
                           Formatters.timeOfDay(message.date),
-                          style: TextStyle(
-                            color: textColor?.withOpacity(0.7) ?? Colors.grey,
-                            fontSize: 10,
-                          ),
+                          style: TextStyle(color: textColor.withOpacity(0.7), fontSize: 10),
                         ),
                         if (message.simSlot != null) ...[
                           const SizedBox(width: 6),
                           Text(
                             '·',
-                            style: TextStyle(color: textColor?.withOpacity(0.5) ?? Colors.grey, fontSize: 10),
+                            style: TextStyle(color: textColor.withOpacity(0.5), fontSize: 10),
                           ),
                           const SizedBox(width: 6),
                           Text(
                             'SIM ${message.simSlot! + 1}',
                             style: TextStyle(
-                              color: textColor?.withOpacity(0.7) ?? Colors.grey,
+                              color: textColor.withOpacity(0.7),
                               fontSize: 10,
                               fontWeight: FontWeight.w600,
                             ),
@@ -127,13 +120,13 @@ class MessageBubble extends StatelessWidget {
 class _CopyOtpButton extends StatelessWidget {
   final String code;
   final bool outgoingTint;
-  final Color? textColor;
+  final Color textColor;
 
-  const _CopyOtpButton({required this.code, required this.outgoingTint, this.textColor});
+  const _CopyOtpButton({required this.code, required this.outgoingTint, required this.textColor});
 
   @override
   Widget build(BuildContext context) {
-    final fg = outgoingTint ? textColor ?? Colors.white : Theme.of(context).colorScheme.primary;
+    final fg = outgoingTint ? textColor : Theme.of(context).colorScheme.primary;
     return InkWell(
       borderRadius: BorderRadius.circular(8),
       onTap: () async {

@@ -8,6 +8,8 @@ import '../widgets/category_badge.dart';
 import '../widgets/conversation_tile.dart';
 import '../widgets/direction_badge.dart';
 import '../widgets/multi_select_bar.dart';
+import '../widgets/ui/empty_state.dart';
+import '../widgets/ui/filter_chip_bar.dart';
 import 'thread_screen.dart';
 
 /// Bottom-nav "Inbox" tab — merges what used to be two separate tabs
@@ -95,7 +97,7 @@ class _InboxScreenState extends State<InboxScreen> {
                     else ...[
                       if (!provider.isDefaultSmsApp)
                         IconButton(
-                          icon: const Icon(Icons.warning_amber_outlined, color: Colors.orange),
+                          icon: const Icon(Icons.warning_amber_outlined, color: Color(0xFFF59E0B)),
                           tooltip: 'Not the default SMS app',
                           onPressed: () => provider.requestDefaultSmsRole(),
                         ),
@@ -153,15 +155,13 @@ class _ChatsBody extends StatelessWidget {
       return Center(child: Text('Could not load messages: ${provider.error}'));
     }
     if (conversations.isEmpty) {
-      return Center(
-        child: Text(
-          searching
-              ? 'No chats match "${provider.chatSearchQuery.trim()}".'
-              : provider.showUnreadOnly
-                  ? 'No unread chats.'
-                  : 'No conversations yet.',
-          textAlign: TextAlign.center,
-        ),
+      return EmptyState(
+        icon: searching ? Icons.search_off_outlined : Icons.chat_bubble_outline,
+        title: searching
+            ? 'No chats match "${provider.chatSearchQuery.trim()}"'
+            : provider.showUnreadOnly
+                ? 'No unread chats'
+                : 'No conversations yet',
       );
     }
     return RefreshIndicator(
@@ -219,15 +219,13 @@ class _MessagesBody extends StatelessWidget {
           child: provider.state == LoadState.loading && messages.isEmpty
               ? const Center(child: CircularProgressIndicator())
               : messages.isEmpty
-                  ? Center(
-                      child: Text(
-                        searching
-                            ? 'No messages match "${provider.searchQuery.trim()}".'
-                            : provider.showUnreadOnly
-                                ? 'No unread messages.'
-                                : 'No messages in this category.',
-                        textAlign: TextAlign.center,
-                      ),
+                  ? EmptyState(
+                      icon: searching ? Icons.search_off_outlined : Icons.inbox_outlined,
+                      title: searching
+                          ? 'No messages match "${provider.searchQuery.trim()}"'
+                          : provider.showUnreadOnly
+                              ? 'No unread messages'
+                              : 'No messages in this category',
                     )
                   : RefreshIndicator(
                       onRefresh: provider.refresh,
@@ -364,28 +362,11 @@ class _CategoryFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 48,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        children: [
-          _chip(context, null, 'All'),
-          for (final cat in SmsCategory.values) _chip(context, cat, cat.label),
-        ],
-      ),
-    );
-  }
-
-  Widget _chip(BuildContext context, SmsCategory? category, String label) {
-    final selected = provider.activeCategoryFilter == category;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: ChoiceChip(
-        label: Text(label),
-        selected: selected,
-        onSelected: (_) => provider.setCategoryFilter(category),
-      ),
+    return FilterChipBar<SmsCategory?>(
+      values: [null, for (final cat in SmsCategory.values) cat],
+      selected: provider.activeCategoryFilter,
+      labelBuilder: (category) => category?.label ?? 'All',
+      onSelected: provider.setCategoryFilter,
     );
   }
 }
