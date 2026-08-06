@@ -199,10 +199,25 @@ class SmsProvider extends ChangeNotifier {
         newCategories[m.id] = m.category;
 
         if (m.category == SmsCategory.transactional) {
-          final txn = _txnParser.parseTransaction(m);
-          if (txn != null) newTransactions.add(txn);
+          // Investment first, generic transaction only as a fallback: a SIP/
+          // mutual-fund/stock-trade confirmation (the AMC or broker's own
+          // SMS, not the bank's separate debit alert for the same money)
+          // always also has an amount, so it would otherwise pass
+          // parseTransaction's bare "has an amount" gate too — recording it
+          // as BOTH a generic Transaction (counted in Debited/By-card
+          // totals) AND an InvestmentEvent (counted in Invested totals)
+          // double-counts every rupee ever invested. The bank-side debit
+          // alert for the same real-world payment is a separate SMS with
+          // its own account/UPI language, not SIP/folio/NAV wording, so it
+          // never matches parseInvestment and still comes through as a
+          // normal Transaction below.
           final inv = _txnParser.parseInvestment(m);
-          if (inv != null) newInvestments.add(inv);
+          if (inv != null) {
+            newInvestments.add(inv);
+          } else {
+            final txn = _txnParser.parseTransaction(m);
+            if (txn != null) newTransactions.add(txn);
+          }
         }
       }
 

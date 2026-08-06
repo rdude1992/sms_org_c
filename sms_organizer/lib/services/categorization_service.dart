@@ -16,7 +16,7 @@ class CategorizationService {
   /// cached categories from before a logic change would silently keep
   /// being reused forever (incremental sync deliberately never
   /// re-evaluates cached entries on its own).
-  static const int version = 1;
+  static const int version = 2;
 
   SmsCategory categorize(SmsMessage message) {
     final sender = message.address;
@@ -126,6 +126,18 @@ class CategorizationService {
             RegExp(r'scheduled', caseSensitive: false).hasMatch(contentLower) ||
             RegExp(r'initiated', caseSensitive: false).hasMatch(contentLower);
 
+    // A UPI/CRED-style collect request ("X has requested Rs.Y from you" /
+    // "... has requested money from you on CRED") isn't money that has
+    // moved yet — it's asking the user to approve a future debit. Some
+    // gateways phrase the follow-up as "will be debited" (already caught
+    // by isFutureTransaction below) but others (e.g. "To authorize debit
+    // from your account please login...") don't, so without this check
+    // those slip through as if they were completed transactions and
+    // inflate spend totals for money that was never actually sent.
+    final isPendingPaymentRequest =
+        RegExp(r'has\s+requested\s+(?:Rs\.?|INR|₹|money)', caseSensitive: false).hasMatch(content) &&
+            contentLower.contains('from you');
+
     final isRequestNotification = (contentLower.contains('request') &&
             (contentLower.contains('receipt') ||
                 contentLower.contains('received') ||
@@ -133,7 +145,8 @@ class CategorizationService {
                 contentLower.contains('cancel') ||
                 contentLower.contains('redemption'))) ||
         (contentLower.contains('feedback') && contentLower.contains('important')) ||
-        (contentLower.contains('ack') && contentLower.contains('receipt'));
+        (contentLower.contains('ack') && contentLower.contains('receipt')) ||
+        isPendingPaymentRequest;
 
     // Uses the robust extractor (handles year false-positives, Pluxee's
     // currency-symbol-less amounts, etc.) rather than a bare regex check.

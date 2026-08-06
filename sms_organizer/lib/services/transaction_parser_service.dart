@@ -44,7 +44,18 @@ class TransactionParserService {
         .hasMatch(body);
     if (!isMf && !isStock) return null;
 
-    final amount = extractors.extractAmount(body);
+    final details = extractors.extractInvestmentDetails(body, sender);
+
+    // A one-time purchase confirmation like "as per your request 155.248
+    // units at NAV 64.41 have been allotted in folio..." states units and
+    // NAV but never an explicit Rs amount — extractAmount alone would
+    // return null and silently drop the whole event. Derive it the same
+    // way extractInvestmentDetails already derives units from amount÷NAV,
+    // just inverted.
+    final amount = extractors.extractAmount(body) ??
+        (details.units != null && details.nav != null
+            ? double.parse((details.units! * details.nav!).toStringAsFixed(2))
+            : null);
     if (amount == null) return null;
 
     InvestmentKind kind;
@@ -57,8 +68,6 @@ class TransactionParserService {
     } else {
       kind = InvestmentKind.stockTrade;
     }
-
-    final details = extractors.extractInvestmentDetails(body, sender);
 
     // extractInvestmentDetails only recognises a handful of mutual-fund
     // sender keywords; for stock trades (Zerodha/Groww/IndMoney/Kuvera)
