@@ -8,14 +8,39 @@ import '../widgets/direction_badge.dart';
 import '../widgets/multi_select_bar.dart';
 import 'thread_screen.dart';
 
-class AllMessagesTab extends StatelessWidget {
+class AllMessagesTab extends StatefulWidget {
   const AllMessagesTab({super.key});
+
+  @override
+  State<AllMessagesTab> createState() => _AllMessagesTabState();
+}
+
+class _AllMessagesTabState extends State<AllMessagesTab> {
+  bool _isSearching = false;
+  final _searchController = TextEditingController();
+
+  void _startSearch() {
+    setState(() => _isSearching = true);
+  }
+
+  void _stopSearch(SmsProvider provider) {
+    _searchController.clear();
+    provider.setSearchQuery('');
+    setState(() => _isSearching = false);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<SmsProvider>(
       builder: (context, provider, _) {
         final messages = provider.filteredMessages;
+        final searching = provider.searchQuery.trim().isNotEmpty;
 
         return Scaffold(
           appBar: provider.isSelecting
@@ -26,7 +51,32 @@ class AllMessagesTab extends StatelessWidget {
                   onMarkUnread: () => provider.markSelectedRead(false),
                   onDelete: provider.deleteSelected,
                 )
-              : AppBar(title: const Text('All Messages')),
+              : AppBar(
+                  title: _isSearching
+                      ? TextField(
+                          controller: _searchController,
+                          autofocus: true,
+                          textInputAction: TextInputAction.search,
+                          decoration: const InputDecoration(
+                            hintText: 'Search messages',
+                            border: InputBorder.none,
+                          ),
+                          onChanged: provider.setSearchQuery,
+                        )
+                      : const Text('All Messages'),
+                  actions: [
+                    if (_isSearching)
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => _stopSearch(provider),
+                      )
+                    else
+                      IconButton(
+                        icon: const Icon(Icons.search),
+                        onPressed: _startSearch,
+                      ),
+                  ],
+                ),
           body: Column(
             children: [
               _CategoryFilterBar(provider: provider),
@@ -35,7 +85,14 @@ class AllMessagesTab extends StatelessWidget {
                 child: provider.state == LoadState.loading && messages.isEmpty
                     ? const Center(child: CircularProgressIndicator())
                     : messages.isEmpty
-                        ? const Center(child: Text('No messages in this category.'))
+                        ? Center(
+                            child: Text(
+                              searching
+                                  ? 'No messages match "${provider.searchQuery.trim()}".'
+                                  : 'No messages in this category.',
+                              textAlign: TextAlign.center,
+                            ),
+                          )
                         : ListView.separated(
                             itemCount: messages.length,
                             separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),

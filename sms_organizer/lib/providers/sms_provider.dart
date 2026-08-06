@@ -39,13 +39,27 @@ class SmsProvider extends ChangeNotifier {
   // Category filter for the "all messages" list view.
   SmsCategory? activeCategoryFilter;
 
+  // Free-text search over the "all messages" list view — matches message
+  // body, sender display name, and raw address.
+  String searchQuery = '';
+
   List<SmsMessage> get allMessages => _allMessages;
   List<Transaction> get transactions => _transactions;
   List<InvestmentEvent> get investments => _investments;
 
   List<SmsMessage> get filteredMessages {
-    if (activeCategoryFilter == null) return _allMessages;
-    return _allMessages.where((m) => m.category == activeCategoryFilter).toList();
+    Iterable<SmsMessage> msgs = _allMessages;
+    if (activeCategoryFilter != null) {
+      msgs = msgs.where((m) => m.category == activeCategoryFilter);
+    }
+    final query = searchQuery.trim().toLowerCase();
+    if (query.isNotEmpty) {
+      msgs = msgs.where((m) =>
+          m.body.toLowerCase().contains(query) ||
+          m.address.toLowerCase().contains(query) ||
+          displayNameFor(m.address).toLowerCase().contains(query));
+    }
+    return msgs.toList();
   }
 
   List<SmsConversation> get conversations {
@@ -257,6 +271,11 @@ class SmsProvider extends ChangeNotifier {
 
   void setCategoryFilter(SmsCategory? category) {
     activeCategoryFilter = category;
+    notifyListeners();
+  }
+
+  void setSearchQuery(String query) {
+    searchQuery = query;
     notifyListeners();
   }
 
