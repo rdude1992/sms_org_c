@@ -303,6 +303,33 @@ class SmsProvider extends ChangeNotifier {
     await refresh();
   }
 
+  /// Marks every unread incoming message in [threadId] as read. Call this
+  /// when a thread is opened — ThreadScreen previously never did, so
+  /// messages stayed "unread" (device SMS store included) no matter how
+  /// many times you opened the conversation.
+  ///
+  /// Writing to the OS's own SMS store only actually takes effect when
+  /// this app is the default SMS app — same restriction every other write
+  /// (send, delete, the multi-select mark-read above) already has, and the
+  /// OS enforces it, not us. This is called automatically on every thread
+  /// open rather than from an explicit user action, so a failure (not
+  /// default, transient platform error) is swallowed rather than
+  /// interrupting the read: the unread badge just won't clear until the
+  /// app is made default.
+  Future<void> markThreadRead(int threadId) async {
+    final unreadIds = _allMessages
+        .where((m) => m.threadId == threadId && m.isIncoming && !m.read)
+        .map((m) => m.id)
+        .toList();
+    if (unreadIds.isEmpty) return;
+    try {
+      await _platform.markRead(unreadIds, true);
+    } catch (_) {
+      return;
+    }
+    await refresh();
+  }
+
   // ---- Sending / drafts ----
 
   Future<bool> sendSms(String address, String body, {int? subscriptionId}) async {

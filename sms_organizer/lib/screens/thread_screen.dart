@@ -37,6 +37,13 @@ class _ThreadScreenState extends State<ThreadScreen> {
   void initState() {
     super.initState();
     _highlightedId = widget.highlightMessageId;
+    // Opening a thread should mark its unread messages read, same as any
+    // other SMS app — fire once after the first frame rather than in
+    // build(), which reruns on every provider notifyListeners().
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<SmsProvider>().markThreadRead(widget.threadId);
+    });
   }
 
   void _initSelectedSim(List<SimInfo> sims) {
