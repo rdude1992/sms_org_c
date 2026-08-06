@@ -26,9 +26,10 @@ class ConversationTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final latest = conversation.latest;
     final unread = conversation.unreadCount > 0;
+    final scheme = Theme.of(context).colorScheme;
 
     return Material(
-      color: selected ? Theme.of(context).colorScheme.primary.withOpacity(0.08) : Colors.transparent,
+      color: selected ? scheme.primary.withOpacity(0.08) : Colors.transparent,
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
@@ -41,7 +42,7 @@ class ConversationTile extends StatelessWidget {
                   padding: const EdgeInsets.only(right: 8),
                   child: Icon(
                     selected ? Icons.check_circle : Icons.radio_button_unchecked,
-                    color: selected ? Theme.of(context).colorScheme.primary : Colors.grey,
+                    color: selected ? scheme.primary : scheme.outline,
                   ),
                 )
               else
@@ -60,12 +61,21 @@ class ConversationTile extends StatelessWidget {
                   children: [
                     Row(
                       children: [
+                        if (unread) ...[
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(color: scheme.primary, shape: BoxShape.circle),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
                         Expanded(
                           child: Text(
                             displayName,
                             style: TextStyle(
                               fontWeight: unread ? FontWeight.bold : FontWeight.w600,
                               fontSize: 15,
+                              color: unread ? scheme.onSurface : null,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -74,7 +84,7 @@ class ConversationTile extends StatelessWidget {
                           Formatters.relativeOrTime(latest.date),
                           style: TextStyle(
                             fontSize: 12,
-                            color: unread ? Theme.of(context).colorScheme.primary : Colors.grey,
+                            color: unread ? scheme.primary : scheme.onSurfaceVariant,
                             fontWeight: unread ? FontWeight.bold : FontWeight.normal,
                           ),
                         ),
@@ -89,13 +99,30 @@ class ConversationTile extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: unread ? null : Colors.grey,
+                              color: unread ? scheme.onSurface.withOpacity(0.85) : scheme.onSurfaceVariant,
                               fontWeight: unread ? FontWeight.w600 : FontWeight.normal,
                               fontSize: 13,
                             ),
                           ),
                         ),
                         const SizedBox(width: 6),
+                        if (unread)
+                          Container(
+                            margin: const EdgeInsets.only(right: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: scheme.primary,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              '${conversation.unreadCount}',
+                              style: TextStyle(
+                                color: scheme.onPrimary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
                         CategoryBadge(category: latest.category, compact: true),
                       ],
                     ),

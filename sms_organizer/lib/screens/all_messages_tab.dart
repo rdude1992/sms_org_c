@@ -4,6 +4,7 @@ import '../models/category.dart';
 import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
 import '../widgets/category_badge.dart';
+import '../widgets/direction_badge.dart';
 import '../widgets/multi_select_bar.dart';
 import 'thread_screen.dart';
 
@@ -41,35 +42,66 @@ class AllMessagesTab extends StatelessWidget {
                             itemBuilder: (context, index) {
                               final m = messages[index];
                               final selected = provider.selectedIds.contains(m.id);
+                              final unread = !m.read && m.isIncoming;
+                              final scheme = Theme.of(context).colorScheme;
                               return ListTile(
                                 selected: selected,
-                                selectedTileColor:
-                                    Theme.of(context).colorScheme.primary.withOpacity(0.06),
+                                selectedTileColor: scheme.primary.withOpacity(0.06),
                                 leading: provider.isSelecting
                                     ? Icon(
                                         selected
                                             ? Icons.check_circle
                                             : Icons.radio_button_unchecked,
-                                        color: selected
-                                            ? Theme.of(context).colorScheme.primary
-                                            : Colors.grey,
+                                        color: selected ? scheme.primary : scheme.outline,
                                       )
-                                    : CircleAvatar(
-                                        backgroundColor: m.category.color.withOpacity(0.15),
-                                        child: Icon(m.category.icon,
-                                            color: m.category.color, size: 18),
+                                    : Stack(
+                                        clipBehavior: Clip.none,
+                                        children: [
+                                          CircleAvatar(
+                                            backgroundColor: m.category.color.withOpacity(0.15),
+                                            child: Icon(m.category.icon,
+                                                color: m.category.color, size: 18),
+                                          ),
+                                          Positioned(
+                                            bottom: -2,
+                                            right: -2,
+                                            child: DirectionBadge(isIncoming: m.isIncoming),
+                                          ),
+                                        ],
                                       ),
-                                title: Text(
-                                  provider.displayNameFor(m.address),
-                                  style: TextStyle(
-                                    fontWeight:
-                                        (!m.read && m.isIncoming) ? FontWeight.bold : FontWeight.w600,
-                                  ),
+                                title: Row(
+                                  children: [
+                                    if (unread) ...[
+                                      Container(
+                                        width: 8,
+                                        height: 8,
+                                        decoration: BoxDecoration(
+                                          color: scheme.primary,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                    ],
+                                    Expanded(
+                                      child: Text(
+                                        provider.displayNameFor(m.address),
+                                        style: TextStyle(
+                                          fontWeight: unread ? FontWeight.bold : FontWeight.w600,
+                                          color: unread ? scheme.onSurface : null,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 subtitle: Text(
                                   m.body,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: unread ? scheme.onSurface.withOpacity(0.85) : scheme.onSurfaceVariant,
+                                    fontWeight: unread ? FontWeight.w600 : FontWeight.normal,
+                                  ),
                                 ),
                                 trailing: Column(
                                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -77,7 +109,11 @@ class AllMessagesTab extends StatelessWidget {
                                   children: [
                                     Text(
                                       Formatters.relativeOrTime(m.date),
-                                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: unread ? scheme.primary : scheme.onSurfaceVariant,
+                                        fontWeight: unread ? FontWeight.bold : FontWeight.normal,
+                                      ),
                                     ),
                                     const SizedBox(height: 4),
                                     CategoryBadge(category: m.category, compact: true),
