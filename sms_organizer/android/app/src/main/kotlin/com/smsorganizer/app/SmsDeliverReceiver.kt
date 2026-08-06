@@ -21,8 +21,12 @@ class SmsDeliverReceiver : BroadcastReceiver() {
         val address = messages[0].originatingAddress
         val timestamp = messages[0].timestampMillis
         val fullBody = messages.joinToString(separator = "") { it.messageBody ?: "" }
+        // AOSP's telephony framework stamps incoming SMS_DELIVER/SMS_RECEIVED
+        // intents with the receiving SIM's subscription id under this extra
+        // on dual-SIM devices (API 22+). Absent on single-SIM devices.
+        val subscriptionId = intent.getIntExtra("subscription", -1)
 
-        val id = SmsRepository.insertIncoming(context, address, fullBody, timestamp)
+        val id = SmsRepository.insertIncoming(context, address, fullBody, timestamp, subscriptionId)
 
         MainActivity.eventSink?.success(
             mapOf(

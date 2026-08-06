@@ -45,6 +45,7 @@ class MainActivity : FlutterActivity() {
                 }
                 "getAllMessages" -> result.success(SmsRepository.getAllMessages(this))
                 "getContacts" -> result.success(ContactsRepository.getAllContacts(this))
+                "getActiveSims" -> result.success(SimRepository.getActiveSims(this))
                 "getMutedCategories" ->
                     result.success(NotificationPrefsRepository.getMuted(this).toList())
                 "setMutedCategories" -> {
@@ -79,8 +80,9 @@ class MainActivity : FlutterActivity() {
                 "sendSms" -> {
                     val address = call.argument<String>("address") ?: ""
                     val body = call.argument<String>("body") ?: ""
+                    val subscriptionId = call.argument<Int>("subscriptionId")
                     try {
-                        SmsRepository.sendSms(this, address, body)
+                        SmsRepository.sendSms(this, address, body, subscriptionId)
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("SEND_FAILED", e.message, null)

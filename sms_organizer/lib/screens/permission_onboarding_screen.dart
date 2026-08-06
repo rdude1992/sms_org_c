@@ -44,6 +44,10 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
       Permission.sms,
       Permission.contacts,
       Permission.notification,
+      // For dual-SIM detection (which SIM sent/received each message, and
+      // choosing a SIM to send from) — best-effort, so it's requested here
+      // but doesn't gate _permissionsGranted below.
+      Permission.phone,
     ].request();
     final granted = results[Permission.sms]?.isGranted ?? false;
     setState(() {

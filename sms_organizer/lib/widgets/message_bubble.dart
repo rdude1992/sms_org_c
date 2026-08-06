@@ -71,12 +71,33 @@ class MessageBubble extends StatelessWidget {
                       _CopyOtpButton(code: otpCode, outgoingTint: isOutgoing, textColor: textColor),
                     ],
                     const SizedBox(height: 4),
-                    Text(
-                      Formatters.timeOfDay(message.date),
-                      style: TextStyle(
-                        color: textColor?.withOpacity(0.7) ?? Colors.grey,
-                        fontSize: 10,
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          Formatters.timeOfDay(message.date),
+                          style: TextStyle(
+                            color: textColor?.withOpacity(0.7) ?? Colors.grey,
+                            fontSize: 10,
+                          ),
+                        ),
+                        if (message.simSlot != null) ...[
+                          const SizedBox(width: 6),
+                          Text(
+                            '·',
+                            style: TextStyle(color: textColor?.withOpacity(0.5) ?? Colors.grey, fontSize: 10),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'SIM ${message.simSlot! + 1}',
+                            style: TextStyle(
+                              color: textColor?.withOpacity(0.7) ?? Colors.grey,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ),

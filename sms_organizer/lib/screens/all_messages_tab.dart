@@ -172,13 +172,29 @@ class _AllMessagesTabState extends State<AllMessagesTab> {
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Text(
-                                      Formatters.relativeOrTime(m.date),
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: unread ? scheme.primary : scheme.onSurfaceVariant,
-                                        fontWeight: unread ? FontWeight.bold : FontWeight.normal,
-                                      ),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (m.simSlot != null) ...[
+                                          Text(
+                                            'SIM ${m.simSlot! + 1}',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w600,
+                                              color: scheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                        ],
+                                        Text(
+                                          Formatters.relativeOrTime(m.date),
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: unread ? scheme.primary : scheme.onSurfaceVariant,
+                                            fontWeight: unread ? FontWeight.bold : FontWeight.normal,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                     const SizedBox(height: 4),
                                     CategoryBadge(category: m.category, compact: true, showLabel: false),

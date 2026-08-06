@@ -30,6 +30,11 @@ class SmsMessage {
   final SmsBoxType box;
   final bool read;
 
+  /// 0-based SIM slot this message was sent/received on ("SIM 1" = 0, "SIM
+  /// 2" = 1), or null if unknown — no READ_PHONE_STATE permission, a
+  /// single-SIM device, or the SIM involved has since been removed.
+  final int? simSlot;
+
   /// Populated by CategorizationService after load; not from the OS provider.
   SmsCategory category;
 
@@ -41,10 +46,12 @@ class SmsMessage {
     required this.date,
     required this.box,
     required this.read,
+    this.simSlot,
     this.category = SmsCategory.personal,
   });
 
   factory SmsMessage.fromPlatformMap(Map<dynamic, dynamic> map) {
+    final rawSlot = map['simSlot'] as int?;
     return SmsMessage(
       id: map['id'] as int,
       threadId: (map['threadId'] ?? 0) as int,
@@ -53,6 +60,7 @@ class SmsMessage {
       date: DateTime.fromMillisecondsSinceEpoch((map['date'] ?? 0) as int),
       box: boxTypeFromAndroid((map['type'] ?? 1) as int),
       read: (map['read'] ?? true) as bool,
+      simSlot: (rawSlot != null && rawSlot >= 0) ? rawSlot : null,
     );
   }
 
@@ -65,6 +73,7 @@ class SmsMessage {
         'box': box.name,
         'read': read,
         'category': category.name,
+        'simSlot': simSlot,
       };
 
   factory SmsMessage.fromJson(Map<String, dynamic> json) {
@@ -79,6 +88,7 @@ class SmsMessage {
         orElse: () => SmsBoxType.unknown,
       ),
       read: json['read'] as bool,
+      simSlot: json['simSlot'] as int?,
     );
     msg.category = SmsCategory.values.firstWhere(
       (e) => e.name == json['category'],
