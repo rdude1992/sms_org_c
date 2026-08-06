@@ -16,7 +16,7 @@ class CategorizationService {
   /// cached categories from before a logic change would silently keep
   /// being reused forever (incremental sync deliberately never
   /// re-evaluates cached entries on its own).
-  static const int version = 2;
+  static const int version = 3;
 
   SmsCategory categorize(SmsMessage message) {
     final sender = message.address;
@@ -70,6 +70,15 @@ class CategorizationService {
         !contentLower.contains('withdrawn') &&
         !contentLower.contains('sent to') &&
         !contentLower.contains('transferred to')) {
+      return SmsCategory.updates;
+    }
+
+    // Stock-broker periodic snapshots ("ZERODHA BROKING LIMITED on <date>
+    // reported your Fund bal Rs.X & Securities bal Y...") — a balance
+    // reading, not a transaction; "broking" being in the transactional
+    // sender allowlist below would otherwise let these through with a
+    // meaningless direction/merchant since no money actually moved.
+    if (contentLower.contains('reported your fund bal')) {
       return SmsCategory.updates;
     }
 

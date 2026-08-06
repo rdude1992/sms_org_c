@@ -176,6 +176,13 @@ String? extractMerchant(String content) {
     // "Money Transfer:Rs X from HDFC Bank A/c **6020 on date to MERCHANT
     // UPI: ..." — HDFC's IMPS/UPI transfer-confirmation format.
     RegExp(r"\bto\s+([A-Za-z0-9\s&.\-]{2,40}?)\s+UPI\b", caseSensitive: false),
+    // "Payment of Rs.X to MERCHANT succeeded." — payment-gateway
+    // confirmations (PayU/aggregators).
+    RegExp(r'\bto\s+([A-Za-z0-9_.\s&-]{2,40}?)\s+succeeded\b', caseSensitive: false),
+    // "Transaction of Rs.900.00 for purchase of Petrol is successful." —
+    // HP Pay fuel-purchase confirmations; the category name stands in for
+    // a specific business name here.
+    RegExp(r'for\s+purchase\s+of\s+([A-Za-z\s]+?)\s+is\b', caseSensitive: false),
   ];
 
   const excludeList = [
@@ -339,6 +346,20 @@ ParsedDirection getTransactionType(String content) {
           contentLower.contains('processed') &&
           contentLower.contains('nav')) ||
       (contentLower.contains('units') && contentLower.contains('credited'))) {
+    return ParsedDirection.debit;
+  }
+
+  // "HDFC Bank : NEFT money transfer ... has been credited to <Recipient
+  // Name> on ..." — an outgoing NEFT/IMPS confirmation phrased from the
+  // *recipient's* side ("credited to Priya Sharma"), not the user's own
+  // account ("credited to a/c ..." / "credited to your wallet") — this is
+  // really a debit from the sender's perspective despite containing
+  // "credited". Narrowly scoped to NEFT/IMPS/money-transfer wording so it
+  // can't misfire on the far more common "credited to a/c XX6020" /
+  // "credited to your ..." self-account phrasing, which stays a credit.
+  if (RegExp(r'credited\s+to\s+(?!your\b|a\/c|account)[A-Za-z]', caseSensitive: false)
+          .hasMatch(content) &&
+      RegExp(r'\b(neft|imps|money\s+transfer)\b', caseSensitive: false).hasMatch(content)) {
     return ParsedDirection.debit;
   }
 
