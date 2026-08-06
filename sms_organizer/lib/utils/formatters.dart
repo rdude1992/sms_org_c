@@ -12,6 +12,7 @@ class Formatters {
   static String currency(double value) => _currency.format(value);
   static String currencyPrecise(double value) => _currencyPrecise.format(value);
   static String monthYear(DateTime date) => _monthYear.format(date);
+  static String timeOfDay(DateTime date) => _timeOfDay.format(date);
 
   static String relativeOrTime(DateTime date) {
     final now = DateTime.now();
