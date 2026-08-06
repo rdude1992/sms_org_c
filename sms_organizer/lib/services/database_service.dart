@@ -1,5 +1,8 @@
 import 'package:path/path.dart' as p;
-import 'package:sqflite/sqflite.dart';
+// sqflite re-exports its own `Transaction` (the db.transaction() callback
+// type), which collides with our Transaction model from models/transaction.dart
+// below — hidden since this file never references sqflite's directly.
+import 'package:sqflite/sqflite.dart' hide Transaction;
 import '../models/category.dart';
 import '../models/sms_message.dart';
 import '../models/transaction.dart';
