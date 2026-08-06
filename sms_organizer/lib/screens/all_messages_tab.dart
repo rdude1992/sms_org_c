@@ -207,7 +207,10 @@ class _AllMessagesTabState extends State<AllMessagesTab> {
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
-                                        builder: (_) => ThreadScreen(threadId: m.threadId),
+                                        builder: (_) => ThreadScreen(
+                                          threadId: m.threadId,
+                                          highlightMessageId: m.id,
+                                        ),
                                       ),
                                     );
                                   }

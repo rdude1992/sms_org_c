@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import '../models/sms_message.dart';
 import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
 import '../widgets/date_separator.dart';
@@ -8,7 +10,12 @@ import '../widgets/multi_select_bar.dart';
 
 class ThreadScreen extends StatefulWidget {
   final int threadId;
-  const ThreadScreen({super.key, required this.threadId});
+
+  /// If set (e.g. tapping a message in the All Messages list), the thread
+  /// scrolls to and briefly highlights this message on open.
+  final int? highlightMessageId;
+
+  const ThreadScreen({super.key, required this.threadId, this.highlightMessageId});
 
   @override
   State<ThreadScreen> createState() => _ThreadScreenState();
@@ -16,11 +23,43 @@ class ThreadScreen extends StatefulWidget {
 
 class _ThreadScreenState extends State<ThreadScreen> {
   final _replyController = TextEditingController();
+  final _itemScrollController = ItemScrollController();
+
+  int? _highlightedId;
+  bool _didInitialScroll = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _highlightedId = widget.highlightMessageId;
+  }
 
   @override
   void dispose() {
     _replyController.dispose();
     super.dispose();
+  }
+
+  void _scrollToHighlightIfNeeded(List<SmsMessage> messages) {
+    if (_didInitialScroll || widget.highlightMessageId == null) return;
+    final index = messages.indexWhere((m) => m.id == widget.highlightMessageId);
+    if (index == -1) return;
+    _didInitialScroll = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_itemScrollController.isAttached) return;
+      _itemScrollController.scrollTo(
+        index: index,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeOut,
+        alignment: 0.4,
+      );
+    });
+
+    // Fade the highlight back out after it's had a moment to draw the eye.
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _highlightedId = null);
+    });
   }
 
   @override
@@ -37,6 +76,8 @@ class _ThreadScreenState extends State<ThreadScreen> {
         final conversation = matches.first;
         final messages = conversation.messages.reversed.toList(); // oldest first for chat view
 
+        _scrollToHighlightIfNeeded(messages);
+
         return Scaffold(
           appBar: provider.isSelecting
               ? MultiSelectAppBar(
@@ -50,8 +91,8 @@ class _ThreadScreenState extends State<ThreadScreen> {
           body: Column(
             children: [
               Expanded(
-                child: ListView.builder(
-                  reverse: false,
+                child: ScrollablePositionedList.builder(
+                  itemScrollController: _itemScrollController,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
@@ -66,6 +107,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           message: m,
                           selected: selected,
                           selectionMode: provider.isSelecting,
+                          highlighted: m.id == _highlightedId,
                           onTap: () {
                             if (provider.isSelecting) provider.toggleSelected(m.id);
                           },

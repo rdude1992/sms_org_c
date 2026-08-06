@@ -9,6 +9,13 @@ class MessageBubble extends StatelessWidget {
   final SmsMessage message;
   final bool selected;
   final bool selectionMode;
+
+  /// True briefly when this bubble was jumped to (e.g. from tapping the
+  /// message in the All Messages list) — draws an animated border that
+  /// fades back out, so the target message is unmistakable after the scroll
+  /// lands.
+  final bool highlighted;
+
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -19,6 +26,7 @@ class MessageBubble extends StatelessWidget {
     required this.selectionMode,
     required this.onTap,
     required this.onLongPress,
+    this.highlighted = false,
   });
 
   @override
@@ -47,7 +55,9 @@ class MessageBubble extends StatelessWidget {
           mainAxisAlignment: isOutgoing ? MainAxisAlignment.end : MainAxisAlignment.start,
           children: [
             Flexible(
-              child: Container(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 400),
+                curve: Curves.easeOut,
                 margin: EdgeInsets.only(
                   left: isOutgoing ? 48 : 12,
                   right: isOutgoing ? 12 : 48,
@@ -60,6 +70,10 @@ class MessageBubble extends StatelessWidget {
                     topRight: const Radius.circular(16),
                     bottomLeft: Radius.circular(isOutgoing ? 16 : 4),
                     bottomRight: Radius.circular(isOutgoing ? 4 : 16),
+                  ),
+                  border: Border.all(
+                    color: highlighted ? scheme.primary : scheme.primary.withOpacity(0),
+                    width: 2,
                   ),
                 ),
                 child: Column(
