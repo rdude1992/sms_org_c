@@ -6,6 +6,7 @@ import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/transaction_tile.dart';
+import 'instrument_list_screen.dart';
 import 'investment_list_screen.dart';
 import 'transaction_list_screen.dart';
 
@@ -137,7 +138,27 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ),
                               ),
                               const SizedBox(height: 24),
-                              Text('By card / account', style: Theme.of(context).textTheme.titleMedium),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('By card / account',
+                                      style: Theme.of(context).textTheme.titleMedium),
+                                  if (summary.byInstrument.isNotEmpty)
+                                    TextButton(
+                                      onPressed: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => InstrumentListScreen(
+                                            instruments: summary.byInstrument,
+                                            transactions: filteredTransactions,
+                                            subtitle: _range.label,
+                                          ),
+                                        ),
+                                      ),
+                                      child: const Text('See all'),
+                                    ),
+                                ],
+                              ),
                               const SizedBox(height: 8),
                               if (summary.byInstrument.isEmpty)
                                 const Padding(
@@ -533,14 +554,31 @@ class _InstrumentRow extends StatelessWidget {
   final VoidCallback onTap;
   const _InstrumentRow({required this.summary, required this.onTap});
 
+  // UPI isn't its own instrument icon — it's a rail, and almost all UPI
+  // activity now classifies as the bank account/card it actually moved
+  // money through (see TransactionParserService._instrumentType). A bare
+  // VPA mention with no account/card context at all falls through to the
+  // generic icon below rather than getting a dedicated one.
+  IconData get _icon {
+    if (summary.walletType != null) return Icons.account_balance_wallet_outlined;
+    if (summary.isCreditCard) return Icons.credit_card;
+    if (summary.isDebitCard) return Icons.credit_card_outlined;
+    if (summary.isBankAccount) return Icons.account_balance;
+    return Icons.help_outline;
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       minVerticalPadding: 10,
-      leading: const Icon(Icons.credit_card_outlined),
+      leading: Icon(_icon),
       title: Text(summary.displayName),
-      subtitle: Text('${summary.count} transactions'),
+      subtitle: Text(
+        summary.isLinkedAccount
+            ? '${summary.typeLabel} · ${summary.count} transactions'
+            : '${summary.count} transactions',
+      ),
       trailing: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,

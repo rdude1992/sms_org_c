@@ -13,14 +13,22 @@ class TransactionTile extends StatelessWidget {
     final direction = transaction.direction;
     final isCredit = direction == TxnDirection.credit;
     final isReversal = direction == TxnDirection.reversal;
+    final isUnknown = direction == TxnDirection.unknown;
+    // Reversal and unknown-direction transactions are both excluded from
+    // Insights' Credited/Debited totals (see InsightsService.build) — show
+    // both in neutral grey with no +/- sign so the list doesn't visually
+    // imply an amount that isn't actually counted anywhere.
+    final isNeutral = isReversal || isUnknown;
 
-    final color = isReversal
-        ? const Color(0xFF9CA3AF) // neutral grey — nets to no real effect
+    final color = isNeutral
+        ? const Color(0xFF9CA3AF) // neutral grey — not counted in any total
         : (isCredit ? const Color(0xFF10B981) : const Color(0xFFEF4444));
-    final sign = isReversal ? '' : (isCredit ? '+' : '-');
+    final sign = isNeutral ? '' : (isCredit ? '+' : '-');
     final icon = isReversal
         ? Icons.replay
-        : (isCredit ? Icons.arrow_downward : Icons.arrow_upward);
+        : isUnknown
+            ? Icons.remove
+            : (isCredit ? Icons.arrow_downward : Icons.arrow_upward);
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),

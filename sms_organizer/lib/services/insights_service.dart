@@ -8,37 +8,61 @@ class MonthlyTotal {
 }
 
 class InstrumentSummary {
-  final InstrumentType type;
+  /// Matches [Transaction.instrumentGroupKey] for the transactions that fed
+  /// this summary — lets drilldowns filter the full transaction list back
+  /// down to just the ones behind this row. Stored directly (rather than
+  /// re-derived from [types]/[issuer]/[ref]) so the two never drift apart —
+  /// [Transaction.instrumentGroupKey] merges debit-card and bank-account
+  /// entries that share an issuer + last-4, which a single [type] field
+  /// can't represent on its own.
+  final String key;
   final EntityType entityType;
   final String? ref; // e.g. "XX1234", or "Pluxee Card" for numberless cards
   final String? issuer;
   final String? walletType; // e.g. "Fuel Wallet", "HDFC FASTag"
+
+  /// Every distinct [InstrumentType] seen among the transactions grouped
+  /// under [key] — usually just one, but a merged debit-card+bank-account
+  /// group carries both, which the segregated Cards & Accounts view uses
+  /// to bucket it and to show a "Debit Card + Bank Account" badge.
+  final Set<InstrumentType> types = {};
+
   double totalCredit = 0;
   double totalDebit = 0;
   int count = 0;
 
   InstrumentSummary({
-    required this.type,
+    required this.key,
     this.entityType = EntityType.unknown,
     this.ref,
     this.issuer,
     this.walletType,
   });
 
-  /// Matches [Transaction.instrumentGroupKey] for the transactions that fed
-  /// this summary — lets drilldowns filter the full transaction list back
-  /// down to just the ones behind this row.
-  String get key =>
-      walletType != null ? 'wallet|$walletType' : '${type.name}|${issuer ?? ''}|${ref ?? ''}';
+  /// The single instrument type driving this group, or the first one seen
+  /// if it's a merged debit-card+bank-account group — used wherever a
+  /// single icon/label is needed and the merge itself isn't relevant.
+  InstrumentType get primaryType => types.isEmpty ? InstrumentType.unknown : types.first;
+
+  bool get isCreditCard => types.contains(InstrumentType.creditCard);
+  bool get isDebitCard => types.contains(InstrumentType.debitCard);
+  bool get isBankAccount => types.contains(InstrumentType.bankAccount);
+  bool get isLinkedAccount => types.length > 1;
 
   String get displayName {
     // A specific wallet name ("Fuel Wallet", "HDFC FASTag") is more useful
     // than a generic instrument label, so prefer it when we have one.
     if (walletType != null) return walletType!;
 
-    final issuerPart = issuer ?? _instrumentLabel(type);
+    final issuerPart = issuer ?? _instrumentLabel(primaryType);
     if (ref != null) return '$issuerPart ${_formatRef(ref!)}';
     return issuerPart;
+  }
+
+  /// e.g. "Debit Card", or "Debit Card + Bank Account" for a merged group.
+  String get typeLabel {
+    if (walletType != null) return 'Wallet';
+    return types.map(_instrumentLabel).toSet().join(' + ');
   }
 
   /// "XX1234" -> "•• 1234"; anything else (e.g. "Pluxee Card") passes
@@ -116,13 +140,14 @@ class InsightsService {
       final summary = instrumentMap.putIfAbsent(
         t.instrumentGroupKey,
         () => InstrumentSummary(
-          type: t.instrument,
+          key: t.instrumentGroupKey,
           entityType: t.entityType,
           ref: t.instrumentRef,
           issuer: t.issuer,
           walletType: t.walletType,
         ),
       );
+      summary.types.add(t.instrument);
       if (t.direction == TxnDirection.credit) {
         summary.totalCredit += t.amount;
       } else if (t.direction == TxnDirection.debit) {

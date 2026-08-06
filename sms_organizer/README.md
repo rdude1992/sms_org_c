@@ -79,7 +79,7 @@ lib/
     notification_preferences_service.dart  Persists muted categories
   providers/               SmsProvider (app state), ThemeProvider (dark mode),
                             NotificationSettingsProvider (per-category mute switches)
-  screens/                 Onboarding, Home (bottom nav), Chats, All Messages,
+  screens/                 Onboarding, Home (bottom nav), Inbox (chat/list toggle),
                             Thread, Compose, Insights, Settings
   widgets/                 Conversation tile, message bubble, category badge,
                             multi-select app bar, transaction tile

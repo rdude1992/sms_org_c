@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/category.dart';
 import '../models/sim_info.dart';
 import '../models/sms_message.dart';
@@ -13,6 +14,12 @@ import '../services/sms_platform_service.dart';
 import '../services/transaction_parser_service.dart';
 
 enum LoadState { idle, loading, ready, error }
+
+/// Which layout the Inbox tab shows — grouped-by-conversation ("Chats") or
+/// a flat chronological list of every message ("Messages"). Persisted via
+/// SmsProvider.setInboxView so the choice survives both switching tabs and
+/// a cold app restart, not just staying alive in widget state.
+enum InboxView { chats, messages }
 
 class SmsProvider extends ChangeNotifier {
   final SmsPlatformService _platform = SmsPlatformService.instance;
@@ -51,6 +58,20 @@ class SmsProvider extends ChangeNotifier {
   // over to a list it wasn't typed into.
   String chatSearchQuery = '';
 
+  // "Show unread only" toggle for the message list views. Shared across
+  // both All Messages and Chats (unlike the search queries above, which
+  // are deliberately per-tab) — "unread only" reads as one on/off
+  // preference the user is setting, not text they'd type independently
+  // into two different boxes.
+  bool showUnreadOnly = false;
+
+  /// Which layout the Inbox tab is currently showing. Loaded from disk in
+  /// [initialize] and written back on every [setInboxView] call — see
+  /// [InboxView] for why this needs to survive a cold restart, not just a
+  /// tab switch.
+  InboxView inboxView = InboxView.chats;
+  static const _inboxViewPrefKey = 'inbox_view';
+
   List<SmsMessage> get allMessages => _allMessages;
   List<Transaction> get transactions => _transactions;
   List<InvestmentEvent> get investments => _investments;
@@ -61,6 +82,9 @@ class SmsProvider extends ChangeNotifier {
     Iterable<SmsMessage> msgs = _allMessages;
     if (activeCategoryFilter != null) {
       msgs = msgs.where((m) => m.category == activeCategoryFilter);
+    }
+    if (showUnreadOnly) {
+      msgs = msgs.where((m) => m.isIncoming && !m.read);
     }
     final query = searchQuery.trim().toLowerCase();
     if (query.isNotEmpty) {
@@ -86,9 +110,13 @@ class SmsProvider extends ChangeNotifier {
   }
 
   List<SmsConversation> get filteredConversations {
+    Iterable<SmsConversation> convs = conversations;
+    if (showUnreadOnly) {
+      convs = convs.where((c) => c.unreadCount > 0);
+    }
     final query = chatSearchQuery.trim().toLowerCase();
-    if (query.isEmpty) return conversations;
-    return conversations.where((c) {
+    if (query.isEmpty) return convs.toList();
+    return convs.where((c) {
       if (displayNameFor(c.address).toLowerCase().contains(query)) return true;
       if (c.address.toLowerCase().contains(query)) return true;
       return c.messages.any((m) => m.body.toLowerCase().contains(query));
@@ -120,6 +148,7 @@ class SmsProvider extends ChangeNotifier {
   Future<void> initialize() async {
     isDefaultSmsApp = await _platform.isDefaultSmsApp();
     notifyListeners();
+    await _loadInboxView();
     await contactService.load(_platform);
     await _loadActiveSims();
     await _ensureCacheMatchesCurrentLogic();
@@ -136,6 +165,24 @@ class SmsProvider extends ChangeNotifier {
       _activeSims = [];
     }
     notifyListeners();
+  }
+
+  Future<void> _loadInboxView() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString(_inboxViewPrefKey);
+    inboxView = InboxView.values.firstWhere(
+      (v) => v.name == stored,
+      orElse: () => InboxView.chats,
+    );
+    notifyListeners();
+  }
+
+  Future<void> setInboxView(InboxView view) async {
+    if (inboxView == view) return;
+    inboxView = view;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_inboxViewPrefKey, view.name);
   }
 
   /// Incremental sync deliberately never re-evaluates a cached category
@@ -199,10 +246,25 @@ class SmsProvider extends ChangeNotifier {
         newCategories[m.id] = m.category;
 
         if (m.category == SmsCategory.transactional) {
-          final txn = _txnParser.parseTransaction(m);
-          if (txn != null) newTransactions.add(txn);
+          // Investment first, generic transaction only as a fallback: a SIP/
+          // mutual-fund/stock-trade confirmation (the AMC or broker's own
+          // SMS, not the bank's separate debit alert for the same money)
+          // always also has an amount, so it would otherwise pass
+          // parseTransaction's bare "has an amount" gate too — recording it
+          // as BOTH a generic Transaction (counted in Debited/By-card
+          // totals) AND an InvestmentEvent (counted in Invested totals)
+          // double-counts every rupee ever invested. The bank-side debit
+          // alert for the same real-world payment is a separate SMS with
+          // its own account/UPI language, not SIP/folio/NAV wording, so it
+          // never matches parseInvestment and still comes through as a
+          // normal Transaction below.
           final inv = _txnParser.parseInvestment(m);
-          if (inv != null) newInvestments.add(inv);
+          if (inv != null) {
+            newInvestments.add(inv);
+          } else {
+            final txn = _txnParser.parseTransaction(m);
+            if (txn != null) newTransactions.add(txn);
+          }
         }
       }
 
@@ -288,6 +350,33 @@ class SmsProvider extends ChangeNotifier {
     await refresh();
   }
 
+  /// Marks every unread incoming message in [threadId] as read. Call this
+  /// when a thread is opened — ThreadScreen previously never did, so
+  /// messages stayed "unread" (device SMS store included) no matter how
+  /// many times you opened the conversation.
+  ///
+  /// Writing to the OS's own SMS store only actually takes effect when
+  /// this app is the default SMS app — same restriction every other write
+  /// (send, delete, the multi-select mark-read above) already has, and the
+  /// OS enforces it, not us. This is called automatically on every thread
+  /// open rather than from an explicit user action, so a failure (not
+  /// default, transient platform error) is swallowed rather than
+  /// interrupting the read: the unread badge just won't clear until the
+  /// app is made default.
+  Future<void> markThreadRead(int threadId) async {
+    final unreadIds = _allMessages
+        .where((m) => m.threadId == threadId && m.isIncoming && !m.read)
+        .map((m) => m.id)
+        .toList();
+    if (unreadIds.isEmpty) return;
+    try {
+      await _platform.markRead(unreadIds, true);
+    } catch (_) {
+      return;
+    }
+    await refresh();
+  }
+
   // ---- Sending / drafts ----
 
   Future<bool> sendSms(String address, String body, {int? subscriptionId}) async {
@@ -313,6 +402,11 @@ class SmsProvider extends ChangeNotifier {
 
   void setChatSearchQuery(String query) {
     chatSearchQuery = query;
+    notifyListeners();
+  }
+
+  void setShowUnreadOnly(bool value) {
+    showUnreadOnly = value;
     notifyListeners();
   }
 

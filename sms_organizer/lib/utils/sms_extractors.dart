@@ -47,6 +47,15 @@ String? extractCardTypeHint(String content) {
     }
   }
 
+  // Many banks' card-spend alerts (e.g. "Spent Rs.X On HDFC Bank Card 6408
+  // At MERCHANT...SMS BLOCK CC 6408 to...") mention only "Card NNNN" with
+  // no "credit"/"debit" qualifier in the sentence itself, but always carry
+  // a "BLOCK CC"/"BLOCK DC" footer telling you which product it is — CC
+  // (credit card) vs DC (debit card) is the bank's own disambiguator, so
+  // trust it over guessing from context.
+  if (lower.contains('block cc')) return 'credit';
+  if (lower.contains('block dc')) return 'debit';
+
   return null;
 }
 
@@ -133,8 +142,19 @@ double? extractAmount(String content) {
 String? extractMerchant(String content) {
   final merchantPatterns = [
     RegExp(r'([a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+)'), // UPI VPA
+    // Many bank SMS are laid out as separate newline-delimited fields
+    // ("Sent Rs.X\nFrom HDFC Bank A/C *6020\nTo MERCHANT\nOn date\n...")
+    // rather than one sentence, so the payee sits alone on its own "To "
+    // line — never adjacent to "paid"/"sent"/"transfer" the way the
+    // sentence-style patterns below expect.
+    RegExp(r"(?:^|\n)To\s+([A-Za-z0-9\s&./'-]{2,50}?)\s*(?:\n|$)", caseSensitive: false),
+    // "...deducted from HDFC Bank A/C No 6020 towards PayTM Money UMRN:
+    // ..." / "...bill of Rs.X against BSDIRECT-F18152 ..." — stops at a
+    // slash or "UMRN" since those introduce a reference code, not more of
+    // the payee name.
+    RegExp(r"towards\s+([A-Za-z0-9\s&.'-]{2,40}?)(?:\s*\/|\s+UMRN|\n|$|\.)", caseSensitive: false),
     RegExp(
-      r"(?:paid\s+to|sent\s+to|transfer\s+to|at)\s+([A-Za-z0-9\s&.'-]{2,30}?)(?:\s+(?:via|using|through|on|by)|$|\.)",
+      r"(?:paid\s+to|sent\s+to|transfer\s+to|at)\s+([A-Za-z0-9\s&.*_/'-]{2,30}?)(?:\s+(?:via|using|through|on|by)|$|\.|\n)",
       caseSensitive: false,
     ),
     RegExp(
@@ -145,6 +165,24 @@ String? extractMerchant(String content) {
       r"(?:spent\s+at|used\s+at|purchase\s+at)\s+([A-Za-z0-9\s&.'-]{2,30}?)(?:\s+on|$|\.)",
       caseSensitive: false,
     ),
+    // "Bill Paid: AxisMF Bill AXDIRECT-F18152 of Rs.X ... via SmartPay" —
+    // AMC/biller bill-pay confirmations name the biller right after "Bill
+    // Paid:" and again before "Bill <reference>".
+    RegExp(r'Bill\s+Paid[:!]?\s*\n?\s*([A-Za-z0-9]+)\s+Bill\b', caseSensitive: false),
+    // "UPDATE: Your Axis Mutual Fund bill payment of Rs.X for ... has been
+    // processed successfully." — the AMC name sits between "Your" and
+    // "bill payment".
+    RegExp(r'Your\s+([A-Za-z0-9\s]+?)\s+bill\s+payment', caseSensitive: false),
+    // "Money Transfer:Rs X from HDFC Bank A/c **6020 on date to MERCHANT
+    // UPI: ..." — HDFC's IMPS/UPI transfer-confirmation format.
+    RegExp(r"\bto\s+([A-Za-z0-9\s&.\-]{2,40}?)\s+UPI\b", caseSensitive: false),
+    // "Payment of Rs.X to MERCHANT succeeded." — payment-gateway
+    // confirmations (PayU/aggregators).
+    RegExp(r'\bto\s+([A-Za-z0-9_.\s&-]{2,40}?)\s+succeeded\b', caseSensitive: false),
+    // "Transaction of Rs.900.00 for purchase of Petrol is successful." —
+    // HP Pay fuel-purchase confirmations; the category name stands in for
+    // a specific business name here.
+    RegExp(r'for\s+purchase\s+of\s+([A-Za-z\s]+?)\s+is\b', caseSensitive: false),
   ];
 
   const excludeList = [
@@ -187,15 +225,22 @@ String? extractMerchant(String content) {
 
 String? extractAccountNumber(String content) {
   final explicitPatterns = [
+    // Mask length varies by bank — some use a single "*" ("A/C *6020"),
+    // others "XX"/"xxxx"/multiple asterisks. Widened from requiring 2+
+    // mask characters to 1+ so a lone "*" or "x" still matches.
     RegExp(
-      r'(?:bank|a\/c|acct|account|card)\s*(?:no\.?|ending|xxxx?)?\s*[:\s.-]*(?:xx|x{2,4}|\*{2,4})(\d{4})',
+      r'(?:bank|a\/c|acct|account|card)\s*(?:no\.?|ending(?:\s+with)?|xxxx?)?\s*[:\s.-]*(?:xx|x{1,4}|\*{1,4})(\d{4})',
       caseSensitive: false,
     ),
     RegExp(
-      r'(?:debited from|credited to|debited\s+from|credited\s+to)\s+(?:.*?)\s+(?:xx|x{2,4}|\*{2,4})(\d{4})',
+      r'(?:debited from|credited to|debited\s+from|credited\s+to)\s+(?:.*?)\s+(?:xx|x{1,4}|\*{1,4})(\d{4})',
       caseSensitive: false,
     ),
-    RegExp(r'(?:SB|SA|CA)[-.\s]*(?:xx|x{2,4}|\*{2,4})[-\s]*(\d{4})', caseSensitive: false),
+    RegExp(r'(?:SB|SA|CA)[-.\s]*(?:xx|x{1,4}|\*{1,4})[-\s]*(\d{4})', caseSensitive: false),
+    // "card ending 1009" / "...ending with 6408" — some card-payment
+    // alerts state the last 4 digits directly after "ending" with no
+    // xx/*/x mask at all.
+    RegExp(r'card\s+ending(?:\s+with)?\s+(\d{4})\b', caseSensitive: false),
   ];
 
   for (final pattern in explicitPatterns) {
@@ -216,9 +261,25 @@ String? extractAccountNumber(String content) {
   );
 
   final genericMatch =
-      RegExp(r'(?:xx|x{3,}|\*{2,})[-\s]*(\d{4})', caseSensitive: false).firstMatch(safeContent);
+      RegExp(r'(?:xx|x{1,}|\*{1,})[-\s]*(\d{4})', caseSensitive: false).firstMatch(safeContent);
   final genericDigits = genericMatch?.group(1);
   if (genericDigits != null) return 'XX$genericDigits';
+
+  // Last resort: some SMS state the account/card's last 4 digits fully
+  // bare, with no xx/*/x mask at all (e.g. "HDFC Bank A/C No 6020",
+  // "from HDFC Bank A/c 6020", "HDFC Bank Card 6408"). Only reached once
+  // every masked pattern above has failed, and requires the digits to sit
+  // immediately next to the a/c or card keyword with a hard word
+  // boundary, so it can't grab an unrelated 4-digit number (a year, part
+  // of a longer number, ...) elsewhere in the message.
+  final bareMatch = RegExp(
+    r'(?:a\/c|acct|account)\s*(?:no\.?)?\s+(\d{4})\b|\bcard\s+(\d{4})\b',
+    caseSensitive: false,
+  ).firstMatch(safeContent);
+  if (bareMatch != null) {
+    final digits = bareMatch.group(1) ?? bareMatch.group(2);
+    if (digits != null) return 'XX$digits';
+  }
 
   if (RegExp(r'Pluxee|Sodexo', caseSensitive: false).hasMatch(content) &&
       (content.contains('Card') || content.contains('card'))) {
@@ -288,10 +349,28 @@ ParsedDirection getTransactionType(String content) {
     return ParsedDirection.debit;
   }
 
+  // "HDFC Bank : NEFT money transfer ... has been credited to <Recipient
+  // Name> on ..." — an outgoing NEFT/IMPS confirmation phrased from the
+  // *recipient's* side ("credited to Priya Sharma"), not the user's own
+  // account ("credited to a/c ..." / "credited to your wallet") — this is
+  // really a debit from the sender's perspective despite containing
+  // "credited". Narrowly scoped to NEFT/IMPS/money-transfer wording so it
+  // can't misfire on the far more common "credited to a/c XX6020" /
+  // "credited to your ..." self-account phrasing, which stays a credit.
+  if (RegExp(r'credited\s+to\s+(?!your\b|a\/c|account)[A-Za-z]', caseSensitive: false)
+          .hasMatch(content) &&
+      RegExp(r'\b(neft|imps|money\s+transfer)\b', caseSensitive: false).hasMatch(content)) {
+    return ParsedDirection.debit;
+  }
+
   if (contentLower.contains('credited') ||
       contentLower.contains('received') ||
       contentLower.contains('deposited') ||
       contentLower.contains('added to') ||
+      // "you have successfully added Rs.X into your Securities account" —
+      // a broker/trading-app funds-added confirmation, same shape as
+      // "added to" but without the trailing "to".
+      contentLower.contains('successfully added') ||
       contentLower.contains('refund on') ||
       contentLower.contains('refund processed') ||
       contentLower.contains('redemption') ||
@@ -320,7 +399,28 @@ ParsedDirection getTransactionType(String content) {
       contentLower.contains('sent to') ||
       contentLower.contains('transfer to') ||
       contentLower.contains('installment') ||
-      contentLower.contains('allotted')) {
+      contentLower.contains('allotted') ||
+      // Payment-gateway confirmations ("Payment of Rs.X to Y succeeded",
+      // "Transaction No. N for Rs X ... has succeeded") and AMC bill-pay
+      // alerts ("Your Axis Mutual Fund bill payment of Rs.X ... has been
+      // processed successfully") never use "debited"/"paid" wording at
+      // all, but both only ever describe money that left the account —
+      // credit-side messages ("redeemed", "credited", ...) already
+      // returned above, so these can't collide with a real credit.
+      contentLower.contains('succeeded') ||
+      contentLower.contains('processed successfully') ||
+      // "Money Transfer:Rs X from HDFC Bank A/c ... to Y" — HDFC's IMPS
+      // confirmation format, always outgoing.
+      contentLower.contains('money transfer')) {
+    return ParsedDirection.debit;
+  }
+
+  // HDFC's newer "Sent Rs.X\nFrom ... A/C ...\nTo ...\n" UPI confirmation
+  // format never uses "sent to" as one phrase (the "To" is its own line),
+  // so the "sent to" check above misses it; word-bounded so it doesn't
+  // fire on unrelated words like "consent". Always a debit — nothing in
+  // this bank's SMS vocabulary uses bare "sent" for money coming in.
+  if (RegExp(r'\bsent\b', caseSensitive: false).hasMatch(content)) {
     return ParsedDirection.debit;
   }
 
@@ -341,6 +441,9 @@ const Map<String, String> _bankNamesBySenderKeyword = {
   'BOB': 'Bank of Baroda',
   'CANARA': 'Canara Bank',
   'PAYTM': 'Paytm Bank',
+  // "PYTMBK" is Paytm Payments Bank's other real-world DLT sender code —
+  // doesn't contain "PAYTM" as a substring, so needs its own entry.
+  'PYTMBK': 'Paytm Bank',
   'PHONE': 'PhonePe',
   'GPAY': 'Google Pay',
   'GOOG': 'Google Pay',
@@ -351,10 +454,15 @@ const Map<String, String> _bankNamesBySenderKeyword = {
   'IDFC': 'IDFC First Bank',
   'YES': 'Yes Bank',
   'IOB': 'Indian Overseas Bank',
+  'AIRBNK': 'Airtel Payments Bank',
   'ZERODH': 'Zerodha',
+  // Zerodha's actual DLT sender ID ("ZRODHA") drops the "E" — doesn't
+  // contain "ZERODH", so needs its own entry alongside it.
+  'ZRODHA': 'Zerodha',
   'GROWW': 'Groww',
   'INDMON': 'IndMoney',
   'KUVERA': 'Kuvera',
+  'UPSTOX': 'Upstox',
 };
 
 /// Note: the source file's getSenderName() CSV-lookup indirection is a
@@ -418,10 +526,11 @@ ParsedEntityType extractEntityType(String sender, String content) {
   }
 
   const investmentProviders = [
-    'ZERODHA', 'ZERODH', 'GROWW', 'KUVERA', 'INDMONEY', 'INDMON',
+    'ZERODHA', 'ZERODH', 'ZRODHA', 'GROWW', 'KUVERA', 'INDMONEY', 'INDMON',
     'UPSTOX', 'ANGEL', 'ANGELONE', 'SHAREKHAN', 'MOTILAL', 'IIFL',
-    'ICICI-PRU', 'ICICIPRU', 'HDFC-MF', 'SBI-MF', 'AXIS-MF',
+    'ICICI-PRU', 'ICICIPRU', 'IPRUMF', 'HDFC-MF', 'SBI-MF', 'AXIS-MF',
     'ABCAMC', 'MIRAEI', 'NIPPON', 'KOTAK-MF', 'DSP-MF', 'UTI-MF',
+    'QNTAMC', 'BOIAMC',
   ];
   for (final investment in investmentProviders) {
     if (senderUpper.contains(investment)) return ParsedEntityType.investment;
@@ -484,6 +593,7 @@ ParsedEntityType extractEntityType(String sender, String content) {
   const bankKeywords = [
     'BANK', 'HDFC', 'ICICI', 'SBI', 'AXIS', 'KOTAK', 'PNB', 'BOB',
     'CANARA', 'UNION', 'INDUS', 'RBL', 'IDFC', 'YES', 'FEDERAL', 'KARUR', 'IOB',
+    'AIRBNK',
   ];
   for (final bank in bankKeywords) {
     if (senderUpper.contains(bank) &&
@@ -802,17 +912,29 @@ ExtractedInvestmentDetails extractInvestmentDetails(String content, String sende
     }
   }
 
-  final amcMatch =
-      RegExp(r'(?:Regards|From|Thanks)?[\s,\.\-]*([A-Za-z\s]+MF|Mututal\s+Fund)[^a-z]*$',
-              caseSensitive: false)
-          .firstMatch(content);
-  if (amcMatch?.group(1) != null) {
-    details.amc = amcMatch!.group(1)!.trim();
+  // Sender-keyword lookup first: it always yields the same normalised
+  // label ("Axis MF") for a given AMC, which is what grouping-by-AMC
+  // depends on. The free-text signature regex below is a much looser
+  // match — it captures whatever text happens to precede "...MF"/"...
+  // Mutual Fund" at the tail of the SMS, which varies message-to-message
+  // even for the same sender (different whitespace, prefix wording,
+  // trailing punctuation). Running it first, as before, meant it almost
+  // always won and produced a slightly different `amc` string per SMS —
+  // so investments never actually grouped, since each message landed in
+  // its own singleton bucket. It's now only a fallback for AMCs not in
+  // the keyword list, and only if NPS detection above didn't already set
+  // [amc].
+  if (details.amc != null) {
+    // NPS already assigned above — leave it as-is.
   } else if (RegExp(r'Axis', caseSensitive: false).hasMatch(sender)) {
     details.amc = 'Axis MF';
   } else if (RegExp(r'SBI', caseSensitive: false).hasMatch(sender)) {
     details.amc = 'SBI MF';
-  } else if (RegExp(r'ICICI', caseSensitive: false).hasMatch(sender)) {
+  } else if (RegExp(r'IPRUMF', caseSensitive: false).hasMatch(sender) ||
+      RegExp(r'ICICI', caseSensitive: false).hasMatch(sender)) {
+    // Real-world DLT sender IDs for ICICI Prudential MF are typically
+    // "IPRUMF" (no "ICICI" substring at all), not the bank's own "ICICI*"
+    // codes — check both so this AMC groups correctly either way.
     details.amc = 'ICICI Pru MF';
   } else if (RegExp(r'HDFC', caseSensitive: false).hasMatch(sender)) {
     details.amc = 'HDFC MF';
@@ -826,6 +948,28 @@ ExtractedInvestmentDetails extractInvestmentDetails(String content, String sende
     details.amc = 'DSP MF';
   } else if (RegExp(r'Uti', caseSensitive: false).hasMatch(sender)) {
     details.amc = 'UTI MF';
+  } else if (RegExp(r'QNTAMC|Quant', caseSensitive: false).hasMatch(sender)) {
+    details.amc = 'Quant MF';
+  } else if (RegExp(r'BOIAMC', caseSensitive: false).hasMatch(sender)) {
+    details.amc = 'Bank of India MF';
+  } else if (RegExp(r'ABCAMC', caseSensitive: false).hasMatch(sender)) {
+    // Sender ID "ABCAMC" is Aditya Birla Sun Life MF's DLT header — the
+    // message body signs off inconsistently ("-ABSLMF." on some, "Aditya
+    // Birla Sun Life Mutual Fund." on others), which would otherwise
+    // fragment this AMC's investments into two separate groups.
+    details.amc = 'Aditya Birla Sun Life MF';
+  } else {
+    final amcMatch = RegExp(
+      r'(?:Regards|From|Thanks)?[\s,\.\-]*([A-Za-z\s]+MF|[A-Za-z\s]+Mutual\s+Fund)[^a-z]*$',
+      caseSensitive: false,
+    ).firstMatch(content);
+    final rawAmc = amcMatch?.group(1);
+    if (rawAmc != null) {
+      // Collapse repeated whitespace so trivial formatting differences
+      // between messages from the same unrecognised AMC still land in
+      // the same group.
+      details.amc = rawAmc.trim().replaceAll(RegExp(r'\s+'), ' ');
+    }
   }
 
   // Fallback: derive units from amount ÷ NAV if units weren't stated directly.
