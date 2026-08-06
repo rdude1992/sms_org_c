@@ -802,12 +802,20 @@ ExtractedInvestmentDetails extractInvestmentDetails(String content, String sende
     }
   }
 
-  final amcMatch =
-      RegExp(r'(?:Regards|From|Thanks)?[\s,\.\-]*([A-Za-z\s]+MF|Mututal\s+Fund)[^a-z]*$',
-              caseSensitive: false)
-          .firstMatch(content);
-  if (amcMatch?.group(1) != null) {
-    details.amc = amcMatch!.group(1)!.trim();
+  // Sender-keyword lookup first: it always yields the same normalised
+  // label ("Axis MF") for a given AMC, which is what grouping-by-AMC
+  // depends on. The free-text signature regex below is a much looser
+  // match — it captures whatever text happens to precede "...MF"/"...
+  // Mutual Fund" at the tail of the SMS, which varies message-to-message
+  // even for the same sender (different whitespace, prefix wording,
+  // trailing punctuation). Running it first, as before, meant it almost
+  // always won and produced a slightly different `amc` string per SMS —
+  // so investments never actually grouped, since each message landed in
+  // its own singleton bucket. It's now only a fallback for AMCs not in
+  // the keyword list, and only if NPS detection above didn't already set
+  // [amc].
+  if (details.amc != null) {
+    // NPS already assigned above — leave it as-is.
   } else if (RegExp(r'Axis', caseSensitive: false).hasMatch(sender)) {
     details.amc = 'Axis MF';
   } else if (RegExp(r'SBI', caseSensitive: false).hasMatch(sender)) {
@@ -826,6 +834,18 @@ ExtractedInvestmentDetails extractInvestmentDetails(String content, String sende
     details.amc = 'DSP MF';
   } else if (RegExp(r'Uti', caseSensitive: false).hasMatch(sender)) {
     details.amc = 'UTI MF';
+  } else {
+    final amcMatch = RegExp(
+      r'(?:Regards|From|Thanks)?[\s,\.\-]*([A-Za-z\s]+MF|[A-Za-z\s]+Mutual\s+Fund)[^a-z]*$',
+      caseSensitive: false,
+    ).firstMatch(content);
+    final rawAmc = amcMatch?.group(1);
+    if (rawAmc != null) {
+      // Collapse repeated whitespace so trivial formatting differences
+      // between messages from the same unrecognised AMC still land in
+      // the same group.
+      details.amc = rawAmc.trim().replaceAll(RegExp(r'\s+'), ' ');
+    }
   }
 
   // Fallback: derive units from amount ÷ NAV if units weren't stated directly.

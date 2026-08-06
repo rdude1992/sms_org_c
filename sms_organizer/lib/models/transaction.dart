@@ -197,9 +197,15 @@ class InvestmentEvent {
   /// the Investments drilldown's "by AMC / merchant" view — falls back to
   /// the fund/scheme name, then a generic bucket, so an event with neither
   /// detected still lands somewhere instead of being dropped from grouping.
-  String get providerGroupKey => amc ?? fundOrScheme ?? 'Other';
+  ///
+  /// Normalised (trimmed, whitespace-collapsed, lower-cased) so trivial
+  /// formatting differences between two SMS from the same AMC — an extra
+  /// space, a trailing period — don't split them into separate groups;
+  /// [providerDisplayName] keeps the original casing for display.
+  String get providerGroupKey =>
+      (amc ?? fundOrScheme ?? 'Other').trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
 
-  String get providerDisplayName => amc ?? fundOrScheme ?? 'Other';
+  String get providerDisplayName => (amc ?? fundOrScheme ?? 'Other').trim();
 
   Map<String, dynamic> toJson() => {
         'smsId': smsId,
