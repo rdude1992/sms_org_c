@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/sms_provider.dart';
+import '../utils/formatters.dart';
+import '../widgets/date_separator.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/multi_select_bar.dart';
 
@@ -55,14 +57,21 @@ class _ThreadScreenState extends State<ThreadScreen> {
                   itemBuilder: (context, index) {
                     final m = messages[index];
                     final selected = provider.selectedIds.contains(m.id);
-                    return MessageBubble(
-                      message: m,
-                      selected: selected,
-                      selectionMode: provider.isSelecting,
-                      onTap: () {
-                        if (provider.isSelecting) provider.toggleSelected(m.id);
-                      },
-                      onLongPress: () => provider.toggleSelected(m.id),
+                    final showDateSeparator =
+                        index == 0 || !Formatters.isSameDay(messages[index - 1].date, m.date);
+                    return Column(
+                      children: [
+                        if (showDateSeparator) DateSeparator(date: m.date),
+                        MessageBubble(
+                          message: m,
+                          selected: selected,
+                          selectionMode: provider.isSelecting,
+                          onTap: () {
+                            if (provider.isSelecting) provider.toggleSelected(m.id);
+                          },
+                          onLongPress: () => provider.toggleSelected(m.id),
+                        ),
+                      ],
                     );
                   },
                 ),
