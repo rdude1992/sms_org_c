@@ -76,6 +76,18 @@ class _ConversationsTabState extends State<ConversationsTab> {
                           onPressed: () => provider.requestDefaultSmsRole(),
                         ),
                       IconButton(
+                        icon: Icon(
+                          provider.showUnreadOnly
+                              ? Icons.mark_email_unread
+                              : Icons.mark_email_unread_outlined,
+                          color: provider.showUnreadOnly
+                              ? Theme.of(context).colorScheme.primary
+                              : null,
+                        ),
+                        tooltip: provider.showUnreadOnly ? 'Show all chats' : 'Show unread only',
+                        onPressed: () => provider.setShowUnreadOnly(!provider.showUnreadOnly),
+                      ),
+                      IconButton(
                         icon: const Icon(Icons.search),
                         onPressed: _startSearch,
                       ),
@@ -109,7 +121,9 @@ class _ConversationsTabState extends State<ConversationsTab> {
         child: Text(
           searching
               ? 'No chats match "${provider.chatSearchQuery.trim()}".'
-              : 'No conversations yet.',
+              : provider.showUnreadOnly
+                  ? 'No unread chats.'
+                  : 'No conversations yet.',
           textAlign: TextAlign.center,
         ),
       );

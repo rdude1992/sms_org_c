@@ -71,11 +71,24 @@ class _AllMessagesTabState extends State<AllMessagesTab> {
                         icon: const Icon(Icons.close),
                         onPressed: () => _stopSearch(provider),
                       )
-                    else
+                    else ...[
+                      IconButton(
+                        icon: Icon(
+                          provider.showUnreadOnly
+                              ? Icons.mark_email_unread
+                              : Icons.mark_email_unread_outlined,
+                          color: provider.showUnreadOnly
+                              ? Theme.of(context).colorScheme.primary
+                              : null,
+                        ),
+                        tooltip: provider.showUnreadOnly ? 'Show all messages' : 'Show unread only',
+                        onPressed: () => provider.setShowUnreadOnly(!provider.showUnreadOnly),
+                      ),
                       IconButton(
                         icon: const Icon(Icons.search),
                         onPressed: _startSearch,
                       ),
+                    ],
                   ],
                 ),
           body: Column(
@@ -90,7 +103,9 @@ class _AllMessagesTabState extends State<AllMessagesTab> {
                             child: Text(
                               searching
                                   ? 'No messages match "${provider.searchQuery.trim()}".'
-                                  : 'No messages in this category.',
+                                  : provider.showUnreadOnly
+                                      ? 'No unread messages.'
+                                      : 'No messages in this category.',
                               textAlign: TextAlign.center,
                             ),
                           )

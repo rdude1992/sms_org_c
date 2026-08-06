@@ -51,6 +51,13 @@ class SmsProvider extends ChangeNotifier {
   // over to a list it wasn't typed into.
   String chatSearchQuery = '';
 
+  // "Show unread only" toggle for the message list views. Shared across
+  // both All Messages and Chats (unlike the search queries above, which
+  // are deliberately per-tab) — "unread only" reads as one on/off
+  // preference the user is setting, not text they'd type independently
+  // into two different boxes.
+  bool showUnreadOnly = false;
+
   List<SmsMessage> get allMessages => _allMessages;
   List<Transaction> get transactions => _transactions;
   List<InvestmentEvent> get investments => _investments;
@@ -61,6 +68,9 @@ class SmsProvider extends ChangeNotifier {
     Iterable<SmsMessage> msgs = _allMessages;
     if (activeCategoryFilter != null) {
       msgs = msgs.where((m) => m.category == activeCategoryFilter);
+    }
+    if (showUnreadOnly) {
+      msgs = msgs.where((m) => m.isIncoming && !m.read);
     }
     final query = searchQuery.trim().toLowerCase();
     if (query.isNotEmpty) {
@@ -86,9 +96,13 @@ class SmsProvider extends ChangeNotifier {
   }
 
   List<SmsConversation> get filteredConversations {
+    Iterable<SmsConversation> convs = conversations;
+    if (showUnreadOnly) {
+      convs = convs.where((c) => c.unreadCount > 0);
+    }
     final query = chatSearchQuery.trim().toLowerCase();
-    if (query.isEmpty) return conversations;
-    return conversations.where((c) {
+    if (query.isEmpty) return convs.toList();
+    return convs.where((c) {
       if (displayNameFor(c.address).toLowerCase().contains(query)) return true;
       if (c.address.toLowerCase().contains(query)) return true;
       return c.messages.any((m) => m.body.toLowerCase().contains(query));
@@ -355,6 +369,11 @@ class SmsProvider extends ChangeNotifier {
 
   void setChatSearchQuery(String query) {
     chatSearchQuery = query;
+    notifyListeners();
+  }
+
+  void setShowUnreadOnly(bool value) {
+    showUnreadOnly = value;
     notifyListeners();
   }
 
