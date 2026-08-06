@@ -22,24 +22,31 @@ class TransactionTile extends StatelessWidget {
         : (isCredit ? Icons.arrow_downward : Icons.arrow_upward);
 
     return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      minVerticalPadding: 10,
       leading: CircleAvatar(
+        radius: 20,
         backgroundColor: color.withOpacity(0.12),
         child: Icon(icon, color: color, size: 18),
       ),
-      title: Text(
-        transaction.merchant ??
-            transaction.walletType ??
-            transaction.issuer ??
-            _instrumentLabel(transaction.instrument),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+      title: Padding(
+        padding: const EdgeInsets.only(bottom: 2),
+        child: Text(
+          transaction.merchant ??
+              transaction.walletType ??
+              transaction.issuer ??
+              _instrumentLabel(transaction.instrument),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
       ),
       subtitle: Text(
         [
           if (isReversal) 'Reversed' else _instrumentLabel(transaction.instrument),
           if (transaction.instrumentRef != null) _formatRef(transaction.instrumentRef!),
           Formatters.relativeOrTime(transaction.date),
-        ].join('  '),
+        ].join('  ·  '),
         style: const TextStyle(fontSize: 12),
       ),
       trailing: Text(

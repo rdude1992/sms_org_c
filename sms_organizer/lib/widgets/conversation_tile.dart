@@ -34,7 +34,7 @@ class ConversationTile extends StatelessWidget {
         onTap: onTap,
         onLongPress: onLongPress,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
             children: [
               if (selectionMode)
@@ -47,14 +47,14 @@ class ConversationTile extends StatelessWidget {
                 )
               else
                 CircleAvatar(
-                  radius: 22,
+                  radius: 24,
                   backgroundColor: latest.category.color.withOpacity(0.15),
                   child: Text(
                     displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
                     style: TextStyle(color: latest.category.color, fontWeight: FontWeight.bold),
                   ),
                 ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -90,7 +90,7 @@ class ConversationTile extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     Row(
                       children: [
                         Expanded(

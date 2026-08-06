@@ -71,6 +71,14 @@ class Transaction {
     this.vehicleNumber,
   });
 
+  /// Groups transactions the same way Insights buckets "by card / account" —
+  /// a specific wallet name if there is one, else instrument+issuer+ref.
+  /// Shared with [InsightsService] and instrument-drilldown filtering so the
+  /// two stay in lockstep.
+  String get instrumentGroupKey => walletType != null
+      ? 'wallet|$walletType'
+      : '${instrument.name}|${issuer ?? ''}|${instrumentRef ?? ''}';
+
   Map<String, dynamic> toJson() => {
         'smsId': smsId,
         'date': date.millisecondsSinceEpoch,

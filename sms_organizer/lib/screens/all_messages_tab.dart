@@ -38,7 +38,7 @@ class AllMessagesTab extends StatelessWidget {
                         ? const Center(child: Text('No messages in this category.'))
                         : ListView.separated(
                             itemCount: messages.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1, indent: 16),
+                            separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
                             itemBuilder: (context, index) {
                               final m = messages[index];
                               final selected = provider.selectedIds.contains(m.id);
@@ -47,6 +47,9 @@ class AllMessagesTab extends StatelessWidget {
                               return ListTile(
                                 selected: selected,
                                 selectedTileColor: scheme.primary.withOpacity(0.06),
+                                contentPadding:
+                                    const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                                minVerticalPadding: 10,
                                 leading: provider.isSelecting
                                     ? Icon(
                                         selected
@@ -94,13 +97,18 @@ class AllMessagesTab extends StatelessWidget {
                                     ),
                                   ],
                                 ),
-                                subtitle: Text(
-                                  m.body,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: unread ? scheme.onSurface.withOpacity(0.85) : scheme.onSurfaceVariant,
-                                    fontWeight: unread ? FontWeight.w600 : FontWeight.normal,
+                                subtitle: Padding(
+                                  padding: const EdgeInsets.only(top: 3),
+                                  child: Text(
+                                    m.body,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: unread
+                                          ? scheme.onSurface.withOpacity(0.85)
+                                          : scheme.onSurfaceVariant,
+                                      fontWeight: unread ? FontWeight.w600 : FontWeight.normal,
+                                    ),
                                   ),
                                 ),
                                 trailing: Column(
