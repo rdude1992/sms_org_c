@@ -72,12 +72,19 @@ class InstrumentListScreen extends StatelessWidget {
   /// group is filed under Debit Cards since that's the more specific,
   /// user-facing instrument — the linked account is surfaced via the
   /// badge rather than a section of its own.
+  ///
+  /// UPI isn't a section of its own — it's a payment rail, not an
+  /// instrument, and virtually all UPI activity now classifies as
+  /// whichever bank account/card it actually moved money through (see
+  /// [TransactionParserService._instrumentType]). Anything that still
+  /// lands as [InstrumentType.upi] (a bare VPA mention with no account or
+  /// card context at all) falls into Other rather than getting its own
+  /// section for what should be a rare edge case.
   List<_SectionData> _bucket(List<InstrumentSummary> items) {
     final creditCards = <InstrumentSummary>[];
     final debitCards = <InstrumentSummary>[];
     final bankAccounts = <InstrumentSummary>[];
     final wallets = <InstrumentSummary>[];
-    final upi = <InstrumentSummary>[];
     final other = <InstrumentSummary>[];
 
     for (final s in items) {
@@ -89,8 +96,6 @@ class InstrumentListScreen extends StatelessWidget {
         debitCards.add(s);
       } else if (s.isBankAccount) {
         bankAccounts.add(s);
-      } else if (s.isUpi) {
-        upi.add(s);
       } else {
         other.add(s);
       }
@@ -98,7 +103,7 @@ class InstrumentListScreen extends StatelessWidget {
 
     int byTotal(InstrumentSummary a, InstrumentSummary b) =>
         (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit);
-    for (final list in [creditCards, debitCards, bankAccounts, wallets, upi, other]) {
+    for (final list in [creditCards, debitCards, bankAccounts, wallets, other]) {
       list.sort(byTotal);
     }
 
@@ -109,7 +114,6 @@ class InstrumentListScreen extends StatelessWidget {
       _SectionData('Bank Accounts', Icons.account_balance, const Color(0xFF10B981), bankAccounts),
       _SectionData(
           'Wallets', Icons.account_balance_wallet_outlined, const Color(0xFFF59E0B), wallets),
-      _SectionData('UPI', Icons.qr_code, const Color(0xFF06B6D4), upi),
       _SectionData('Other', Icons.help_outline, const Color(0xFF9CA3AF), other),
     ];
   }

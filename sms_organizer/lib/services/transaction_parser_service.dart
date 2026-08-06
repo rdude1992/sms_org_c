@@ -90,21 +90,30 @@ class TransactionParserService {
     );
   }
 
-  /// UPI first (VPA-style address or explicit "upi"/"vpa" mention), then
-  /// [extractCardTypeHint] to pick credit vs debit card, then a generic
-  /// bank-account mention, else unknown.
+  /// [extractCardTypeHint] to pick credit vs debit card first, then a
+  /// generic bank-account mention, then UPI (VPA-style address or explicit
+  /// "upi"/"vpa" mention) only as a last resort.
+  ///
+  /// UPI is a payment *rail*, not an instrument of its own — almost every
+  /// UPI SMS also names the underlying account it moved money through
+  /// ("credited to a/c XX6020 ... VPA foo@bank"), so checking UPI first (as
+  /// this used to) meant nearly all UPI activity for an account split off
+  /// into its own "UPI" bucket instead of joining that account's other
+  /// transactions. Card/account context now wins whenever it's present;
+  /// UPI only remains the classification for a bare VPA/UPI mention with no
+  /// account or card context at all.
   InstrumentType _instrumentType(String content) {
-    if (RegExp(r'\b(upi|vpa)\b', caseSensitive: false).hasMatch(content) ||
-        RegExp(r'[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+').hasMatch(content)) {
-      return InstrumentType.upi;
-    }
-
     final cardHint = extractors.extractCardTypeHint(content);
     if (cardHint == 'credit') return InstrumentType.creditCard;
     if (cardHint == 'debit') return InstrumentType.debitCard;
 
     if (RegExp(r'\b(a\/c|acc(?:ount)? no|account)\b', caseSensitive: false).hasMatch(content)) {
       return InstrumentType.bankAccount;
+    }
+
+    if (RegExp(r'\b(upi|vpa)\b', caseSensitive: false).hasMatch(content) ||
+        RegExp(r'[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+').hasMatch(content)) {
+      return InstrumentType.upi;
     }
 
     return InstrumentType.unknown;

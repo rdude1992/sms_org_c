@@ -554,12 +554,16 @@ class _InstrumentRow extends StatelessWidget {
   final VoidCallback onTap;
   const _InstrumentRow({required this.summary, required this.onTap});
 
+  // UPI isn't its own instrument icon — it's a rail, and almost all UPI
+  // activity now classifies as the bank account/card it actually moved
+  // money through (see TransactionParserService._instrumentType). A bare
+  // VPA mention with no account/card context at all falls through to the
+  // generic icon below rather than getting a dedicated one.
   IconData get _icon {
     if (summary.walletType != null) return Icons.account_balance_wallet_outlined;
     if (summary.isCreditCard) return Icons.credit_card;
     if (summary.isDebitCard) return Icons.credit_card_outlined;
     if (summary.isBankAccount) return Icons.account_balance;
-    if (summary.isUpi) return Icons.qr_code;
     return Icons.help_outline;
   }
 

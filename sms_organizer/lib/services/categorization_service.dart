@@ -9,14 +9,17 @@ import '../utils/sms_extractors.dart';
 /// top) all come directly from that source and matter for accuracy; don't
 /// reorder blocks without checking the original intent first.
 class CategorizationService {
-  /// Bump this whenever [categorize]'s logic changes meaningfully.
+  /// Bump this whenever [categorize]'s logic changes meaningfully, or
+  /// whenever TransactionParserService's downstream parsing logic changes
+  /// in a way that should reprocess already-cached transactions/investments
+  /// (this is the only "wipe and redo everything" lever the app has).
   /// SmsProvider checks this against a value cached in the local database
   /// and automatically wipes + reprocesses everything once when it doesn't
   /// match — see SmsProvider._ensureCacheMatchesCurrentLogic. Without this,
-  /// cached categories from before a logic change would silently keep
-  /// being reused forever (incremental sync deliberately never
-  /// re-evaluates cached entries on its own).
-  static const int version = 3;
+  /// cached categories/transactions from before a logic change would
+  /// silently keep being reused forever (incremental sync deliberately
+  /// never re-evaluates cached entries on its own).
+  static const int version = 4;
 
   SmsCategory categorize(SmsMessage message) {
     final sender = message.address;
