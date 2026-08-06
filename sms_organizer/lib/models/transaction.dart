@@ -125,6 +125,25 @@ class Transaction {
 
 enum InvestmentKind { mutualFundSip, mutualFundPurchase, mutualFundRedemption, stockTrade, other }
 
+extension InvestmentKindX on InvestmentKind {
+  String get label {
+    switch (this) {
+      case InvestmentKind.mutualFundSip:
+        return 'SIP';
+      case InvestmentKind.mutualFundPurchase:
+        return 'Mutual Fund Purchase';
+      case InvestmentKind.mutualFundRedemption:
+        return 'Redemption';
+      case InvestmentKind.stockTrade:
+        return 'Stock Trade';
+      case InvestmentKind.other:
+        return 'Other';
+    }
+  }
+
+  bool get isRedemption => this == InvestmentKind.mutualFundRedemption;
+}
+
 class InvestmentEvent {
   final int smsId;
   final DateTime date;

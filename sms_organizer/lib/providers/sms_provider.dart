@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/category.dart';
+import '../models/sim_info.dart';
 import '../models/sms_message.dart';
 import '../models/transaction.dart';
 import '../services/backup_service.dart';
@@ -29,6 +30,7 @@ class SmsProvider extends ChangeNotifier {
   List<SmsMessage> _allMessages = [];
   List<Transaction> _transactions = [];
   List<InvestmentEvent> _investments = [];
+  List<SimInfo> _activeSims = [];
 
   StreamSubscription? _incomingSub;
 
@@ -39,13 +41,35 @@ class SmsProvider extends ChangeNotifier {
   // Category filter for the "all messages" list view.
   SmsCategory? activeCategoryFilter;
 
+  // Free-text search over the "all messages" list view — matches message
+  // body, sender display name, and raw address.
+  String searchQuery = '';
+
+  // Separate free-text search over the "chats" list view — matches contact
+  // display name, raw address, or any message body within the thread. Kept
+  // independent from [searchQuery] so switching tabs doesn't carry a query
+  // over to a list it wasn't typed into.
+  String chatSearchQuery = '';
+
   List<SmsMessage> get allMessages => _allMessages;
   List<Transaction> get transactions => _transactions;
   List<InvestmentEvent> get investments => _investments;
+  List<SimInfo> get activeSims => _activeSims;
+  bool get hasMultipleSims => _activeSims.length > 1;
 
   List<SmsMessage> get filteredMessages {
-    if (activeCategoryFilter == null) return _allMessages;
-    return _allMessages.where((m) => m.category == activeCategoryFilter).toList();
+    Iterable<SmsMessage> msgs = _allMessages;
+    if (activeCategoryFilter != null) {
+      msgs = msgs.where((m) => m.category == activeCategoryFilter);
+    }
+    final query = searchQuery.trim().toLowerCase();
+    if (query.isNotEmpty) {
+      msgs = msgs.where((m) =>
+          m.body.toLowerCase().contains(query) ||
+          m.address.toLowerCase().contains(query) ||
+          displayNameFor(m.address).toLowerCase().contains(query));
+    }
+    return msgs.toList();
   }
 
   List<SmsConversation> get conversations {
@@ -59,6 +83,16 @@ class SmsProvider extends ChangeNotifier {
     }).toList();
     result.sort((a, b) => b.latest.date.compareTo(a.latest.date));
     return result;
+  }
+
+  List<SmsConversation> get filteredConversations {
+    final query = chatSearchQuery.trim().toLowerCase();
+    if (query.isEmpty) return conversations;
+    return conversations.where((c) {
+      if (displayNameFor(c.address).toLowerCase().contains(query)) return true;
+      if (c.address.toLowerCase().contains(query)) return true;
+      return c.messages.any((m) => m.body.toLowerCase().contains(query));
+    }).toList();
   }
 
   String displayNameFor(String address) => contactService.displayNameFor(address);
@@ -87,9 +121,21 @@ class SmsProvider extends ChangeNotifier {
     isDefaultSmsApp = await _platform.isDefaultSmsApp();
     notifyListeners();
     await contactService.load(_platform);
+    await _loadActiveSims();
     await _ensureCacheMatchesCurrentLogic();
     await refresh();
     _listenForIncoming();
+  }
+
+  /// Best-effort: an empty result (no permission, single-SIM device) just
+  /// means the SIM picker/badges stay hidden — never blocks startup.
+  Future<void> _loadActiveSims() async {
+    try {
+      _activeSims = await _platform.getActiveSims();
+    } catch (_) {
+      _activeSims = [];
+    }
+    notifyListeners();
   }
 
   /// Incremental sync deliberately never re-evaluates a cached category
@@ -244,8 +290,8 @@ class SmsProvider extends ChangeNotifier {
 
   // ---- Sending / drafts ----
 
-  Future<bool> sendSms(String address, String body) async {
-    final ok = await _platform.sendSms(address, body);
+  Future<bool> sendSms(String address, String body, {int? subscriptionId}) async {
+    final ok = await _platform.sendSms(address, body, subscriptionId: subscriptionId);
     if (ok) await refresh();
     return ok;
   }
@@ -257,6 +303,16 @@ class SmsProvider extends ChangeNotifier {
 
   void setCategoryFilter(SmsCategory? category) {
     activeCategoryFilter = category;
+    notifyListeners();
+  }
+
+  void setSearchQuery(String query) {
+    searchQuery = query;
+    notifyListeners();
+  }
+
+  void setChatSearchQuery(String query) {
+    chatSearchQuery = query;
     notifyListeners();
   }
 

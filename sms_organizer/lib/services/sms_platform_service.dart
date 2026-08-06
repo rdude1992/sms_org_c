@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
+import '../models/sim_info.dart';
 import '../models/sms_message.dart';
 
 /// Everything that has to cross into native Android code goes through here.
@@ -105,12 +106,25 @@ class SmsPlatformService {
         .toList();
   }
 
-  Future<bool> sendSms(String address, String body) async {
+  /// [subscriptionId] picks which SIM sends it on a dual-SIM device — omit
+  /// to use the device's default.
+  Future<bool> sendSms(String address, String body, {int? subscriptionId}) async {
     final result = await _methodChannel.invokeMethod<bool>('sendSms', {
       'address': address,
       'body': body,
+      'subscriptionId': subscriptionId,
     });
     return result ?? false;
+  }
+
+  /// Active SIMs on this device, for the compose screen's SIM picker. Empty
+  /// on a single-SIM device or without READ_PHONE_STATE permission.
+  Future<List<SimInfo>> getActiveSims() async {
+    final raw = await _methodChannel.invokeMethod<List<dynamic>>('getActiveSims');
+    if (raw == null) return [];
+    return raw
+        .map((e) => SimInfo.fromPlatformMap(Map<dynamic, dynamic>.from(e as Map)))
+        .toList();
   }
 
   Future<int> saveDraft(String address, String body, {int? existingId}) async {

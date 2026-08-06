@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../models/sim_info.dart';
 import '../providers/sms_provider.dart';
+import '../widgets/sim_picker.dart';
+import 'contact_picker_screen.dart';
 
 class ComposeScreen extends StatefulWidget {
   final String? initialAddress;
@@ -16,6 +19,8 @@ class _ComposeScreenState extends State<ComposeScreen> {
   late final _toController = TextEditingController(text: widget.initialAddress ?? '');
   late final _bodyController = TextEditingController(text: widget.initialBody ?? '');
   bool _sending = false;
+  int? _selectedSubscriptionId;
+  bool _simInitialized = false;
 
   @override
   void dispose() {
@@ -24,13 +29,31 @@ class _ComposeScreenState extends State<ComposeScreen> {
     super.dispose();
   }
 
+  void _initSelectedSim(List<SimInfo> sims) {
+    if (_simInitialized) return;
+    _simInitialized = true;
+    if (sims.isNotEmpty) _selectedSubscriptionId = sims.first.subscriptionId;
+  }
+
+  Future<void> _pickContact() async {
+    final number = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const ContactPickerScreen()),
+    );
+    if (number != null) {
+      setState(() => _toController.text = number);
+    }
+  }
+
   Future<void> _send() async {
     final address = _toController.text.trim();
     final body = _bodyController.text.trim();
     if (address.isEmpty || body.isEmpty) return;
 
     setState(() => _sending = true);
-    final ok = await context.read<SmsProvider>().sendSms(address, body);
+    final ok = await context
+        .read<SmsProvider>()
+        .sendSms(address, body, subscriptionId: _selectedSubscriptionId);
     setState(() => _sending = false);
     if (ok && mounted) Navigator.pop(context);
   }
@@ -48,6 +71,9 @@ class _ComposeScreenState extends State<ComposeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final sims = context.watch<SmsProvider>().activeSims;
+    _initSelectedSim(sims);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('New message'),
@@ -59,11 +85,32 @@ class _ComposeScreenState extends State<ComposeScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            TextField(
-              controller: _toController,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(labelText: 'To', border: OutlineInputBorder()),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _toController,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(labelText: 'To', border: OutlineInputBorder()),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  onPressed: _pickContact,
+                  icon: const Icon(Icons.contacts_outlined),
+                  tooltip: 'Pick contact',
+                ),
+              ],
             ),
+            if (sims.length > 1) ...[
+              const SizedBox(height: 12),
+              SimPicker(
+                sims: sims,
+                selectedSubscriptionId: _selectedSubscriptionId,
+                onChanged: (id) => setState(() => _selectedSubscriptionId = id),
+              ),
+            ],
             const SizedBox(height: 12),
             Expanded(
               child: TextField(

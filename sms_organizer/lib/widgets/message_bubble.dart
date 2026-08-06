@@ -9,6 +9,13 @@ class MessageBubble extends StatelessWidget {
   final SmsMessage message;
   final bool selected;
   final bool selectionMode;
+
+  /// True briefly when this bubble was jumped to (e.g. from tapping the
+  /// message in the All Messages list) — draws an animated border that
+  /// fades back out, so the target message is unmistakable after the scroll
+  /// lands.
+  final bool highlighted;
+
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -19,6 +26,7 @@ class MessageBubble extends StatelessWidget {
     required this.selectionMode,
     required this.onTap,
     required this.onLongPress,
+    this.highlighted = false,
   });
 
   @override
@@ -47,7 +55,9 @@ class MessageBubble extends StatelessWidget {
           mainAxisAlignment: isOutgoing ? MainAxisAlignment.end : MainAxisAlignment.start,
           children: [
             Flexible(
-              child: Container(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 400),
+                curve: Curves.easeOut,
                 margin: EdgeInsets.only(
                   left: isOutgoing ? 48 : 12,
                   right: isOutgoing ? 12 : 48,
@@ -61,6 +71,10 @@ class MessageBubble extends StatelessWidget {
                     bottomLeft: Radius.circular(isOutgoing ? 16 : 4),
                     bottomRight: Radius.circular(isOutgoing ? 4 : 16),
                   ),
+                  border: Border.all(
+                    color: highlighted ? scheme.primary : scheme.primary.withOpacity(0),
+                    width: 2,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -71,12 +85,33 @@ class MessageBubble extends StatelessWidget {
                       _CopyOtpButton(code: otpCode, outgoingTint: isOutgoing, textColor: textColor),
                     ],
                     const SizedBox(height: 4),
-                    Text(
-                      Formatters.timeOfDay(message.date),
-                      style: TextStyle(
-                        color: textColor?.withOpacity(0.7) ?? Colors.grey,
-                        fontSize: 10,
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          Formatters.timeOfDay(message.date),
+                          style: TextStyle(
+                            color: textColor?.withOpacity(0.7) ?? Colors.grey,
+                            fontSize: 10,
+                          ),
+                        ),
+                        if (message.simSlot != null) ...[
+                          const SizedBox(width: 6),
+                          Text(
+                            '·',
+                            style: TextStyle(color: textColor?.withOpacity(0.5) ?? Colors.grey, fontSize: 10),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'SIM ${message.simSlot! + 1}',
+                            style: TextStyle(
+                              color: textColor?.withOpacity(0.7) ?? Colors.grey,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ),

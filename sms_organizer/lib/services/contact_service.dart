@@ -1,5 +1,15 @@
 import 'sms_platform_service.dart';
 
+/// A contact's name/number pair, for display in the contact picker. Kept
+/// separate from the internal name->number lookup map, which dedupes by
+/// normalized number and so can't reconstruct the full contact list (two
+/// contacts sharing a normalized number would collapse to one entry there).
+class ContactEntry {
+  final String name;
+  final String number;
+  ContactEntry({required this.name, required this.number});
+}
+
 /// Resolves raw SMS `address` values (phone numbers, or short alphanumeric
 /// sender IDs like "HDFCBK") to a saved contact's display name where
 /// possible. Falls back to the raw address otherwise — short sender IDs
@@ -7,29 +17,39 @@ import 'sms_platform_service.dart';
 /// expected and fine.
 class ContactService {
   Map<String, String> _numberToName = {};
+  List<ContactEntry> _entries = [];
   bool _loaded = false;
 
   bool get isLoaded => _loaded;
+
+  /// Full contact list (name + number), for the contact picker. Sorted by
+  /// name for a stable, scannable list.
+  List<ContactEntry> get entries => _entries;
 
   Future<void> load(SmsPlatformService platform) async {
     try {
       final contacts = await platform.getContacts();
       final map = <String, String>{};
+      final entries = <ContactEntry>[];
       for (final c in contacts) {
         final name = c['name'];
         final number = c['number'];
         if (name == null || number == null || name.isEmpty || number.isEmpty) continue;
+        entries.add(ContactEntry(name: name, number: number));
         final normalized = _normalize(number);
         if (normalized.isNotEmpty) {
           map[normalized] = name;
         }
       }
+      entries.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       _numberToName = map;
+      _entries = entries;
       _loaded = true;
     } catch (_) {
       // Contacts permission may be denied — degrade gracefully to showing
       // raw addresses rather than failing message loading entirely.
       _numberToName = {};
+      _entries = [];
       _loaded = false;
     }
   }

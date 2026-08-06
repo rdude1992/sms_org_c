@@ -24,6 +24,25 @@ object SmsRepository {
         }
     }
 
+    // "sub_id" is the subscription id column backing dual-SIM messages —
+    // present in the provider schema since API 22, but not exposed as a
+    // Telephony.Sms constant on all SDK levels, so it's queried by its raw
+    // column name. Queried as a separate, optional projection (see below)
+    // since some ROMs / API<22 devices don't have it at all.
+    private const val COLUMN_SUB_ID = "sub_id"
+
+    private val baseProjection = arrayOf(
+        Telephony.Sms._ID,
+        Telephony.Sms.THREAD_ID,
+        Telephony.Sms.ADDRESS,
+        Telephony.Sms.BODY,
+        Telephony.Sms.DATE,
+        Telephony.Sms.DATE_SENT,
+        Telephony.Sms.TYPE, // 1=inbox, 2=sent, 3=draft, 4=outbox, 5=failed, 6=queued
+        Telephony.Sms.READ,
+        Telephony.Sms.SEEN
+    )
+
     /**
      * Reads every row from content://sms (inbox + sent + draft + outbox).
      * Categorisation and thread-grouping happen on the Dart side; this just
@@ -31,23 +50,33 @@ object SmsRepository {
      */
     fun getAllMessages(context: Context): List<Map<String, Any?>> {
         val results = mutableListOf<Map<String, Any?>>()
-        val projection = arrayOf(
-            Telephony.Sms._ID,
-            Telephony.Sms.THREAD_ID,
-            Telephony.Sms.ADDRESS,
-            Telephony.Sms.BODY,
-            Telephony.Sms.DATE,
-            Telephony.Sms.DATE_SENT,
-            Telephony.Sms.TYPE, // 1=inbox, 2=sent, 3=draft, 4=outbox, 5=failed, 6=queued
-            Telephony.Sms.READ,
-            Telephony.Sms.SEEN
-        )
-        val cursor = context.contentResolver.query(
-            Telephony.Sms.CONTENT_URI, projection, null, null,
-            "${Telephony.Sms.DATE} DESC"
-        )
+
+        // Try including sub_id first; fall back to the base projection if
+        // the provider on this device/API level rejects the extra column
+        // rather than crashing the whole sync over a dual-SIM nicety.
+        var cursor = try {
+            context.contentResolver.query(
+                Telephony.Sms.CONTENT_URI, baseProjection + COLUMN_SUB_ID, null, null,
+                "${Telephony.Sms.DATE} DESC"
+            )
+        } catch (_: Exception) {
+            null
+        }
+        var hasSubId = cursor != null
+        if (cursor == null) {
+            cursor = context.contentResolver.query(
+                Telephony.Sms.CONTENT_URI, baseProjection, null, null,
+                "${Telephony.Sms.DATE} DESC"
+            )
+        }
+
+        val subToSlot = SimRepository.subscriptionToSlotMap(context)
+
         cursor?.use {
+            val subIdIdx = if (hasSubId) it.getColumnIndex(COLUMN_SUB_ID) else -1
+            hasSubId = subIdIdx >= 0
             while (it.moveToNext()) {
+                val subId = if (hasSubId) it.getInt(subIdIdx) else -1
                 results.add(
                     mapOf(
                         "id" to it.getLong(it.getColumnIndexOrThrow(Telephony.Sms._ID)),
@@ -58,7 +87,12 @@ object SmsRepository {
                         "dateSent" to it.getLong(it.getColumnIndexOrThrow(Telephony.Sms.DATE_SENT)),
                         "type" to it.getInt(it.getColumnIndexOrThrow(Telephony.Sms.TYPE)),
                         "read" to (it.getInt(it.getColumnIndexOrThrow(Telephony.Sms.READ)) == 1),
-                        "seen" to (it.getInt(it.getColumnIndexOrThrow(Telephony.Sms.SEEN)) == 1)
+                        "seen" to (it.getInt(it.getColumnIndexOrThrow(Telephony.Sms.SEEN)) == 1),
+                        // 0-based slot index (0="SIM 1", 1="SIM 2"), or -1 if
+                        // unknown (permission not granted, single-SIM device,
+                        // or the SIM that sent/received this has since been
+                        // removed so it's no longer "active").
+                        "simSlot" to (subToSlot[subId] ?: -1)
                     )
                 )
             }
@@ -70,15 +104,13 @@ object SmsRepository {
      * Sends an SMS and, since a default SMS app is responsible for its own
      * "Sent" record (the system does not insert it automatically), writes the
      * sent message into content://sms/sent ourselves.
+     *
+     * [subscriptionId] picks which SIM sends it on a dual-SIM device — null
+     * (or omitted) uses the device's default SmsManager, same as before this
+     * parameter existed.
      */
-    fun sendSms(context: Context, address: String, body: String) {
-        val smsManager: SmsManager =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                context.getSystemService(SmsManager::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                SmsManager.getDefault()
-            }
+    fun sendSms(context: Context, address: String, body: String, subscriptionId: Int? = null) {
+        val smsManager = SimRepository.smsManagerFor(context, subscriptionId)
 
         val parts = smsManager.divideMessage(body)
         smsManager.sendMultipartTextMessage(address, null, parts, null, null)
@@ -89,6 +121,9 @@ object SmsRepository {
             put(Telephony.Sms.DATE, System.currentTimeMillis())
             put(Telephony.Sms.READ, 1)
             put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
+            if (subscriptionId != null && subscriptionId >= 0) {
+                put(COLUMN_SUB_ID, subscriptionId)
+            }
         }
         context.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
     }
@@ -135,8 +170,18 @@ object SmsRepository {
      * Called by SmsDeliverReceiver when this app IS the default handler:
      * it is responsible for writing the incoming message into the provider
      * itself (the system does not do this automatically for the default app).
+     *
+     * [subscriptionId] is the SIM that received it, read off the SMS_DELIVER
+     * intent's "subscription" extra by the receiver — -1/null if unavailable
+     * (single-SIM device, or the extra wasn't present).
      */
-    fun insertIncoming(context: Context, address: String?, body: String?, timestamp: Long): Long {
+    fun insertIncoming(
+        context: Context,
+        address: String?,
+        body: String?,
+        timestamp: Long,
+        subscriptionId: Int? = null
+    ): Long {
         val values = ContentValues().apply {
             put(Telephony.Sms.ADDRESS, address)
             put(Telephony.Sms.BODY, body)
@@ -145,6 +190,9 @@ object SmsRepository {
             put(Telephony.Sms.READ, 0)
             put(Telephony.Sms.SEEN, 0)
             put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_INBOX)
+            if (subscriptionId != null && subscriptionId >= 0) {
+                put(COLUMN_SUB_ID, subscriptionId)
+            }
         }
         val uri = context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values)
         return uri?.lastPathSegment?.toLongOrNull() ?: -1L

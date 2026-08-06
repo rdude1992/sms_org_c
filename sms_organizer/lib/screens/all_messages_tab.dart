@@ -3,19 +3,45 @@ import 'package:provider/provider.dart';
 import '../models/category.dart';
 import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
+import '../utils/search_snippet.dart';
 import '../widgets/category_badge.dart';
 import '../widgets/direction_badge.dart';
 import '../widgets/multi_select_bar.dart';
 import 'thread_screen.dart';
 
-class AllMessagesTab extends StatelessWidget {
+class AllMessagesTab extends StatefulWidget {
   const AllMessagesTab({super.key});
+
+  @override
+  State<AllMessagesTab> createState() => _AllMessagesTabState();
+}
+
+class _AllMessagesTabState extends State<AllMessagesTab> {
+  bool _isSearching = false;
+  final _searchController = TextEditingController();
+
+  void _startSearch() {
+    setState(() => _isSearching = true);
+  }
+
+  void _stopSearch(SmsProvider provider) {
+    _searchController.clear();
+    provider.setSearchQuery('');
+    setState(() => _isSearching = false);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<SmsProvider>(
       builder: (context, provider, _) {
         final messages = provider.filteredMessages;
+        final searching = provider.searchQuery.trim().isNotEmpty;
 
         return Scaffold(
           appBar: provider.isSelecting
@@ -26,7 +52,32 @@ class AllMessagesTab extends StatelessWidget {
                   onMarkUnread: () => provider.markSelectedRead(false),
                   onDelete: provider.deleteSelected,
                 )
-              : AppBar(title: const Text('All Messages')),
+              : AppBar(
+                  title: _isSearching
+                      ? TextField(
+                          controller: _searchController,
+                          autofocus: true,
+                          textInputAction: TextInputAction.search,
+                          decoration: const InputDecoration(
+                            hintText: 'Search messages',
+                            border: InputBorder.none,
+                          ),
+                          onChanged: provider.setSearchQuery,
+                        )
+                      : const Text('All Messages'),
+                  actions: [
+                    if (_isSearching)
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => _stopSearch(provider),
+                      )
+                    else
+                      IconButton(
+                        icon: const Icon(Icons.search),
+                        onPressed: _startSearch,
+                      ),
+                  ],
+                ),
           body: Column(
             children: [
               _CategoryFilterBar(provider: provider),
@@ -35,7 +86,14 @@ class AllMessagesTab extends StatelessWidget {
                 child: provider.state == LoadState.loading && messages.isEmpty
                     ? const Center(child: CircularProgressIndicator())
                     : messages.isEmpty
-                        ? const Center(child: Text('No messages in this category.'))
+                        ? Center(
+                            child: Text(
+                              searching
+                                  ? 'No messages match "${provider.searchQuery.trim()}".'
+                                  : 'No messages in this category.',
+                              textAlign: TextAlign.center,
+                            ),
+                          )
                         : ListView.separated(
                             itemCount: messages.length,
                             separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
@@ -99,32 +157,48 @@ class AllMessagesTab extends StatelessWidget {
                                 ),
                                 subtitle: Padding(
                                   padding: const EdgeInsets.only(top: 3),
-                                  child: Text(
-                                    m.body,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
+                                  child: SearchPreviewText(
+                                    body: m.body,
+                                    query: provider.searchQuery,
+                                    baseStyle: TextStyle(
                                       color: unread
                                           ? scheme.onSurface.withOpacity(0.85)
                                           : scheme.onSurfaceVariant,
                                       fontWeight: unread ? FontWeight.w600 : FontWeight.normal,
                                     ),
+                                    matchColor: scheme.primary,
                                   ),
                                 ),
                                 trailing: Column(
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Text(
-                                      Formatters.relativeOrTime(m.date),
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: unread ? scheme.primary : scheme.onSurfaceVariant,
-                                        fontWeight: unread ? FontWeight.bold : FontWeight.normal,
-                                      ),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (m.simSlot != null) ...[
+                                          Text(
+                                            'SIM ${m.simSlot! + 1}',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w600,
+                                              color: scheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                        ],
+                                        Text(
+                                          Formatters.relativeOrTime(m.date),
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: unread ? scheme.primary : scheme.onSurfaceVariant,
+                                            fontWeight: unread ? FontWeight.bold : FontWeight.normal,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                     const SizedBox(height: 4),
-                                    CategoryBadge(category: m.category, compact: true),
+                                    CategoryBadge(category: m.category, compact: true, showLabel: false),
                                   ],
                                 ),
                                 onTap: () {
@@ -134,7 +208,10 @@ class AllMessagesTab extends StatelessWidget {
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
-                                        builder: (_) => ThreadScreen(threadId: m.threadId),
+                                        builder: (_) => ThreadScreen(
+                                          threadId: m.threadId,
+                                          highlightMessageId: m.id,
+                                        ),
                                       ),
                                     );
                                   }
