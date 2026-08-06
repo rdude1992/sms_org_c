@@ -1,45 +1,231 @@
 import '../models/category.dart';
 import '../models/sms_message.dart';
-import '../utils/regex_patterns.dart';
+import '../utils/sms_extractors.dart';
 
-/// Rule-based classifier. Deliberately checked in this priority order:
-/// OTP first (highest precision, short-lived and important), then
-/// transactional (financial relevance), then promotional, defaulting to
-/// personal. This ordering matters because a bank OTP SMS also often
-/// contains transactional-sounding words like "account".
+/// Ported from categorizeMessage(sender, content) in the source
+/// smsParser.ts. This replaced an earlier, much simpler 4-bucket classifier
+/// — the ordering and exclusion logic below (promo/future/request/bill
+/// checks gating transaction detection, the priority-ordered checks up
+/// top) all come directly from that source and matter for accuracy; don't
+/// reorder blocks without checking the original intent first.
 class CategorizationService {
-  SmsCategory categorize(SmsMessage message) {
-    final body = message.body;
-    final sender = message.address;
+  /// Bump this whenever [categorize]'s logic changes meaningfully.
+  /// SmsProvider checks this against a value cached in the local database
+  /// and automatically wipes + reprocesses everything once when it doesn't
+  /// match — see SmsProvider._ensureCacheMatchesCurrentLogic. Without this,
+  /// cached categories from before a logic change would silently keep
+  /// being reused forever (incremental sync deliberately never
+  /// re-evaluates cached entries on its own).
+  static const int version = 1;
 
-    if (_looksLikeOtp(body)) return SmsCategory.otp;
-    if (_looksLikeTransactional(body, sender)) return SmsCategory.transactional;
-    if (_looksLikePromotional(body, sender)) return SmsCategory.promotional;
-    return SmsCategory.personal;
+  SmsCategory categorize(SmsMessage message) {
+    final sender = message.address;
+    final content = message.body;
+    final contentLower = content.toLowerCase();
+    final senderLower = sender.toLowerCase();
+    final senderUpper = sender.toUpperCase();
+
+    // 0. Updates/Notifications (highest priority) — statements, nominee
+    // notices, and "thank you" confirmations aren't personal, promotional,
+    // or a transaction in themselves, even though they often come from the
+    // same bank senders that also send real transaction alerts.
+    if (contentLower.contains('view statement') ||
+        contentLower.contains('account statement') ||
+        contentLower.contains('a/c statement') ||
+        contentLower.contains('download statement') ||
+        contentLower.contains('statement of account') ||
+        contentLower.contains('statement for folio') ||
+        (contentLower.contains('stmt') &&
+            (contentLower.contains('view') ||
+                contentLower.contains('click') ||
+                contentLower.contains('check'))) ||
+        (contentLower.contains('redemption transaction') && contentLower.contains('processed')) ||
+        (contentLower.contains('due') &&
+            (contentLower.contains('debit') ||
+                contentLower.contains('payment') ||
+                contentLower.contains('sip'))) ||
+        contentLower.contains('nomination') ||
+        contentLower.contains('nominee') ||
+        contentLower.contains('thank you for choosing')) {
+      return SmsCategory.updates;
+    }
+
+    // Investment/NPS balance alerts ("Investment value ... as on ...").
+    if ((contentLower.contains('investment value') ||
+            contentLower.contains('total holding') ||
+            contentLower.contains('current value')) &&
+        (contentLower.contains('as on') || contentLower.contains('is rs'))) {
+      return SmsCategory.updates;
+    }
+
+    // Balance info without any transaction verb ("Available Balance: Rs X")
+    // is a status ping, not a transaction.
+    if ((contentLower.contains('available balance') ||
+            contentLower.contains('account balance') ||
+            contentLower.contains('clear balance') ||
+            contentLower.contains('total balance')) &&
+        !contentLower.contains('spent') &&
+        !contentLower.contains('paid') &&
+        !contentLower.contains('debited') &&
+        !contentLower.contains('withdrawn') &&
+        !contentLower.contains('sent to') &&
+        !contentLower.contains('transferred to')) {
+      return SmsCategory.updates;
+    }
+
+    // Sender-suffix hint: many Indian DLT-registered sender IDs end in a
+    // single letter indicating the message class (-P promotional, -T
+    // transactional, -S/-G service/government — both mapped to updates).
+    final suffixMatch = RegExp(r'-([PSTG])$', caseSensitive: false).firstMatch(sender);
+    SmsCategory? suffixCategory;
+    if (suffixMatch != null) {
+      switch (suffixMatch.group(1)!.toUpperCase()) {
+        case 'P':
+          suffixCategory = SmsCategory.promotional;
+        case 'S':
+        case 'G':
+          suffixCategory = SmsCategory.updates;
+        case 'T':
+          suffixCategory = SmsCategory.transactional;
+      }
+    }
+
+    // 1. OTP detection.
+    const otpKeywords = [
+      'otp', 'verification code', 'verify', 'code is', 'passcode', 'pin is',
+      'one time password', 'auth code',
+    ];
+    final hasOtpKeyword = otpKeywords.any((kw) => contentLower.contains(kw));
+    final hasDigitCode = RegExp(r'\b\d{4,8}\b').hasMatch(content);
+    if ((hasOtpKeyword && hasDigitCode) ||
+        RegExp(r'is your otp', caseSensitive: false).hasMatch(content)) {
+      return SmsCategory.otp;
+    }
+
+    // 2. Transaction detection.
+    const promoKeywords = [
+      'offer', 'sale', 'discount', '% off', 'flat off', 'deal', 'free', 'win', 'prize',
+      'cashback', 'coupon', 'limited time', 'hurry', 'shop now', 'buy now', 'grab',
+      'exclusive', 'rewards', 'points', 'congrats', 'play now',
+      'recharge', 'data', 'validity', 'use code',
+      'create wealth', 'achieve your life goals', 'start a sip', 'opportunity',
+      'nfo', 'new fund offer', 'is live', 'opens today', 'closes on', 'subscribe now',
+      'markets have fallen', 'time to top up', 'click here to invest',
+    ];
+    final isPromotion = promoKeywords.any((kw) {
+      if (kw == 'data' && contentLower.contains('data wallet')) return false;
+      if ((kw == 'recharge' || kw == 'validity') &&
+          (contentLower.contains('fastag') || senderUpper.contains('FASTAG'))) {
+        return false;
+      }
+      return contentLower.contains(kw);
+    });
+
+    final isFutureTransaction =
+        RegExp(r'will\s+be\s+(?:debited|credited)', caseSensitive: false).hasMatch(contentLower) ||
+            RegExp(r'scheduled', caseSensitive: false).hasMatch(contentLower) ||
+            RegExp(r'initiated', caseSensitive: false).hasMatch(contentLower);
+
+    final isRequestNotification = (contentLower.contains('request') &&
+            (contentLower.contains('receipt') ||
+                contentLower.contains('received') ||
+                contentLower.contains('recd') ||
+                contentLower.contains('cancel') ||
+                contentLower.contains('redemption'))) ||
+        (contentLower.contains('feedback') && contentLower.contains('important')) ||
+        (contentLower.contains('ack') && contentLower.contains('receipt'));
+
+    // Uses the robust extractor (handles year false-positives, Pluxee's
+    // currency-symbol-less amounts, etc.) rather than a bare regex check.
+    final hasAmount = extractAmount(content) != null;
+
+    const transactionKeywords = [
+      'credited', 'debited', 'spent', 'paid', 'received', 'transfer',
+      'balance', 'a/c', 'account', 'transaction', 'payment', 'upi', 'bank',
+      'withdrawn', 'purchase', 'card', 'limit', 'pluxee', 'sodexo',
+      'sip', 'folio', 'nav', 'units', 'equity', 'redemption', 'allotted',
+    ];
+    const bankSenders = [
+      'bank', 'hdfc', 'icici', 'sbi', 'axis', 'kotak', 'paytm', 'phonepe',
+      'gpay', 'upi', 'abcamc', 'miraei', 'mutual', 'fund', 'broking',
+    ];
+
+    if (suffixCategory == SmsCategory.transactional) return SmsCategory.transactional;
+
+    if (hasAmount &&
+        (transactionKeywords.any((kw) => contentLower.contains(kw)) ||
+            bankSenders.any((bank) => senderLower.contains(bank)) ||
+            RegExp(r'Pluxee', caseSensitive: false).hasMatch(content) ||
+            RegExp(r'FASTag', caseSensitive: false).hasMatch(content) ||
+            senderUpper.contains('FASTAG'))) {
+      final isBillNotification = (contentLower.contains('due') || contentLower.contains('bill')) &&
+          !contentLower.contains('paid') &&
+          !contentLower.contains('debited');
+
+      final isMandateNotification = contentLower.contains('mandate registered') ||
+          (contentLower.contains('mandate') && contentLower.contains('creation'));
+
+      if (!isBillNotification &&
+          !isMandateNotification &&
+          !isFutureTransaction &&
+          !isPromotion &&
+          !isRequestNotification) {
+        return SmsCategory.transactional;
+      }
+    }
+
+    // Explicit investment checks, even without an exact amount match.
+    if (!isFutureTransaction && !isRequestNotification && !isPromotion) {
+      if (contentLower.contains('sip') &&
+          (contentLower.contains('processed') ||
+              contentLower.contains('due') ||
+              contentLower.contains('installment'))) {
+        return SmsCategory.transactional;
+      }
+      if (contentLower.contains('units') &&
+          (contentLower.contains('nav') ||
+              contentLower.contains('allotted') ||
+              contentLower.contains('credited'))) {
+        return SmsCategory.transactional;
+      }
+      if (contentLower.contains('folio')) return SmsCategory.transactional;
+      if (contentLower.contains('mutual fund') || contentLower.contains(' mf ')) {
+        return SmsCategory.transactional;
+      }
+    }
+
+    // 3. Updates.
+    if (suffixCategory == SmsCategory.updates) return SmsCategory.updates;
+
+    const updateKeywords = [
+      'delivered', 'out for delivery', 'dispatched', 'shipped', 'arriving', 'courier', 'package', 'order',
+      'pnr', 'booking confirmed', 'ticket', 'flight', 'train', 'bus', 'cab', 'driver', 'ride',
+      'bill generated', 'invoice', 'due date', 'statement', 'plan expire',
+    ];
+    if (updateKeywords.any((kw) => contentLower.contains(kw))) return SmsCategory.updates;
+
+    // 4. Promotional.
+    if (suffixCategory == SmsCategory.promotional) return SmsCategory.promotional;
+    if (promoKeywords.any((kw) => contentLower.contains(kw))) return SmsCategory.promotional;
+
+    if (contentLower.contains('unsubscribe') ||
+        contentLower.contains('opt-out') ||
+        contentLower.contains('t&c')) {
+      return SmsCategory.promotional;
+    }
+
+    // Personal: only plain 10-digit senders (excludes shortcodes and
+    // alphanumeric sender IDs), after removing a +91/91 country-code prefix.
+    final cleanedNumber = sender.replaceFirst(RegExp(r'^\+?91'), '').replaceAll(RegExp(r'\D'), '');
+    if (RegExp(r'^\d{10}$').hasMatch(cleanedNumber)) return SmsCategory.personal;
+
+    // Everything else (shortcodes, alphanumeric senders, etc.) defaults to updates.
+    return SmsCategory.updates;
   }
 
   void categorizeAll(List<SmsMessage> messages) {
     for (final m in messages) {
       m.category = categorize(m);
     }
-  }
-
-  bool _looksLikeOtp(String body) {
-    return RegexPatterns.otp.hasMatch(body) || RegexPatterns.otpNumber.hasMatch(body);
-  }
-
-  bool _looksLikeTransactional(String body, String sender) {
-    if (!RegexPatterns.transactional.hasMatch(body)) return false;
-    // Require an amount to reduce false positives from generic bank chatter
-    // (e.g. "update your KYC") that mentions "account" without a transaction.
-    return RegexPatterns.amount.hasMatch(body);
-  }
-
-  bool _looksLikePromotional(String body, String sender) {
-    if (RegexPatterns.promo.hasMatch(body)) return true;
-    // Common heuristic: alphanumeric sender IDs like "AX-HDFCBK" for
-    // transactional vs "VM-BIGSALE" for promo aren't reliably distinguishable
-    // by suffix alone, so we lean on keyword match above as the primary signal.
-    return false;
   }
 }

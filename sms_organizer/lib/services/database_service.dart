@@ -1,6 +1,7 @@
 import 'package:path/path.dart' as p;
-import 'package:sqflite/sqflite.dart' hide Transaction;
+import 'package:sqflite/sqflite.dart';
 import '../models/category.dart';
+import '../models/sms_message.dart';
 import '../models/transaction.dart';
 
 /// Local cache layer. The Android SMS provider (content://sms) remains the
@@ -24,7 +25,7 @@ class DatabaseService {
     final path = p.join(dbPath, 'sms_organizer.db');
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE message_categories (
@@ -43,6 +44,11 @@ class DatabaseService {
             issuer TEXT,
             merchant TEXT,
             balance_after REAL,
+            entity_type TEXT,
+            wallet_type TEXT,
+            bill_due_date INTEGER,
+            fastag_wallet_id TEXT,
+            vehicle_number TEXT,
             raw_body TEXT
           )
         ''');
@@ -54,9 +60,41 @@ class DatabaseService {
             kind TEXT NOT NULL,
             fund_or_scheme TEXT,
             folio_or_account TEXT,
+            units REAL,
+            nav REAL,
+            amc TEXT,
             raw_body TEXT
           )
         ''');
+        await db.execute('''
+          CREATE TABLE meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
+          )
+        ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          // Existing installs from before the ported-regex update: add the
+          // new columns (richer transaction/investment fields) and the meta
+          // table (used to auto-trigger one recalculation below, since the
+          // classifier logic itself changed and old cached categories are
+          // now stale by definition).
+          await db.execute('ALTER TABLE transactions ADD COLUMN entity_type TEXT');
+          await db.execute('ALTER TABLE transactions ADD COLUMN wallet_type TEXT');
+          await db.execute('ALTER TABLE transactions ADD COLUMN bill_due_date INTEGER');
+          await db.execute('ALTER TABLE transactions ADD COLUMN fastag_wallet_id TEXT');
+          await db.execute('ALTER TABLE transactions ADD COLUMN vehicle_number TEXT');
+          await db.execute('ALTER TABLE investments ADD COLUMN units REAL');
+          await db.execute('ALTER TABLE investments ADD COLUMN nav REAL');
+          await db.execute('ALTER TABLE investments ADD COLUMN amc TEXT');
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS meta (
+              key TEXT PRIMARY KEY,
+              value TEXT
+            )
+          ''');
+        }
       },
     );
   }
@@ -116,6 +154,11 @@ class DatabaseService {
           'issuer': t.issuer,
           'merchant': t.merchant,
           'balance_after': t.balanceAfter,
+          'entity_type': t.entityType.name,
+          'wallet_type': t.walletType,
+          'bill_due_date': t.billDueDate?.millisecondsSinceEpoch,
+          'fastag_wallet_id': t.fastagWalletId,
+          'vehicle_number': t.vehicleNumber,
           'raw_body': t.rawBody,
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
@@ -144,6 +187,16 @@ class DatabaseService {
               issuer: row['issuer'] as String?,
               merchant: row['merchant'] as String?,
               balanceAfter: row['balance_after'] as double?,
+              entityType: EntityType.values.firstWhere(
+                (e) => e.name == row['entity_type'],
+                orElse: () => EntityType.unknown,
+              ),
+              walletType: row['wallet_type'] as String?,
+              billDueDate: row['bill_due_date'] != null
+                  ? DateTime.fromMillisecondsSinceEpoch(row['bill_due_date'] as int)
+                  : null,
+              fastagWalletId: row['fastag_wallet_id'] as String?,
+              vehicleNumber: row['vehicle_number'] as String?,
               rawBody: row['raw_body'] as String? ?? '',
             ))
         .toList();
@@ -164,6 +217,9 @@ class DatabaseService {
           'kind': e.kind.name,
           'fund_or_scheme': e.fundOrScheme,
           'folio_or_account': e.folioOrAccount,
+          'units': e.units,
+          'nav': e.nav,
+          'amc': e.amc,
           'raw_body': e.rawBody,
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
@@ -186,9 +242,30 @@ class DatabaseService {
               ),
               fundOrScheme: row['fund_or_scheme'] as String?,
               folioOrAccount: row['folio_or_account'] as String?,
+              units: row['units'] as double?,
+              nav: row['nav'] as double?,
+              amc: row['amc'] as String?,
               rawBody: row['raw_body'] as String? ?? '',
             ))
         .toList();
+  }
+
+  // ---- Meta (small key/value settings, e.g. categorizer cache version) ----
+
+  Future<String?> getMeta(String key) async {
+    final db = await database;
+    final rows = await db.query('meta', where: 'key = ?', whereArgs: [key], limit: 1);
+    if (rows.isEmpty) return null;
+    return rows.first['value'] as String?;
+  }
+
+  Future<void> setMeta(String key, String value) async {
+    final db = await database;
+    await db.insert(
+      'meta',
+      {'key': key, 'value': value},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   /// Removes cached derived data for messages that no longer exist on the

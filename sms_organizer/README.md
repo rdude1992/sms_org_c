@@ -150,29 +150,72 @@ render as a solid silhouette rather than a clean glyph — flagged with a
 
 ## How categorisation & parsing work
 
-- **Categorisation** (`categorization_service.dart`) runs a cheap regex pass
-  over every message body, checked in this priority order: OTP → transactional
-  → promotional → personal (default). OTP is checked first because bank OTP
-  messages often also contain transaction-sounding words like "account".
-  Transactional requires *both* a transaction keyword (debited/credited/UPI/
-  etc.) *and* a detected amount, to cut down on false positives from generic
-  bank notifications ("update your KYC") that aren't actual transactions.
+Both the classifier and the extraction logic are a direct port of a
+working TypeScript SMS parser (`smsParser.ts` in the source project) —
+`lib/utils/sms_extractors.dart` mirrors that file function-for-function
+(same names translated to camelCase, same order, same regexes), and
+`categorization_service.dart` mirrors its `categorizeMessage`. See the
+top-of-file comment in `sms_extractors.dart` for the JS→Dart translation
+notes if you're porting further updates from the source later.
 
-- **Transaction parsing** (`transaction_parser_service.dart`) only runs on
-  messages already tagged transactional. It extracts amount, credit/debit
-  direction, instrument type (credit card / debit card / bank account / UPI),
-  last-4 digits, issuer (matched against a small known-bank list you'll want
-  to extend — see below), merchant (best-effort), and balance-after.
+- **Categorisation** (`categorization_service.dart`) now has **five**
+  buckets, not four: personal / promotional / transactional / OTP /
+  **updates**. `updates` covers delivery notifications, booking
+  confirmations, account statements, and bill/due-date reminders — things
+  that aren't personal chat, aren't promotions, and aren't a transaction
+  in themselves, even though they often come from the same bank senders
+  that also send real transaction alerts. Checked in priority order:
+  updates (several specific high-confidence patterns) → sender-suffix hint
+  (many DLT-registered sender IDs end in `-P`/`-T`/`-S`/`-G`) → OTP →
+  transactional (gated by several exclusions: promotional-sounding,
+  "will be debited" future-tense, request/acknowledgement notifications,
+  bill reminders that haven't been paid yet, mandate-registration
+  notices) → updates keywords → promotional → personal (only plain
+  10-digit senders) → default updates.
 
-- **Investment parsing** looks for SIP/mutual-fund/folio/stock-trade keywords
-  within the same transactional set and produces `InvestmentEvent`s (SIP,
-  purchase, redemption, stock trade).
+- **Transaction parsing** (`transaction_parser_service.dart`) runs on
+  messages already tagged transactional and now extracts considerably
+  more than before: amount, direction (credit / debit / **reversal** —
+  reversed/declined/failed transactions are excluded from Insights totals
+  rather than counted as a debit), instrument type, a masked account/card
+  reference (`extractAccountNumber` — "XX1234", or "Pluxee Card" for cards
+  that never surface a number), issuer, merchant, balance-after,
+  **entity type** (bank / wallet / investment / card-service —
+  `extractEntityType`), **wallet type** (e.g. "Fuel Wallet", "HDFC
+  FASTag" — `extractWalletType`), bill due date, and FASTag-specific
+  wallet id + vehicle number.
 
-- All of this is **regex/keyword-based, not ML**. It'll work reasonably well
-  on common Indian bank SMS formats out of the box, but real-world message
-  formats vary a lot bank-to-bank. Expect to spend real time in
-  `lib/utils/regex_patterns.dart` tuning against your own actual SMS
-  inbox — that file is deliberately centralised for exactly this.
+- **Investment parsing** now also extracts units, NAV, folio/PRAN, and
+  AMC/scheme provider (`extractInvestmentDetails`) — including the
+  "units credited to your folio" nuance, where money left the user's bank
+  account even though the SMS says "credited" (to the fund, not the
+  user's cash), and NPS Tier 1/2 naming.
+
+- **OTP messages** now also extract the actual code (`extractOtp`) and
+  surface a tap-to-copy button in the thread view (`MessageBubble`) —
+  computed on demand per rendered message rather than cached, since it's
+  a single cheap regex pass and only applies to a subset of messages.
+
+- Insights groups by **wallet type** when present (so "Fuel Wallet" and
+  "Meal Wallet" don't collapse into a generic bucket just because they're
+  both wallet-entity transactions with no card number), falling back to
+  instrument + issuer + masked reference otherwise.
+
+- All of this is still **regex/keyword-based, not ML**. It'll work
+  reasonably well on common Indian bank SMS formats out of the box, but
+  real-world message formats vary a lot bank-to-bank. Tune
+  `lib/utils/sms_extractors.dart` against your own actual SMS inbox —
+  that file is deliberately centralised for exactly this, and structured
+  to make re-porting future changes from the TS source straightforward.
+
+- **`extractBillDueDate` is not a literal port.** The source relies on
+  JS's lenient `new Date(str)`, which happily parses loosely-formatted
+  strings like "18-Feb-25"; Dart's `DateTime.parse` is strict ISO-8601
+  only. `tryParseFlexibleDate` in `sms_extractors.dart` is a small
+  hand-written stand-in covering the two formats the source's own regex
+  patterns actually produce (day-first, matching Indian SMS conventions).
+  If you extend the due-date regex to match new formats, check this
+  parser still covers them.
 
 ## Caching model: what's cached, what isn't, and how sync stays incremental
 
@@ -203,6 +246,15 @@ as a cache now, not just written and ignored:
   even if you later tune the regex. That's what the Settings → Data & sync
   → "Recalculate categorisation" action is for — it clears the cache
   (`SmsProvider.recalculateAll()`) and forces a full re-scan on demand.
+  There's also an **automatic** version of this: `CategorizationService.version`
+  is checked against a value stored in the database's `meta` table on
+  every app start (`SmsProvider._ensureCacheMatchesCurrentLogic`), and the
+  cache is wiped once, automatically, whenever they don't match — e.g. this
+  happened for existing installs when the classifier was replaced with the
+  ported version, since old cached categories were stale by definition
+  under the hood. Bump `CategorizationService.version` yourself if you
+  tune the regex enough that old cached results should be considered
+  invalid.
 - Cache entries for messages that no longer exist on-device (deleted since
   the last sync) are pruned during `refresh()` so a stale transaction
   doesn't linger in Insights forever.
@@ -215,16 +267,21 @@ from the second sync onward.
 
 
 
+## Known limitations / scope cut for this MVP
+
 - **MMS is not parsed.** `MmsReceiver.kt` exists only to satisfy Android's
   default-SMS-app eligibility requirement; it acknowledges receipt but
   doesn't extract or store MMS content/attachments.
-- **Native and Dart categorisation can drift.** `Categorizer.kt` (native,
-  used for the notification decision) and `categorization_service.dart`
-  (Dart, used for the displayed category) implement the same regex by hand
-  in two languages. They're identical today; if you tune one without the
-  other, a message could get notified under one category but displayed
-  under another. Worth converting to a config-driven or code-generated
-  source of truth if this project grows past MVP.
+- **Native and Dart categorisation can drift — more so now.** `Categorizer.kt`
+  (native, used for the notification decision) is a hand-mirrored copy of
+  `categorization_service.dart` (Dart, used for the displayed category),
+  both ported from the same TS source. The Dart side additionally uses
+  `extractAmount` for its "has amount" check where the native side uses a
+  simpler inline regex — a deliberate simplification since the native
+  path only needs a category, not full extraction, but it's a second
+  place the two implementations differ even today. If you tune the
+  classifier, update both, and bump `CategorizationService.version` so
+  existing installs auto-reprocess (see the caching section above).
 - **One notification per thread, not per message.** `IncomingSmsNotifier`
   reuses the thread id as both the notification id and the `PendingIntent`
   request code, so a second message in the same conversation before the

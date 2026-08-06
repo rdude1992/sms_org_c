@@ -87,8 +87,25 @@ class SmsProvider extends ChangeNotifier {
     isDefaultSmsApp = await _platform.isDefaultSmsApp();
     notifyListeners();
     await contactService.load(_platform);
+    await _ensureCacheMatchesCurrentLogic();
     await refresh();
     _listenForIncoming();
+  }
+
+  /// Incremental sync deliberately never re-evaluates a cached category
+  /// once written (see refresh() below) — that's what makes it fast, but
+  /// it also means a cache built under old classifier logic would
+  /// otherwise be reused forever even after the logic changes. This runs
+  /// once per logic version bump (see CategorizationService.version) and
+  /// wipes the cache so the next refresh() reprocesses everything fresh.
+  /// A no-op on a brand-new install, since clearing empty tables is free.
+  Future<void> _ensureCacheMatchesCurrentLogic() async {
+    final storedVersion = await _db.getMeta('categorizer_version');
+    final currentVersion = CategorizationService.version.toString();
+    if (storedVersion == currentVersion) return;
+
+    await _db.clearAll();
+    await _db.setMeta('categorizer_version', currentVersion);
   }
 
   Future<bool> requestDefaultSmsRole() async {

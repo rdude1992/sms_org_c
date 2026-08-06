@@ -1,6 +1,15 @@
-enum TxnDirection { credit, debit, unknown }
+/// `reversal` is new (ported from getTransactionType in the source regex
+/// file): covers "reversed"/"declined"/"failed" transactions, which
+/// shouldn't count toward either credit or debit totals.
+enum TxnDirection { credit, debit, reversal, unknown }
 
 enum InstrumentType { debitCard, creditCard, bankAccount, upi, unknown }
+
+/// Ported from extractEntityType in the source regex file — a coarser
+/// classification than [InstrumentType]: is this message from a bank, a
+/// wallet provider (Paytm/PhonePe/Pluxee/FASTag/...), an investment
+/// platform, or a dedicated card-network service (Visa/Amex/...)?
+enum EntityType { bank, wallet, investment, cardService, unknown }
 
 class Transaction {
   final int smsId;
@@ -10,9 +19,11 @@ class Transaction {
   final InstrumentType instrument;
 
   /// e.g. last 4 digits of card/account, or the UPI handle if detected.
+  /// Falls back to "Pluxee Card" for cards that never surface a number.
   final String? instrumentRef;
 
-  /// Bank / issuer name if detected from the sender ID (e.g. "HDFC", "ICICI").
+  /// Bank / issuer name if detected from the sender ID (e.g. "HDFC", "ICICI")
+  /// or, failing that, from a gift-card brand mentioned in the body.
   final String? issuer;
 
   /// Merchant / payee name if the SMS format included one.
@@ -20,6 +31,25 @@ class Transaction {
 
   /// Available/remaining balance if the SMS mentioned it.
   final double? balanceAfter;
+
+  /// Bank / wallet / investment / card-service classification (see
+  /// [EntityType]) — coarser than [instrument], useful for grouping wallet
+  /// spend separately from card/bank spend in Insights.
+  final EntityType entityType;
+
+  /// Specific wallet name if [entityType] is wallet, e.g. "Fuel Wallet",
+  /// "HDFC FASTag", "Paytm Wallet".
+  final String? walletType;
+
+  /// Due date mentioned in the SMS, if any (e.g. credit card payment
+  /// reminders that also confirm a transaction).
+  final DateTime? billDueDate;
+
+  /// FASTag-specific: the wallet id/account number for toll transactions.
+  final String? fastagWalletId;
+
+  /// FASTag-specific: the vehicle number the toll was charged against.
+  final String? vehicleNumber;
 
   final String rawBody;
 
@@ -34,6 +64,11 @@ class Transaction {
     this.issuer,
     this.merchant,
     this.balanceAfter,
+    this.entityType = EntityType.unknown,
+    this.walletType,
+    this.billDueDate,
+    this.fastagWalletId,
+    this.vehicleNumber,
   });
 
   Map<String, dynamic> toJson() => {
@@ -46,6 +81,11 @@ class Transaction {
         'issuer': issuer,
         'merchant': merchant,
         'balanceAfter': balanceAfter,
+        'entityType': entityType.name,
+        'walletType': walletType,
+        'billDueDate': billDueDate?.millisecondsSinceEpoch,
+        'fastagWalletId': fastagWalletId,
+        'vehicleNumber': vehicleNumber,
         'rawBody': rawBody,
       };
 
@@ -62,6 +102,16 @@ class Transaction {
         issuer: json['issuer'] as String?,
         merchant: json['merchant'] as String?,
         balanceAfter: (json['balanceAfter'] as num?)?.toDouble(),
+        entityType: EntityType.values.firstWhere(
+          (e) => e.name == json['entityType'],
+          orElse: () => EntityType.unknown,
+        ),
+        walletType: json['walletType'] as String?,
+        billDueDate: json['billDueDate'] != null
+            ? DateTime.fromMillisecondsSinceEpoch(json['billDueDate'] as int)
+            : null,
+        fastagWalletId: json['fastagWalletId'] as String?,
+        vehicleNumber: json['vehicleNumber'] as String?,
       );
 }
 
@@ -74,6 +124,17 @@ class InvestmentEvent {
   final InvestmentKind kind;
   final String? fundOrScheme;
   final String? folioOrAccount;
+
+  /// Number of units allotted/redeemed, if the SMS stated it or it could be
+  /// derived from amount ÷ NAV.
+  final double? units;
+
+  /// Net asset value per unit at the time of this event, if stated.
+  final double? nav;
+
+  /// Asset management company / scheme provider (e.g. "Axis MF", "NPS").
+  final String? amc;
+
   final String rawBody;
 
   InvestmentEvent({
@@ -84,6 +145,9 @@ class InvestmentEvent {
     required this.rawBody,
     this.fundOrScheme,
     this.folioOrAccount,
+    this.units,
+    this.nav,
+    this.amc,
   });
 
   Map<String, dynamic> toJson() => {
@@ -93,6 +157,9 @@ class InvestmentEvent {
         'kind': kind.name,
         'fundOrScheme': fundOrScheme,
         'folioOrAccount': folioOrAccount,
+        'units': units,
+        'nav': nav,
+        'amc': amc,
         'rawBody': rawBody,
       };
 
@@ -105,5 +172,8 @@ class InvestmentEvent {
         rawBody: json['rawBody'] as String? ?? '',
         fundOrScheme: json['fundOrScheme'] as String?,
         folioOrAccount: json['folioOrAccount'] as String?,
+        units: (json['units'] as num?)?.toDouble(),
+        nav: (json['nav'] as num?)?.toDouble(),
+        amc: json['amc'] as String?,
       );
 }

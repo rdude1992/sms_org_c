@@ -1,0 +1,891 @@
+/// Ported from the project's smsParser.ts (see /mnt/project/smsParser_ts.txt
+/// in Claude's environment, or wherever you keep the source in your repo).
+/// Deliberately structured to mirror that file 1:1 — one function per
+/// extractor, same order, same names translated to camelCase Dart
+/// conventions — so future changes on the TS side can be diffed against
+/// this file function-by-function rather than having to re-derive the
+/// mapping from scratch.
+///
+/// Translation notes (JS -> Dart), in case you're porting further updates:
+/// - `.includes()` -> `.contains()`
+/// - `.match(regex)` (no global flag) -> `regex.firstMatch(str)`
+/// - `.match(regex)` (global flag) / `matchAll` -> `regex.allMatches(str)`
+/// - `match[1]` -> `match.group(1)`
+/// - JS's loose `new Date(str)` has no direct Dart equivalent (Dart's
+///   DateTime.parse is strict ISO-8601), so [extractBillDueDate] uses a
+///   small hand-written parser instead of a literal port — see
+///   [tryParseFlexibleDate].
+library sms_extractors;
+
+// ---------------------------------------------------------------------------
+// extractCardType
+// ---------------------------------------------------------------------------
+
+/// Returns 'credit' or 'debit' if the message clearly indicates a card type,
+/// null otherwise. Used to help pick between InstrumentType.creditCard and
+/// InstrumentType.debitCard when a generic "card ending XXXX" pattern alone
+/// wouldn't tell you which.
+String? extractCardTypeHint(String content) {
+  final lower = content.toLowerCase();
+
+  if (lower.contains('credit card')) return 'credit';
+  if (lower.contains('debit card')) return 'debit';
+  if (lower.contains('gift card')) return 'debit';
+
+  if (lower.contains('cardmember')) return 'credit';
+
+  if (lower.contains('credited to your card') || lower.contains('credited to card')) {
+    return 'credit';
+  }
+
+  if (lower.contains('card ending') || lower.contains('card xxxx')) {
+    if (lower.contains('payment') || lower.contains('credited') || lower.contains('outstanding')) {
+      return 'credit';
+    }
+    if (lower.contains('spent') || lower.contains('debited') || lower.contains('withdrawn')) {
+      return 'debit';
+    }
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// extractOTP
+// ---------------------------------------------------------------------------
+
+/// Extracts the actual OTP code from a message, with context awareness
+/// (prefers a code near an explicit "OTP"/"code"/"pin" keyword over a
+/// bare isolated digit run that could be a phone/account number).
+String? extractOtp(String content) {
+  final otpWithContext = RegExp(
+    r'(?:otp|code|pin|passcode|password)[\s:is-]*([A-Z0-9]{4,8})',
+    caseSensitive: false,
+  );
+  final contextMatch = otpWithContext.firstMatch(content);
+  if (contextMatch != null) {
+    final candidate = contextMatch.group(1);
+    if (candidate != null && RegExp(r'\d').hasMatch(candidate)) {
+      return candidate;
+    }
+  }
+
+  final otpRegex = RegExp(r'\b\d{4,6}\b');
+  for (final match in otpRegex.allMatches(content)) {
+    final value = match.group(0)!;
+    final beforePattern = RegExp(
+      '(?:rs\\.|rs|inr|₹|xx|\\*|ending|ac|no\\.|bal|balance)[\\s:.]*$value',
+      caseSensitive: false,
+    );
+    if (!beforePattern.hasMatch(content)) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// extractAmount
+// ---------------------------------------------------------------------------
+
+double? extractAmount(String content) {
+  final patterns = [
+    RegExp(r'(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)', caseSensitive: false),
+    RegExp(r'([\d,]+(?:\.\d{1,2})?)\s*(?:rs|rupees|inr)', caseSensitive: false),
+  ];
+
+  for (final pattern in patterns) {
+    for (final match in pattern.allMatches(content)) {
+      final group1 = match.group(1);
+      if (group1 == null) continue;
+      final amount = double.tryParse(group1.replaceAll(',', ''));
+      if (amount == null || amount <= 0 || amount >= 10000000) continue;
+
+      if (amount >= 1900 &&
+          amount <= 2100 &&
+          !content.toLowerCase().contains('rs') &&
+          !content.contains('₹')) {
+        continue; // Likely a year
+      }
+      return amount;
+    }
+  }
+
+  // Special handling for Pluxee/Sodexo which often omits the currency symbol.
+  if (RegExp(r'Pluxee|Sodexo', caseSensitive: false).hasMatch(content)) {
+    final pluxeeMatch = RegExp(r'with\s+([\d,]+(?:\.\d{1,2})?)\s+towards', caseSensitive: false)
+            .firstMatch(content) ??
+        RegExp(r'purchase\s+of\s+([\d,]+(?:\.\d{1,2})?)', caseSensitive: false).firstMatch(content);
+    final group1 = pluxeeMatch?.group(1);
+    if (group1 != null) {
+      return double.tryParse(group1.replaceAll(',', ''));
+    }
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// extractMerchant
+// ---------------------------------------------------------------------------
+
+String? extractMerchant(String content) {
+  final merchantPatterns = [
+    RegExp(r'([a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+)'), // UPI VPA
+    RegExp(
+      r"(?:paid\s+to|sent\s+to|transfer\s+to|at)\s+([A-Za-z0-9\s&.'-]{2,30}?)(?:\s+(?:via|using|through|on|by)|$|\.)",
+      caseSensitive: false,
+    ),
+    RegExp(
+      r"(?:received\s+from|credit\s+from)\s+([A-Za-z0-9\s&.'-]{2,30}?)(?:\s+(?:via|using|through|on|by)|$|\.)",
+      caseSensitive: false,
+    ),
+    RegExp(
+      r"(?:spent\s+at|used\s+at|purchase\s+at)\s+([A-Za-z0-9\s&.'-]{2,30}?)(?:\s+on|$|\.)",
+      caseSensitive: false,
+    ),
+  ];
+
+  const excludeList = [
+    'your', 'the', 'account', 'card', 'bank', 'ac', 'a/c', 'ending', 'nav', 'folio', 'units', 'rs', 'inr',
+  ];
+
+  for (final pattern in merchantPatterns) {
+    final match = pattern.firstMatch(content);
+    final raw = match?.group(1)?.trim();
+    if (raw == null || raw.isEmpty) continue;
+
+    final merchant = raw.replaceAll(RegExp(r'\s+via\s+upi', caseSensitive: false), '');
+    if (merchant.isEmpty) continue;
+
+    final merchantLower = merchant.toLowerCase();
+    if (!excludeList.any((word) => merchantLower.startsWith(word))) {
+      return merchant[0].toUpperCase() + merchant.substring(1);
+    }
+  }
+
+  const commonMerchants = [
+    'swiggy', 'zomato', 'uber', 'ola', 'amazon', 'flipkart', 'myntra', 'netflix',
+    'spotify', 'hotstar', 'jiomart', 'bigbasket', 'blinkit', 'zepto', 'bookmyshow', 'makemytrip',
+  ];
+  final contentLower = content.toLowerCase();
+  for (final m in commonMerchants) {
+    if (contentLower.contains(m)) {
+      return m[0].toUpperCase() + m.substring(1);
+    }
+  }
+
+  if (RegExp(r'Pluxee|Sodexo', caseSensitive: false).hasMatch(content)) return 'Pluxee';
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// extractAccountNumber
+// ---------------------------------------------------------------------------
+
+String? extractAccountNumber(String content) {
+  final explicitPatterns = [
+    RegExp(
+      r'(?:bank|a\/c|acct|account|card)\s*(?:no\.?|ending|xxxx?)?\s*[:\s.-]*(?:xx|x{2,4}|\*{2,4})(\d{4})',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'(?:debited from|credited to|debited\s+from|credited\s+to)\s+(?:.*?)\s+(?:xx|x{2,4}|\*{2,4})(\d{4})',
+      caseSensitive: false,
+    ),
+    RegExp(r'(?:SB|SA|CA)[-.\s]*(?:xx|x{2,4}|\*{2,4})[-\s]*(\d{4})', caseSensitive: false),
+  ];
+
+  for (final pattern in explicitPatterns) {
+    final match = pattern.firstMatch(content);
+    final digits = match?.group(1);
+    if (digits != null) return 'XX$digits';
+  }
+
+  // Remove UPI reference / ref-no patterns before the generic XX pass, so
+  // they don't get mistaken for a masked account number.
+  var safeContent = content.replaceAll(
+    RegExp(r'UPI-[a-zA-Z0-9-]+\d{4}', caseSensitive: false),
+    'UPI-REFERENCE-REMOVED',
+  );
+  safeContent = safeContent.replaceAll(
+    RegExp(r'Ref\s*no\s*\d+', caseSensitive: false),
+    'REF-REMOVED',
+  );
+
+  final genericMatch =
+      RegExp(r'(?:xx|x{3,}|\*{2,})[-\s]*(\d{4})', caseSensitive: false).firstMatch(safeContent);
+  final genericDigits = genericMatch?.group(1);
+  if (genericDigits != null) return 'XX$genericDigits';
+
+  if (RegExp(r'Pluxee|Sodexo', caseSensitive: false).hasMatch(content) &&
+      (content.contains('Card') || content.contains('card'))) {
+    return 'Pluxee Card';
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// extractBalance
+// ---------------------------------------------------------------------------
+
+double? extractBalance(String content) {
+  final balancePatterns = [
+    RegExp(
+      r'(?:avl\.?\s*bal\.?|available\s+balance|bal\.?|balance)[:;\s-]*(?:rs\.?|inr|₹)?\s*([0-9,]+(?:\.\d{1,2})?)',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'(?:wallet|fuel|meal|gift)\s+(?:wallet\s+)?balance\s+(?:is|are)\s+(?:rs\.?|inr|₹)\s*([0-9,]+(?:\.\d{1,2})?)',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'wallet\s+balance\s*[:;\s-]*(?:rs\.?|inr|₹)?\s*([0-9,]+(?:\.\d{1,2})?)',
+      caseSensitive: false,
+    ),
+  ];
+
+  for (final pattern in balancePatterns) {
+    final matches = pattern.allMatches(content).toList();
+    if (matches.isEmpty) continue;
+    final group1 = matches.last.group(1); // most recent balance mention wins
+    if (group1 != null) {
+      final amount = double.tryParse(group1.replaceAll(',', ''));
+      if (amount != null) return amount;
+    }
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// getTransactionType
+// ---------------------------------------------------------------------------
+
+enum ParsedDirection { credit, debit, reversal, unknown }
+
+ParsedDirection getTransactionType(String content) {
+  final contentLower = content.toLowerCase();
+
+  if (contentLower.contains('reversed') ||
+      contentLower.contains('declined') ||
+      contentLower.contains('failed') ||
+      contentLower.contains('trxn reversed')) {
+    return ParsedDirection.reversal;
+  }
+
+  // Investment debit, high priority: "units allotted"/"SIP processed with
+  // NAV" mean money LEFT the user's bank account even though the message
+  // says "credited" (to the fund/folio, not to the user's cash).
+  if ((contentLower.contains('allotted') || contentLower.contains('alloted')) ||
+      (contentLower.contains('sip') &&
+          contentLower.contains('processed') &&
+          contentLower.contains('nav')) ||
+      (contentLower.contains('units') && contentLower.contains('credited'))) {
+    return ParsedDirection.debit;
+  }
+
+  if (contentLower.contains('credited') ||
+      contentLower.contains('received') ||
+      contentLower.contains('deposited') ||
+      contentLower.contains('added to') ||
+      contentLower.contains('refund on') ||
+      contentLower.contains('refund processed') ||
+      contentLower.contains('redemption') ||
+      contentLower.contains('redeemed')) {
+    return ParsedDirection.credit;
+  }
+
+  // Exclude "due"/"bill" reminders that haven't actually been paid yet.
+  if (contentLower.contains('due') ||
+      contentLower.contains('bill generated') ||
+      contentLower.contains('to be paid')) {
+    if (!contentLower.contains('paid') &&
+        !contentLower.contains('debited') &&
+        !contentLower.contains('auto-debited')) {
+      return ParsedDirection.unknown;
+    }
+  }
+
+  if (contentLower.contains('debited') ||
+      contentLower.contains('deducted') ||
+      contentLower.contains('spent') ||
+      contentLower.contains('paid') ||
+      contentLower.contains('withdrawn') ||
+      contentLower.contains('purchase') ||
+      contentLower.contains('switch in') ||
+      contentLower.contains('sent to') ||
+      contentLower.contains('transfer to') ||
+      contentLower.contains('installment') ||
+      contentLower.contains('allotted')) {
+    return ParsedDirection.debit;
+  }
+
+  return ParsedDirection.unknown;
+}
+
+// ---------------------------------------------------------------------------
+// extractBankName / extractBankNameFromContent
+// ---------------------------------------------------------------------------
+
+const Map<String, String> _bankNamesBySenderKeyword = {
+  'HDFC': 'HDFC Bank',
+  'ICICI': 'ICICI Bank',
+  'SBI': 'SBI',
+  'AXIS': 'Axis Bank',
+  'KOTAK': 'Kotak Bank',
+  'PNB': 'PNB',
+  'BOB': 'Bank of Baroda',
+  'CANARA': 'Canara Bank',
+  'PAYTM': 'Paytm Bank',
+  'PHONE': 'PhonePe',
+  'GPAY': 'Google Pay',
+  'GOOG': 'Google Pay',
+  'BHIM': 'BHIM UPI',
+  'UNION': 'Union Bank',
+  'INDUS': 'IndusInd Bank',
+  'RBL': 'RBL Bank',
+  'IDFC': 'IDFC First Bank',
+  'YES': 'Yes Bank',
+  'IOB': 'Indian Overseas Bank',
+  'ZERODH': 'Zerodha',
+  'GROWW': 'Groww',
+  'INDMON': 'IndMoney',
+  'KUVERA': 'Kuvera',
+};
+
+/// Note: the source file's getSenderName() CSV-lookup indirection is a
+/// permanent stub there (removed for performance, per its own comment) —
+/// skipped here rather than ported as dead code.
+String? extractBankName(String sender) {
+  final senderUpper = sender.toUpperCase();
+  for (final entry in _bankNamesBySenderKeyword.entries) {
+    if (senderUpper.contains(entry.key)) return entry.value;
+  }
+  return null;
+}
+
+/// Fallback for gift cards etc. that come from a generic sender (e.g. a
+/// Flipkart gift card notification sent from a shortcode, not "FLPKRT").
+String? extractBankNameFromContent(String content) {
+  final match = RegExp(r'([A-Za-z]+)\s+Gift\s+Card', caseSensitive: false).firstMatch(content);
+  final brand = match?.group(1);
+  if (brand == null) return null;
+
+  const generics = ['my', 'your', 'the', 'a', 'an', 'new', 'free'];
+  if (generics.contains(brand.toLowerCase())) return null;
+
+  return brand[0].toUpperCase() + brand.substring(1);
+}
+
+// ---------------------------------------------------------------------------
+// extractEntityType
+// ---------------------------------------------------------------------------
+
+enum ParsedEntityType { bank, wallet, investment, cardService, unknown }
+
+ParsedEntityType extractEntityType(String sender, String content) {
+  final senderUpper = sender.toUpperCase();
+  final contentLower = content.toLowerCase();
+
+  const walletProviders = [
+    'PAYTM', 'PYTM', 'PHONEPE', 'PHONE-PE', 'GPAY', 'GOOGLEPAY', 'GOOG',
+    'AMAZONPAY', 'AMZNPAY', 'PLUXEE', 'SODEXO', 'MOBIKWIK', 'FREECHARGE',
+    'OLAMONEY', 'DHANI', 'AIRTEL-PAY', 'AIRTELBANK', 'JIOMONEY',
+  ];
+  for (final wallet in walletProviders) {
+    if (senderUpper.contains(wallet)) return ParsedEntityType.wallet;
+  }
+
+  if (senderUpper.contains('FASTAG') || contentLower.contains('fastag')) {
+    return ParsedEntityType.wallet;
+  }
+
+  if (contentLower.contains('wallet balance') ||
+      contentLower.contains('paytm wallet') ||
+      contentLower.contains('phonepe wallet') ||
+      contentLower.contains('meal wallet') ||
+      contentLower.contains('fuel wallet') ||
+      contentLower.contains('gift wallet') ||
+      (contentLower.contains('office wear') &&
+          (contentLower.contains('pluxee') || contentLower.contains('sodexo'))) ||
+      contentLower.contains('pluxee') ||
+      contentLower.contains('sodexo')) {
+    return ParsedEntityType.wallet;
+  }
+
+  const investmentProviders = [
+    'ZERODHA', 'ZERODH', 'GROWW', 'KUVERA', 'INDMONEY', 'INDMON',
+    'UPSTOX', 'ANGEL', 'ANGELONE', 'SHAREKHAN', 'MOTILAL', 'IIFL',
+    'ICICI-PRU', 'ICICIPRU', 'HDFC-MF', 'SBI-MF', 'AXIS-MF',
+    'ABCAMC', 'MIRAEI', 'NIPPON', 'KOTAK-MF', 'DSP-MF', 'UTI-MF',
+  ];
+  for (final investment in investmentProviders) {
+    if (senderUpper.contains(investment)) return ParsedEntityType.investment;
+  }
+
+  if ((senderUpper.contains('MF') ||
+          senderUpper.contains('AMC') ||
+          senderUpper.contains('MUTUAL') ||
+          senderUpper.contains('FUND')) &&
+      (contentLower.contains('sip') ||
+          contentLower.contains('nav') ||
+          contentLower.contains('folio') ||
+          contentLower.contains('units') ||
+          contentLower.contains('allotted') ||
+          contentLower.contains('redemption'))) {
+    return ParsedEntityType.investment;
+  }
+
+  if (contentLower.contains('nps') &&
+      (contentLower.contains('tier 1') ||
+          contentLower.contains('tier i') ||
+          contentLower.contains('tier 2') ||
+          contentLower.contains('tier ii'))) {
+    return ParsedEntityType.investment;
+  }
+
+  if (contentLower.contains('sip') &&
+      (contentLower.contains('processed') ||
+          contentLower.contains('due') ||
+          contentLower.contains('installment'))) {
+    return ParsedEntityType.investment;
+  }
+  if (contentLower.contains('folio') ||
+      (contentLower.contains('units') && contentLower.contains('nav'))) {
+    return ParsedEntityType.investment;
+  }
+
+  const cardNetworks = ['VISA', 'MASTER', 'RUPAY', 'AMEX', 'DINERS'];
+  for (final network in cardNetworks) {
+    if (senderUpper.contains(network)) return ParsedEntityType.cardService;
+  }
+
+  if (contentLower.contains('cardmember')) return ParsedEntityType.cardService;
+
+  if (contentLower.contains('credited to your card') || contentLower.contains('credited to card')) {
+    return ParsedEntityType.cardService;
+  }
+
+  if (contentLower.contains('card') &&
+      (contentLower.contains('spent') ||
+          contentLower.contains('used at') ||
+          contentLower.contains('card ending') ||
+          (contentLower.contains('payment') && contentLower.contains('card')))) {
+    if (RegExp(r'card.*(?:ending|xxxx|xx\d{4})', caseSensitive: false).hasMatch(contentLower) ||
+        contentLower.contains('outstanding')) {
+      return ParsedEntityType.cardService;
+    }
+  }
+
+  const bankKeywords = [
+    'BANK', 'HDFC', 'ICICI', 'SBI', 'AXIS', 'KOTAK', 'PNB', 'BOB',
+    'CANARA', 'UNION', 'INDUS', 'RBL', 'IDFC', 'YES', 'FEDERAL', 'KARUR', 'IOB',
+  ];
+  for (final bank in bankKeywords) {
+    if (senderUpper.contains(bank) &&
+        !senderUpper.contains('MF') &&
+        !senderUpper.contains('WALLET') &&
+        !senderUpper.contains('PAY')) {
+      return ParsedEntityType.bank;
+    }
+  }
+
+  return ParsedEntityType.unknown;
+}
+
+// ---------------------------------------------------------------------------
+// extractBillDueDate
+// ---------------------------------------------------------------------------
+
+DateTime? extractBillDueDate(String content) {
+  final dueDatePatterns = [
+    RegExp(
+      r'(?:due\s+date|payment\s+due|valid\s+until)[:\s]*(\d{1,2}[-/\s][A-Za-z]{3,}[-/\s]\d{2,4})',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'(?:due\s+date|payment\s+due|valid\s+until)[:\s]*(\d{1,2}[-/\s]\d{1,2}[-/\s]\d{2,4})',
+      caseSensitive: false,
+    ),
+  ];
+
+  for (final pattern in dueDatePatterns) {
+    final raw = pattern.firstMatch(content)?.group(1);
+    if (raw == null) continue;
+    final parsed = tryParseFlexibleDate(raw);
+    if (parsed != null) return parsed;
+  }
+  return null;
+}
+
+/// Dart's DateTime.parse only accepts ISO-8601, unlike JS's lenient
+/// `new Date(str)` which happily parses "18-Feb-25" or "05/03/2024". This
+/// is a small hand-written stand-in covering the two formats
+/// [extractBillDueDate] actually produces: "DD-MMM-YY(YY)" and
+/// "DD-MM-YYYY"/"DD/MM/YYYY" (day-first, matching Indian SMS conventions).
+DateTime? tryParseFlexibleDate(String raw) {
+  final normalized = raw.trim();
+
+  final monthNameMatch =
+      RegExp(r'^(\d{1,2})[-/\s]([A-Za-z]{3,})[-/\s](\d{2,4})$').firstMatch(normalized);
+  if (monthNameMatch != null) {
+    final day = int.tryParse(monthNameMatch.group(1)!);
+    final month = _monthFromName(monthNameMatch.group(2)!);
+    final year = _normalizeYear(monthNameMatch.group(3)!);
+    if (day != null && month != null) {
+      return _safeDate(year, month, day);
+    }
+  }
+
+  final numericMatch = RegExp(r'^(\d{1,2})[-/\s](\d{1,2})[-/\s](\d{2,4})$').firstMatch(normalized);
+  if (numericMatch != null) {
+    final day = int.tryParse(numericMatch.group(1)!);
+    final month = int.tryParse(numericMatch.group(2)!);
+    final year = _normalizeYear(numericMatch.group(3)!);
+    if (day != null && month != null && month >= 1 && month <= 12) {
+      return _safeDate(year, month, day);
+    }
+  }
+
+  return null;
+}
+
+DateTime? _safeDate(int year, int month, int day) {
+  try {
+    final date = DateTime(year, month, day);
+    // DateTime silently rolls over invalid days (e.g. Feb 31 -> Mar 3) rather
+    // than throwing, so double check it round-trips to what was asked for.
+    if (date.year != year || date.month != month || date.day != day) return null;
+    return date;
+  } catch (_) {
+    return null;
+  }
+}
+
+int _normalizeYear(String raw) {
+  final year = int.parse(raw);
+  return year < 100 ? 2000 + year : year;
+}
+
+const Map<String, int> _monthNames = {
+  'jan': 1, 'january': 1,
+  'feb': 2, 'february': 2,
+  'mar': 3, 'march': 3,
+  'apr': 4, 'april': 4,
+  'may': 5,
+  'jun': 6, 'june': 6,
+  'jul': 7, 'july': 7,
+  'aug': 8, 'august': 8,
+  'sep': 9, 'sept': 9, 'september': 9,
+  'oct': 10, 'october': 10,
+  'nov': 11, 'november': 11,
+  'dec': 12, 'december': 12,
+};
+
+int? _monthFromName(String name) {
+  final lower = name.toLowerCase();
+  if (_monthNames.containsKey(lower)) return _monthNames[lower];
+  final abbrev = lower.length >= 3 ? lower.substring(0, 3) : lower;
+  return _monthNames[abbrev];
+}
+
+// ---------------------------------------------------------------------------
+// extractWalletType
+// ---------------------------------------------------------------------------
+
+String? extractWalletType(String content, String sender) {
+  final senderUpper = sender.toUpperCase();
+  final contentLower = content.toLowerCase();
+
+  final isFastag = senderUpper.contains('FASTAG') ||
+      contentLower.contains('fastag') ||
+      (contentLower.contains('toll') && contentLower.contains('paid'));
+
+  if (isFastag) {
+    final senderBankMatch =
+        RegExp(r'HDFC|ICICI|PAYTM|AXIS|SBI|KOTAK', caseSensitive: false).firstMatch(sender);
+    if (senderBankMatch != null) return '${senderBankMatch.group(0)} FASTag';
+
+    final fastagMatch =
+        RegExp(r'(HDFC|ICICI|Paytm|Axis|SBI|Kotak).*(?:FASTag|Toll)', caseSensitive: false)
+            .firstMatch(content);
+    if (fastagMatch != null) return '${fastagMatch.group(1)} FASTag';
+
+    return 'FASTag Wallet';
+  }
+
+  if (senderUpper.contains('PAYTM') && !senderUpper.contains('BANK')) return 'Paytm Wallet';
+  if (senderUpper.contains('PHONEPE') || senderUpper.contains('PHONE-PE')) return 'PhonePe Wallet';
+  if (senderUpper.contains('GPAY') || senderUpper.contains('GOOGLEPAY')) return 'Google Pay';
+  if (senderUpper.contains('AMAZONPAY') || senderUpper.contains('AMZNPAY')) return 'Amazon Pay';
+  if (senderUpper.contains('MOBIKWIK')) return 'MobiKwik Wallet';
+  if (senderUpper.contains('FREECHARGE')) return 'Freecharge Wallet';
+  if (senderUpper.contains('OLAMONEY')) return 'Ola Money';
+  if (senderUpper.contains('DHANI')) return 'Dhani Wallet';
+
+  final pluxeeSodexo = RegExp(r'Pluxee|Sodexo', caseSensitive: false);
+  if (pluxeeSodexo.hasMatch(content) || pluxeeSodexo.hasMatch(sender)) {
+    if (RegExp(r'reimbursement\s+wallet', caseSensitive: false).hasMatch(content)) {
+      return 'Reimbursement Wallet';
+    }
+
+    final claimMatch =
+        RegExp(r'against\s+your\s+([A-Za-z\s&]+?)\s+reimbursement\s+claim', caseSensitive: false)
+            .firstMatch(content);
+    if (claimMatch?.group(1) != null) return '${claimMatch!.group(1)!.trim()} Wallet';
+
+    final towardsMatch =
+        RegExp(r'towards\s+([A-Za-z\s&]+?)(?:\s+on|\s+Wallet|\.|$)', caseSensitive: false)
+            .firstMatch(content);
+    if (towardsMatch?.group(1) != null) {
+      final matchText = towardsMatch!.group(1)!.trim();
+      if (matchText.toLowerCase() == 'online convenience fee') return 'Pluxee Wallet';
+      return '$matchText Wallet';
+    }
+
+    if (contentLower.contains('fuel')) return 'Fuel Wallet';
+    if (contentLower.contains('meal') || contentLower.contains('food')) return 'Meal Wallet';
+    if (contentLower.contains('office wear') || contentLower.contains('apparel')) {
+      return 'Office Wear Wallet';
+    }
+    if (contentLower.contains('telecom') ||
+        contentLower.contains('telecommunication') ||
+        contentLower.contains('data')) {
+      return 'Telecom & Data Wallet';
+    }
+
+    return 'Pluxee Wallet';
+  }
+
+  final walletPatterns = [
+    RegExp(r'fuel\s+wallet', caseSensitive: false),
+    RegExp(r'meal\s+wallet', caseSensitive: false),
+    RegExp(r'food\s+wallet', caseSensitive: false),
+    RegExp(r'office\s+wear', caseSensitive: false),
+    RegExp(r'gift\s+wallet', caseSensitive: false),
+    RegExp(r'paytm\s+wallet', caseSensitive: false),
+    RegExp(r'amazon\s+pay(?:\s+balance)?', caseSensitive: false),
+    RegExp(r'ola\s+money', caseSensitive: false),
+    RegExp(r'phonepe\s+wallet', caseSensitive: false),
+    RegExp(r'mobikwik', caseSensitive: false),
+    RegExp(r'freecharge', caseSensitive: false),
+    RegExp(r'dhani', caseSensitive: false),
+    RegExp(r'(?:un)?billed\s+wallet', caseSensitive: false),
+    RegExp(r'wallet\s+balance', caseSensitive: false),
+    RegExp(r'(?:added|sent|paid)\s+to\s+(?:your\s+)?(.+?)\s+wallet', caseSensitive: false),
+  ];
+  for (final pattern in walletPatterns) {
+    final match = pattern.firstMatch(content);
+    if (match != null) return _capitalizeWords(match.group(0)!);
+  }
+
+  final genericMatch = RegExp(r'([a-zA-Z]{2,})\s+wallet', caseSensitive: false).firstMatch(content);
+  if (genericMatch?.group(1) != null) {
+    final name = genericMatch!.group(1)!.trim();
+    const excludeWords = [
+      'your', 'my', 'the', 'reach', 'to', 'from', 'in', 'on', 'total', 'updated', 'bal', 'wallet',
+    ];
+    if (!excludeWords.contains(name.toLowerCase())) {
+      return '${name[0].toUpperCase()}${name.substring(1)} Wallet';
+    }
+  }
+
+  return null;
+}
+
+String _capitalizeWords(String input) =>
+    input.replaceAllMapped(RegExp(r'\b\w'), (m) => m.group(0)!.toUpperCase());
+
+// ---------------------------------------------------------------------------
+// extractInvestmentDetails
+// ---------------------------------------------------------------------------
+
+class ExtractedInvestmentDetails {
+  String? investmentName;
+  double? units;
+  double? nav;
+  String? folio;
+  String? amc;
+}
+
+ExtractedInvestmentDetails extractInvestmentDetails(String content, String sender) {
+  final details = ExtractedInvestmentDetails();
+
+  final folioMatch =
+      RegExp(r'(?:folio|fol)\s*(?:no\.?|number|id)?\s*[:\-\/]?\s*([0-9A-Z\/]+)', caseSensitive: false)
+          .firstMatch(content);
+  if (folioMatch?.group(1) != null) {
+    details.folio = folioMatch!.group(1);
+  } else {
+    final pranMatch = RegExp(r'PRAN\s*[:\-]?\s*([X\d]+)', caseSensitive: false).firstMatch(content);
+    if (pranMatch?.group(1) != null) details.folio = pranMatch!.group(1);
+  }
+
+  final navMatch =
+      RegExp(r'NAV\s*(?:of|is)?\s*[:\-]?\s*(?:Rs\.?)?\s*([0-9,]+(?:\.\d+)?)', caseSensitive: false)
+          .firstMatch(content);
+  if (navMatch?.group(1) != null) {
+    details.nav = double.tryParse(navMatch!.group(1)!.replaceAll(',', ''));
+  }
+
+  if (content.contains('PRAN') || RegExp(r'NPS', caseSensitive: false).hasMatch(sender)) {
+    details.investmentName ??= 'NPS Scheme';
+    details.amc = 'NPS';
+  }
+
+  final unitsMatch = RegExp(r'(\d+(?:\.\d+)?)\s*units', caseSensitive: false).firstMatch(content) ??
+      RegExp(r'units\s*[:\-]?\s*(\d+(?:\.\d+)?)', caseSensitive: false).firstMatch(content);
+  if (unitsMatch?.group(1) != null) {
+    details.units = double.tryParse(unitsMatch!.group(1)!.replaceAll(',', ''));
+  }
+
+  final contentLower = content.toLowerCase();
+  if (contentLower.contains('nps') && (contentLower.contains('tier 1') || contentLower.contains('tier i'))) {
+    details.investmentName = 'NPS Tier 1';
+    details.amc = 'NPS';
+  } else if (contentLower.contains('nps') &&
+      (contentLower.contains('tier 2') || contentLower.contains('tier ii'))) {
+    details.investmentName = 'NPS Tier 2';
+    details.amc = 'NPS';
+  }
+
+  final fundPatterns = [
+    RegExp(
+      r'in\s+(?:your\s+)?Folio[\s\-]+[0-9A-Z\/]+\s+under\s+([A-Za-z0-9\s\-_&()]+) (?:for|with)',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'in\s+(?:your\s+)?Folio\s+[0-9A-Z\/]+\s+in\s+([A-Za-z0-9\s\-_&()]+?)(?:\s+(?:has been|is|processed|for|units)|$)',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'towards\s+(?:your\s+)?(?:SIP|investment)\s+in\s+([A-Za-z0-9\s\-_&()]+?)(?:\s+(?:has been|is|processed)|,|\s+dated|$)',
+      caseSensitive: false,
+    ),
+    RegExp(r'in\s+([A-Za-z0-9\s\-_&()]+?)\s+in\s+folio', caseSensitive: false),
+    RegExp(
+      r'(?:SIP|purchase|investment|alloted|allotted|installment|units|redemption|switch)\s+(?:[\w\d,\.\-]+\s+){0,6}in\s+(?:scheme\s+)?([A-Za-z0-9\s\-_&()]+?)(?:\s+(?:has been|is|processed|allotted|credited|successfully|via|under|against)|,|\s+dated|$)',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'in\s+(?:scheme\s+)?([A-Za-z0-9\s\-_&()]+(?:Fund|Plan|Growth|Equity|ETF)[A-Za-z0-9\s\-_&()]*?)(?:\s+(?:has|subject|for|with|under|against)|$)',
+      caseSensitive: false,
+    ),
+  ];
+
+  for (final pattern in fundPatterns) {
+    final match = pattern.firstMatch(content);
+    final rawName = match?.group(1);
+    if (rawName == null) continue;
+
+    var name = rawName.trim().replaceFirst(RegExp(r'^(your|the)\s+', caseSensitive: false), '');
+    const stopWords = [
+      ' has ', ' is ', ' processed', ' allotted', ' subject', ' for ', ' successfully', ' with ',
+      ' under ', ' against ',
+    ];
+    for (final stop in stopWords) {
+      final idx = name.toLowerCase().indexOf(stop);
+      if (idx > 0) name = name.substring(0, idx);
+    }
+
+    if (name.length > 5 && name.length < 80) {
+      if (RegExp(r'^Folio', caseSensitive: false).hasMatch(name) ||
+          RegExp(r'^NAV', caseSensitive: false).hasMatch(name)) {
+        continue; // extraction error — try the next pattern
+      }
+      details.investmentName = name.trim();
+      break;
+    }
+  }
+
+  final amcMatch =
+      RegExp(r'(?:Regards|From|Thanks)?[\s,\.\-]*([A-Za-z\s]+MF|Mututal\s+Fund)[^a-z]*$',
+              caseSensitive: false)
+          .firstMatch(content);
+  if (amcMatch?.group(1) != null) {
+    details.amc = amcMatch!.group(1)!.trim();
+  } else if (RegExp(r'Axis', caseSensitive: false).hasMatch(sender)) {
+    details.amc = 'Axis MF';
+  } else if (RegExp(r'SBI', caseSensitive: false).hasMatch(sender)) {
+    details.amc = 'SBI MF';
+  } else if (RegExp(r'ICICI', caseSensitive: false).hasMatch(sender)) {
+    details.amc = 'ICICI Pru MF';
+  } else if (RegExp(r'HDFC', caseSensitive: false).hasMatch(sender)) {
+    details.amc = 'HDFC MF';
+  } else if (RegExp(r'Mirae', caseSensitive: false).hasMatch(sender)) {
+    details.amc = 'Mirae Asset MF';
+  } else if (RegExp(r'Kotak', caseSensitive: false).hasMatch(sender)) {
+    details.amc = 'Kotak MF';
+  } else if (RegExp(r'Nippon', caseSensitive: false).hasMatch(sender)) {
+    details.amc = 'Nippon India MF';
+  } else if (RegExp(r'Dsp', caseSensitive: false).hasMatch(sender)) {
+    details.amc = 'DSP MF';
+  } else if (RegExp(r'Uti', caseSensitive: false).hasMatch(sender)) {
+    details.amc = 'UTI MF';
+  }
+
+  // Fallback: derive units from amount ÷ NAV if units weren't stated directly.
+  if (details.units == null && details.nav != null && details.nav! > 0) {
+    final amountMatch =
+        RegExp(r'(?:Rs\.?|INR)\s*([\d,]+(?:\.\d+)?)', caseSensitive: false).firstMatch(content);
+    final amountRaw = amountMatch?.group(1);
+    if (amountRaw != null) {
+      final amount = double.tryParse(amountRaw.replaceAll(',', ''));
+      if (amount != null && amount > 0) {
+        details.units = double.parse((amount / details.nav!).toStringAsFixed(4));
+      }
+    }
+  }
+
+  return details;
+}
+
+// ---------------------------------------------------------------------------
+// extractFastagWalletId
+// ---------------------------------------------------------------------------
+
+String? extractFastagWalletId(String content) {
+  final lower = content.toLowerCase();
+  if (!lower.contains('fastag') && !lower.contains('toll')) return null;
+
+  final patterns = [
+    RegExp(
+      r'(?:fastag\s*(?:wallet|account|id)?|wallet\s*id)[\s:.-]*(?:xx|x{2,4}|\*{2,4})(\d{4,12})\b',
+      caseSensitive: false,
+    ),
+    RegExp(r'(?:fastag\s*id|wallet\s*id)[\s:.-]*([a-zA-Z0-9]{4,12})\b', caseSensitive: false),
+    RegExp(r'(?:netc\s*fastag|fastag\s*account)[\s:.-]*(\d{10,16})\b', caseSensitive: false),
+  ];
+
+  for (final pattern in patterns) {
+    final value = pattern.firstMatch(content)?.group(1);
+    if (value == null) continue;
+    if (RegExp(r'^\d{4}$').hasMatch(value)) return 'XX$value';
+    return value.toUpperCase();
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// extractVehicleNumber
+// ---------------------------------------------------------------------------
+
+const _vehiclePattern = r'([A-Z]{2}[-\s]?[A-Z0-9]{1,2}[-\s]?[A-Z]{0,3}[-\s]?[0-9]{4})\b';
+
+String? extractVehicleNumber(String content) {
+  final patterns = [
+    RegExp('(?:veh|vehicle|vrn|reg\\s*no|for)[^\\w]*$_vehiclePattern', caseSensitive: false),
+    RegExp('(?:fastag|toll|to).{0,40}\\b$_vehiclePattern', caseSensitive: false),
+    RegExp('\\b$_vehiclePattern.{0,40}(?:fastag|toll)', caseSensitive: false),
+  ];
+
+  for (final pattern in patterns) {
+    final match = pattern.firstMatch(content)?.group(1);
+    if (match != null) return match.replaceAll(RegExp(r'[-\s]'), '').toUpperCase();
+  }
+  return null;
+}

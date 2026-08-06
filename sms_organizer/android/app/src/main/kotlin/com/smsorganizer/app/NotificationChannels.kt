@@ -20,6 +20,7 @@ object NotificationChannels {
         ChannelSpec("promotional", "Promotions", NotificationManagerCompat.IMPORTANCE_DEFAULT),
         ChannelSpec("transactional", "Transactions", NotificationManagerCompat.IMPORTANCE_DEFAULT),
         ChannelSpec("otp", "OTP", NotificationManagerCompat.IMPORTANCE_HIGH),
+        ChannelSpec("updates", "Updates", NotificationManagerCompat.IMPORTANCE_DEFAULT),
     )
 
     @Volatile
