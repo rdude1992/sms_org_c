@@ -25,6 +25,12 @@ class InstrumentSummary {
     this.walletType,
   });
 
+  /// Matches [Transaction.instrumentGroupKey] for the transactions that fed
+  /// this summary — lets drilldowns filter the full transaction list back
+  /// down to just the ones behind this row.
+  String get key =>
+      walletType != null ? 'wallet|$walletType' : '${type.name}|${issuer ?? ''}|${ref ?? ''}';
+
   String get displayName {
     // A specific wallet name ("Fuel Wallet", "HDFC FASTag") is more useful
     // than a generic instrument label, so prefer it when we have one.
@@ -107,11 +113,8 @@ class InsightsService {
         totalDebit += t.amount;
       }
 
-      final key = t.walletType != null
-          ? 'wallet|${t.walletType}'
-          : '${t.instrument.name}|${t.issuer ?? ''}|${t.instrumentRef ?? ''}';
       final summary = instrumentMap.putIfAbsent(
-        key,
+        t.instrumentGroupKey,
         () => InstrumentSummary(
           type: t.instrument,
           entityType: t.entityType,
@@ -140,9 +143,11 @@ class InsightsService {
 
     double invested = 0;
     double redeemed = 0;
+    int investmentEvents = 0;
     for (final inv in investments) {
       if (from != null && inv.date.isBefore(from)) continue;
       if (to != null && inv.date.isAfter(to)) continue;
+      investmentEvents += 1;
       if (inv.kind == InvestmentKind.mutualFundRedemption) {
         redeemed += inv.amount;
       } else {
@@ -158,7 +163,7 @@ class InsightsService {
       monthly: monthlyList,
       totalInvested: invested,
       totalRedeemed: redeemed,
-      investmentEventCount: investments.length,
+      investmentEventCount: investmentEvents,
     );
   }
 }

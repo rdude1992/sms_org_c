@@ -18,6 +18,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _tabIndex = 0;
+  final _pageController = PageController();
   StreamSubscription<int>? _threadTapSub;
 
   final _tabs = const [
@@ -71,13 +72,31 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _threadTapSub?.cancel();
+    _pageController.dispose();
     super.dispose();
+  }
+
+  void _goToTab(int index) {
+    setState(() => _tabIndex = index);
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _tabIndex, children: _tabs),
+      // Swipe left/right to switch tabs, same as the drilldown tabs — each
+      // page keeps its state alive (provider-backed, but InsightsScreen's
+      // local filter selection lives in widget state) via _KeepAlivePage so
+      // swiping away and back doesn't reset it.
+      body: PageView(
+        controller: _pageController,
+        onPageChanged: (i) => setState(() => _tabIndex = i),
+        children: [for (final tab in _tabs) _KeepAlivePage(child: tab)],
+      ),
       floatingActionButton: _tabIndex <= 1
           ? FloatingActionButton(
               onPressed: () => Navigator.push(
@@ -89,7 +108,7 @@ class _HomeScreenState extends State<HomeScreen> {
           : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
-        onDestinationSelected: (i) => setState(() => _tabIndex = i),
+        onDestinationSelected: _goToTab,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: 'Chats'),
           NavigationDestination(icon: Icon(Icons.list_alt_outlined), label: 'All'),
@@ -98,5 +117,28 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
+  }
+}
+
+/// Keeps a PageView child mounted (and its state, if it has any — e.g.
+/// InsightsScreen's date-range filter) after it scrolls off-screen, instead
+/// of PageView's default of disposing pages that aren't the current or
+/// adjacent one.
+class _KeepAlivePage extends StatefulWidget {
+  final Widget child;
+  const _KeepAlivePage({required this.child});
+
+  @override
+  State<_KeepAlivePage> createState() => _KeepAlivePageState();
+}
+
+class _KeepAlivePageState extends State<_KeepAlivePage> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }

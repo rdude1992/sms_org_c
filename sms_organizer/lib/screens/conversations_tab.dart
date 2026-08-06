@@ -58,7 +58,7 @@ class ConversationsTab extends StatelessWidget {
       onRefresh: provider.refresh,
       child: ListView.separated(
         itemCount: conversations.length,
-        separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
+        separatorBuilder: (_, __) => const Divider(height: 1, indent: 78),
         itemBuilder: (context, index) {
           final conversation = conversations[index];
           final selected = provider.selectedIds.contains(conversation.latest.id);
