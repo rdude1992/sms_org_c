@@ -75,9 +75,25 @@ class Transaction {
   /// a specific wallet name if there is one, else instrument+issuer+ref.
   /// Shared with [InsightsService] and instrument-drilldown filtering so the
   /// two stay in lockstep.
-  String get instrumentGroupKey => walletType != null
-      ? 'wallet|$walletType'
-      : '${instrument.name}|${issuer ?? ''}|${instrumentRef ?? ''}';
+  ///
+  /// A debit card is just the physical instrument tied to its linked
+  /// savings account, so a debit-card SMS and a bank-account SMS from the
+  /// same issuer that surface the same last-4 [instrumentRef] almost
+  /// certainly refer to the same underlying money — group them together
+  /// rather than splitting "HDFC debit card ••1234" from "HDFC account
+  /// ••1234" into two rows. Only merge when a ref was actually detected;
+  /// two ref-less entries can't be confidently linked, so they fall back
+  /// to being split by instrument type as before. Credit cards are a
+  /// separate credit facility, not a linked account, so they never merge
+  /// into this bucket even if a last-4 happens to coincide.
+  String get instrumentGroupKey {
+    if (walletType != null) return 'wallet|$walletType';
+    if ((instrument == InstrumentType.debitCard || instrument == InstrumentType.bankAccount) &&
+        instrumentRef != null) {
+      return 'account|${issuer ?? ''}|$instrumentRef';
+    }
+    return '${instrument.name}|${issuer ?? ''}|${instrumentRef ?? ''}';
+  }
 
   Map<String, dynamic> toJson() => {
         'smsId': smsId,
@@ -176,6 +192,14 @@ class InvestmentEvent {
     this.nav,
     this.amc,
   });
+
+  /// Groups investment events by AMC/broker (e.g. "Axis MF", "Zerodha") for
+  /// the Investments drilldown's "by AMC / merchant" view — falls back to
+  /// the fund/scheme name, then a generic bucket, so an event with neither
+  /// detected still lands somewhere instead of being dropped from grouping.
+  String get providerGroupKey => amc ?? fundOrScheme ?? 'Other';
+
+  String get providerDisplayName => amc ?? fundOrScheme ?? 'Other';
 
   Map<String, dynamic> toJson() => {
         'smsId': smsId,

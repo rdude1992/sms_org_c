@@ -60,6 +60,13 @@ class TransactionParserService {
 
     final details = extractors.extractInvestmentDetails(body, sender);
 
+    // extractInvestmentDetails only recognises a handful of mutual-fund
+    // sender keywords; for stock trades (Zerodha/Groww/IndMoney/Kuvera)
+    // the broker only shows up via the generic sender-name lookup, so fall
+    // back to that rather than leaving `amc` null and losing the "group by
+    // AMC/merchant" bucket for every stock trade.
+    final amc = details.amc ?? extractors.extractBankName(sender);
+
     return InvestmentEvent(
       smsId: message.id,
       date: message.date,
@@ -69,7 +76,7 @@ class TransactionParserService {
       folioOrAccount: details.folio,
       units: details.units,
       nav: details.nav,
-      amc: details.amc,
+      amc: amc,
       rawBody: body,
     );
   }
