@@ -1,36 +1,31 @@
-import '../models/category.dart';
 import '../models/sms_message.dart';
 import '../models/transaction.dart';
-import '../utils/regex_patterns.dart';
+import '../utils/sms_extractors.dart' as extractors;
 
 class TransactionParserService {
   /// Only call this on messages already tagged [SmsCategory.transactional].
   Transaction? parseTransaction(SmsMessage message) {
     final body = message.body;
+    final sender = message.address;
 
-    final amountMatch = RegexPatterns.amount.firstMatch(body);
-    if (amountMatch == null) return null;
-    final amount = _parseAmount(amountMatch.group(1)!);
+    final amount = extractors.extractAmount(body);
     if (amount == null) return null;
-
-    final direction = _direction(body);
-    final instrument = _instrument(body);
-    final ref = RegexPatterns.lastFourDigits.firstMatch(body)?.group(1);
-    final issuer = _detectIssuer(body, message.address);
-    final balanceMatch = RegexPatterns.balance.firstMatch(body);
-    final balance = balanceMatch != null ? _parseAmount(balanceMatch.group(1)!) : null;
-    final merchant = _detectMerchant(body);
 
     return Transaction(
       smsId: message.id,
       date: message.date,
       amount: amount,
-      direction: direction,
-      instrument: instrument,
-      instrumentRef: ref,
-      issuer: issuer,
-      merchant: merchant,
-      balanceAfter: balance,
+      direction: _toTxnDirection(extractors.getTransactionType(body)),
+      instrument: _instrumentType(body),
+      instrumentRef: extractors.extractAccountNumber(body),
+      issuer: extractors.extractBankName(sender) ?? extractors.extractBankNameFromContent(body),
+      merchant: extractors.extractMerchant(body),
+      balanceAfter: extractors.extractBalance(body),
+      entityType: _toEntityType(extractors.extractEntityType(sender, body)),
+      walletType: extractors.extractWalletType(body, sender),
+      billDueDate: extractors.extractBillDueDate(body),
+      fastagWalletId: extractors.extractFastagWalletId(body),
+      vehicleNumber: extractors.extractVehicleNumber(body),
       rawBody: body,
     );
   }
@@ -39,81 +34,91 @@ class TransactionParserService {
   /// (investment SMS reliably also contain amount + account-style language).
   InvestmentEvent? parseInvestment(SmsMessage message) {
     final body = message.body;
-    final isMf = RegexPatterns.mutualFundSip.hasMatch(body) ||
-        RegexPatterns.mutualFundGeneral.hasMatch(body);
-    final isStock = RegexPatterns.stockTrade.hasMatch(body);
+    final sender = message.address;
+
+    final isMf = RegExp(r'\bsip\b', caseSensitive: false).hasMatch(body) ||
+        RegExp(r'\b(mutual fund|mf|folio|nav of|units allotted|scheme)\b', caseSensitive: false)
+            .hasMatch(body);
+    final isStock = RegExp(r'\b(shares? (?:bought|sold)|order executed|contract note|demat)\b',
+            caseSensitive: false)
+        .hasMatch(body);
     if (!isMf && !isStock) return null;
 
-    final amountMatch = RegexPatterns.amount.firstMatch(body);
-    if (amountMatch == null) return null;
-    final amount = _parseAmount(amountMatch.group(1)!);
+    final amount = extractors.extractAmount(body);
     if (amount == null) return null;
 
     InvestmentKind kind;
-    if (RegexPatterns.mutualFundRedemption.hasMatch(body)) {
+    if (RegExp(r'\b(redeemed|redemption)\b', caseSensitive: false).hasMatch(body)) {
       kind = InvestmentKind.mutualFundRedemption;
-    } else if (RegexPatterns.mutualFundSip.hasMatch(body)) {
+    } else if (RegExp(r'\bsip\b', caseSensitive: false).hasMatch(body)) {
       kind = InvestmentKind.mutualFundSip;
     } else if (isMf) {
       kind = InvestmentKind.mutualFundPurchase;
-    } else if (isStock) {
-      kind = InvestmentKind.stockTrade;
     } else {
-      kind = InvestmentKind.other;
+      kind = InvestmentKind.stockTrade;
     }
 
-    final folio = RegexPatterns.folio.firstMatch(body)?.group(1);
+    final details = extractors.extractInvestmentDetails(body, sender);
 
     return InvestmentEvent(
       smsId: message.id,
       date: message.date,
       amount: amount,
       kind: kind,
-      folioOrAccount: folio,
+      fundOrScheme: details.investmentName,
+      folioOrAccount: details.folio,
+      units: details.units,
+      nav: details.nav,
+      amc: details.amc,
       rawBody: body,
     );
   }
 
-  double? _parseAmount(String raw) {
-    final cleaned = raw.replaceAll(',', '');
-    return double.tryParse(cleaned);
-  }
+  /// UPI first (VPA-style address or explicit "upi"/"vpa" mention), then
+  /// [extractCardTypeHint] to pick credit vs debit card, then a generic
+  /// bank-account mention, else unknown.
+  InstrumentType _instrumentType(String content) {
+    if (RegExp(r'\b(upi|vpa)\b', caseSensitive: false).hasMatch(content) ||
+        RegExp(r'[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+').hasMatch(content)) {
+      return InstrumentType.upi;
+    }
 
-  TxnDirection _direction(String body) {
-    final debit = RegexPatterns.debitKeywords.hasMatch(body);
-    final credit = RegexPatterns.creditKeywords.hasMatch(body);
-    if (debit && !credit) return TxnDirection.debit;
-    if (credit && !debit) return TxnDirection.credit;
-    // Both or neither matched — fall back to whichever keyword appears first.
-    final debitIdx = RegexPatterns.debitKeywords.firstMatch(body)?.start ?? -1;
-    final creditIdx = RegexPatterns.creditKeywords.firstMatch(body)?.start ?? -1;
-    if (debitIdx == -1 && creditIdx == -1) return TxnDirection.unknown;
-    if (debitIdx == -1) return TxnDirection.credit;
-    if (creditIdx == -1) return TxnDirection.debit;
-    return debitIdx < creditIdx ? TxnDirection.debit : TxnDirection.credit;
-  }
+    final cardHint = extractors.extractCardTypeHint(content);
+    if (cardHint == 'credit') return InstrumentType.creditCard;
+    if (cardHint == 'debit') return InstrumentType.debitCard;
 
-  InstrumentType _instrument(String body) {
-    if (RegexPatterns.creditCard.hasMatch(body)) return InstrumentType.creditCard;
-    if (RegexPatterns.debitCard.hasMatch(body)) return InstrumentType.debitCard;
-    if (RegexPatterns.upi.hasMatch(body)) return InstrumentType.upi;
-    if (RegexPatterns.bankAccount.hasMatch(body)) return InstrumentType.bankAccount;
+    if (RegExp(r'\b(a\/c|acc(?:ount)? no|account)\b', caseSensitive: false).hasMatch(content)) {
+      return InstrumentType.bankAccount;
+    }
+
     return InstrumentType.unknown;
   }
 
-  String? _detectIssuer(String body, String sender) {
-    final upperBody = body.toUpperCase();
-    final upperSender = sender.toUpperCase();
-    for (final issuer in RegexPatterns.knownIssuers) {
-      if (upperSender.contains(issuer) || upperBody.contains(issuer)) {
-        return issuer;
-      }
+  TxnDirection _toTxnDirection(extractors.ParsedDirection direction) {
+    switch (direction) {
+      case extractors.ParsedDirection.credit:
+        return TxnDirection.credit;
+      case extractors.ParsedDirection.debit:
+        return TxnDirection.debit;
+      case extractors.ParsedDirection.reversal:
+        return TxnDirection.reversal;
+      case extractors.ParsedDirection.unknown:
+        return TxnDirection.unknown;
     }
-    return null;
   }
 
-  String? _detectMerchant(String body) {
-    final match = RegexPatterns.merchant.firstMatch(body);
-    return match?.group(1)?.trim();
+  EntityType _toEntityType(extractors.ParsedEntityType entityType) {
+    switch (entityType) {
+      case extractors.ParsedEntityType.bank:
+        return EntityType.bank;
+      case extractors.ParsedEntityType.wallet:
+        return EntityType.wallet;
+      case extractors.ParsedEntityType.investment:
+        return EntityType.investment;
+      case extractors.ParsedEntityType.cardService:
+        return EntityType.cardService;
+      case extractors.ParsedEntityType.unknown:
+        return EntityType.unknown;
+    }
   }
 }

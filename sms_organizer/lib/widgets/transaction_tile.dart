@@ -9,28 +9,35 @@ class TransactionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isCredit = transaction.direction == TxnDirection.credit;
-    final color = isCredit ? const Color(0xFF10B981) : const Color(0xFFEF4444);
-    final sign = isCredit ? '+' : '-';
+    final direction = transaction.direction;
+    final isCredit = direction == TxnDirection.credit;
+    final isReversal = direction == TxnDirection.reversal;
+
+    final color = isReversal
+        ? const Color(0xFF9CA3AF) // neutral grey — nets to no real effect
+        : (isCredit ? const Color(0xFF10B981) : const Color(0xFFEF4444));
+    final sign = isReversal ? '' : (isCredit ? '+' : '-');
+    final icon = isReversal
+        ? Icons.replay
+        : (isCredit ? Icons.arrow_downward : Icons.arrow_upward);
 
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: color.withOpacity(0.12),
-        child: Icon(
-          isCredit ? Icons.arrow_downward : Icons.arrow_upward,
-          color: color,
-          size: 18,
-        ),
+        child: Icon(icon, color: color, size: 18),
       ),
       title: Text(
-        transaction.merchant ?? transaction.issuer ?? _instrumentLabel(transaction.instrument),
+        transaction.merchant ??
+            transaction.walletType ??
+            transaction.issuer ??
+            _instrumentLabel(transaction.instrument),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
       subtitle: Text(
         [
-          _instrumentLabel(transaction.instrument),
-          if (transaction.instrumentRef != null) '•• ${transaction.instrumentRef}',
+          if (isReversal) 'Reversed' else _instrumentLabel(transaction.instrument),
+          if (transaction.instrumentRef != null) _formatRef(transaction.instrumentRef!),
           Formatters.relativeOrTime(transaction.date),
         ].join('  '),
         style: const TextStyle(fontSize: 12),
@@ -40,6 +47,13 @@ class TransactionTile extends StatelessWidget {
         style: TextStyle(color: color, fontWeight: FontWeight.bold),
       ),
     );
+  }
+
+  /// "XX1234" -> "•• 1234"; anything else (e.g. "Pluxee Card") passes
+  /// through as-is.
+  String _formatRef(String ref) {
+    if (RegExp(r'^XX\d+$').hasMatch(ref)) return '•• ${ref.substring(2)}';
+    return ref;
   }
 
   String _instrumentLabel(InstrumentType type) {

@@ -30,7 +30,7 @@ object IncomingSmsNotifier {
         if (address.isNullOrEmpty() || body.isNullOrEmpty()) return
         if (!hasNotificationPermission(context)) return
 
-        val category = Categorizer.categorize(body)
+        val category = Categorizer.categorize(address, body)
         val muted = NotificationPrefsRepository.getMuted(context)
         if (muted.contains(category.prefKey)) return
 

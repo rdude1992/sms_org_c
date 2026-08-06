@@ -9,18 +9,37 @@ class MonthlyTotal {
 
 class InstrumentSummary {
   final InstrumentType type;
-  final String? ref; // e.g. last-4 digits, or issuer name for grouping
+  final EntityType entityType;
+  final String? ref; // e.g. "XX1234", or "Pluxee Card" for numberless cards
   final String? issuer;
+  final String? walletType; // e.g. "Fuel Wallet", "HDFC FASTag"
   double totalCredit = 0;
   double totalDebit = 0;
   int count = 0;
 
-  InstrumentSummary({required this.type, this.ref, this.issuer});
+  InstrumentSummary({
+    required this.type,
+    this.entityType = EntityType.unknown,
+    this.ref,
+    this.issuer,
+    this.walletType,
+  });
 
   String get displayName {
+    // A specific wallet name ("Fuel Wallet", "HDFC FASTag") is more useful
+    // than a generic instrument label, so prefer it when we have one.
+    if (walletType != null) return walletType!;
+
     final issuerPart = issuer ?? _instrumentLabel(type);
-    if (ref != null) return '$issuerPart •• $ref';
+    if (ref != null) return '$issuerPart ${_formatRef(ref!)}';
     return issuerPart;
+  }
+
+  /// "XX1234" -> "•• 1234"; anything else (e.g. "Pluxee Card") passes
+  /// through as-is rather than getting a nonsensical "•• Pluxee Card".
+  static String _formatRef(String ref) {
+    if (RegExp(r'^XX\d+$').hasMatch(ref)) return '•• ${ref.substring(2)}';
+    return '- $ref';
   }
 
   static String _instrumentLabel(InstrumentType t) {
@@ -88,10 +107,18 @@ class InsightsService {
         totalDebit += t.amount;
       }
 
-      final key = '${t.instrument.name}|${t.issuer ?? ''}|${t.instrumentRef ?? ''}';
+      final key = t.walletType != null
+          ? 'wallet|${t.walletType}'
+          : '${t.instrument.name}|${t.issuer ?? ''}|${t.instrumentRef ?? ''}';
       final summary = instrumentMap.putIfAbsent(
         key,
-        () => InstrumentSummary(type: t.instrument, ref: t.instrumentRef, issuer: t.issuer),
+        () => InstrumentSummary(
+          type: t.instrument,
+          entityType: t.entityType,
+          ref: t.instrumentRef,
+          issuer: t.issuer,
+          walletType: t.walletType,
+        ),
       );
       if (t.direction == TxnDirection.credit) {
         summary.totalCredit += t.amount;

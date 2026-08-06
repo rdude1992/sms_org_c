@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 
-enum SmsCategory { personal, promotional, transactional, otp }
+/// Mirrors the 5-category model from the ported classifier (see
+/// lib/services/categorization_service.dart): the original 4-category
+/// scheme didn't have anywhere to put delivery notifications, bill/due-date
+/// reminders, booking confirmations, and account statements — these aren't
+/// personal chat, aren't promotions, and aren't financial transactions
+/// either. `updates` covers that bucket, and is also the default fallback
+/// for anything else that doesn't clearly match one of the other four.
+enum SmsCategory { personal, promotional, transactional, otp, updates }
 
 extension SmsCategoryX on SmsCategory {
   String get label {
@@ -13,6 +20,8 @@ extension SmsCategoryX on SmsCategory {
         return 'Transactions';
       case SmsCategory.otp:
         return 'OTP';
+      case SmsCategory.updates:
+        return 'Updates';
     }
   }
 
@@ -26,6 +35,8 @@ extension SmsCategoryX on SmsCategory {
         return Icons.currency_rupee;
       case SmsCategory.otp:
         return Icons.password_outlined;
+      case SmsCategory.updates:
+        return Icons.notifications_outlined;
     }
   }
 
@@ -39,6 +50,8 @@ extension SmsCategoryX on SmsCategory {
         return const Color(0xFF10B981); // emerald
       case SmsCategory.otp:
         return const Color(0xFF8B5CF6); // violet
+      case SmsCategory.updates:
+        return const Color(0xFF64748B); // slate
     }
   }
 }

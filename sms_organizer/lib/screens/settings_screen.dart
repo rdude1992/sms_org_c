@@ -120,6 +120,8 @@ class SettingsScreen extends StatelessWidget {
         return 'Notify for bank/card/UPI alerts';
       case SmsCategory.otp:
         return 'Notify for one-time passwords';
+      case SmsCategory.updates:
+        return 'Notify for delivery, booking, and statement notices';
     }
   }
 
