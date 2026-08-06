@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import '../models/sim_info.dart';
 import '../models/sms_message.dart';
 import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
 import '../widgets/date_separator.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/multi_select_bar.dart';
+import '../widgets/sim_picker.dart';
 
 class ThreadScreen extends StatefulWidget {
   final int threadId;
@@ -28,10 +30,19 @@ class _ThreadScreenState extends State<ThreadScreen> {
   int? _highlightedId;
   bool _didInitialScroll = false;
 
+  int? _selectedSubscriptionId;
+  bool _simInitialized = false;
+
   @override
   void initState() {
     super.initState();
     _highlightedId = widget.highlightMessageId;
+  }
+
+  void _initSelectedSim(List<SimInfo> sims) {
+    if (_simInitialized) return;
+    _simInitialized = true;
+    if (sims.isNotEmpty) _selectedSubscriptionId = sims.first.subscriptionId;
   }
 
   @override
@@ -77,6 +88,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
         final messages = conversation.messages.reversed.toList(); // oldest first for chat view
 
         _scrollToHighlightIfNeeded(messages);
+        _initSelectedSim(provider.activeSims);
 
         return Scaffold(
           appBar: provider.isSelecting
@@ -124,6 +136,15 @@ class _ThreadScreenState extends State<ThreadScreen> {
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                   child: Row(
                     children: [
+                      if (provider.activeSims.length > 1) ...[
+                        SimPicker(
+                          sims: provider.activeSims,
+                          selectedSubscriptionId: _selectedSubscriptionId,
+                          onChanged: (id) => setState(() => _selectedSubscriptionId = id),
+                          compact: true,
+                        ),
+                        const SizedBox(width: 8),
+                      ],
                       Expanded(
                         child: TextField(
                           controller: _replyController,
@@ -147,7 +168,11 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           final text = _replyController.text.trim();
                           if (text.isEmpty) return;
                           _replyController.clear();
-                          await provider.sendSms(conversation.address, text);
+                          await provider.sendSms(
+                            conversation.address,
+                            text,
+                            subscriptionId: _selectedSubscriptionId,
+                          );
                         },
                       ),
                     ],

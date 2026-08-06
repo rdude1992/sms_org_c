@@ -110,5 +110,19 @@ class SmsConversation {
   SmsConversation({required this.threadId, required this.address, required this.messages});
 
   SmsMessage get latest => messages.first; // messages assumed sorted desc by date
+
+  /// The first message (in current — newest-first — order) whose body
+  /// contains [query] case-insensitively, or [latest] if [query] is blank
+  /// or matches nothing here (e.g. this conversation matched a chat search
+  /// on contact name/address instead of any message body).
+  SmsMessage previewFor(String query) {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return latest;
+    final lower = trimmed.toLowerCase();
+    for (final m in messages) {
+      if (m.body.toLowerCase().contains(lower)) return m;
+    }
+    return latest;
+  }
   int get unreadCount => messages.where((m) => m.isIncoming && !m.read).length;
 }

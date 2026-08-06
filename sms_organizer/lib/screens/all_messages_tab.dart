@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/category.dart';
 import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
+import '../utils/search_snippet.dart';
 import '../widgets/category_badge.dart';
 import '../widgets/direction_badge.dart';
 import '../widgets/multi_select_bar.dart';
@@ -156,16 +157,16 @@ class _AllMessagesTabState extends State<AllMessagesTab> {
                                 ),
                                 subtitle: Padding(
                                   padding: const EdgeInsets.only(top: 3),
-                                  child: Text(
-                                    m.body,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
+                                  child: SearchPreviewText(
+                                    body: m.body,
+                                    query: provider.searchQuery,
+                                    baseStyle: TextStyle(
                                       color: unread
                                           ? scheme.onSurface.withOpacity(0.85)
                                           : scheme.onSurfaceVariant,
                                       fontWeight: unread ? FontWeight.w600 : FontWeight.normal,
                                     ),
+                                    matchColor: scheme.primary,
                                   ),
                                 ),
                                 trailing: Column(

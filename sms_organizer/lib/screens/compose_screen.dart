@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/sim_info.dart';
 import '../providers/sms_provider.dart';
+import '../widgets/sim_picker.dart';
 import 'contact_picker_screen.dart';
 
 class ComposeScreen extends StatefulWidget {
@@ -104,7 +105,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
             ),
             if (sims.length > 1) ...[
               const SizedBox(height: 12),
-              _SimPicker(
+              SimPicker(
                 sims: sims,
                 selectedSubscriptionId: _selectedSubscriptionId,
                 onChanged: (id) => setState(() => _selectedSubscriptionId = id),
@@ -141,44 +142,6 @@ class _ComposeScreenState extends State<ComposeScreen> {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _SimPicker extends StatelessWidget {
-  final List<SimInfo> sims;
-  final int? selectedSubscriptionId;
-  final ValueChanged<int?> onChanged;
-
-  const _SimPicker({
-    required this.sims,
-    required this.selectedSubscriptionId,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const Icon(Icons.sim_card_outlined, size: 18, color: Colors.grey),
-        const SizedBox(width: 8),
-        const Text('Send from', style: TextStyle(fontSize: 13, color: Colors.grey)),
-        const SizedBox(width: 12),
-        Expanded(
-          child: SegmentedButton<int>(
-            segments: [
-              for (final sim in sims)
-                ButtonSegment(
-                  value: sim.subscriptionId,
-                  label: Text(sim.carrierName?.isNotEmpty == true ? sim.carrierName! : sim.label),
-                ),
-            ],
-            selected: {selectedSubscriptionId ?? sims.first.subscriptionId},
-            onSelectionChanged: (selection) => onChanged(selection.first),
-            showSelectedIcon: false,
-          ),
-        ),
-      ],
     );
   }
 }

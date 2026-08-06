@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/category.dart';
 import '../models/sms_message.dart';
 import '../utils/formatters.dart';
+import '../utils/search_snippet.dart';
 import 'category_badge.dart';
 
 class ConversationTile extends StatelessWidget {
@@ -12,6 +13,12 @@ class ConversationTile extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
+  /// Active chat search query, if any — when set, the preview line shows a
+  /// match-centered, highlighted snippet from whichever message in the
+  /// thread actually matched (which may not be the latest one) instead of
+  /// always previewing the most recent message.
+  final String? searchQuery;
+
   const ConversationTile({
     super.key,
     required this.conversation,
@@ -20,6 +27,7 @@ class ConversationTile extends StatelessWidget {
     required this.selectionMode,
     required this.onTap,
     required this.onLongPress,
+    this.searchQuery,
   });
 
   @override
@@ -27,6 +35,9 @@ class ConversationTile extends StatelessWidget {
     final latest = conversation.latest;
     final unread = conversation.unreadCount > 0;
     final scheme = Theme.of(context).colorScheme;
+
+    final query = (searchQuery ?? '').trim();
+    final previewMessage = conversation.previewFor(query);
 
     return Material(
       color: selected ? scheme.primary.withOpacity(0.08) : Colors.transparent,
@@ -94,15 +105,15 @@ class ConversationTile extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(
-                            latest.body,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
+                          child: SearchPreviewText(
+                            body: previewMessage.body,
+                            query: query,
+                            baseStyle: TextStyle(
                               color: unread ? scheme.onSurface.withOpacity(0.85) : scheme.onSurfaceVariant,
                               fontWeight: unread ? FontWeight.w600 : FontWeight.normal,
                               fontSize: 13,
                             ),
+                            matchColor: scheme.primary,
                           ),
                         ),
                         const SizedBox(width: 6),

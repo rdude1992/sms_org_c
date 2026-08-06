@@ -6,6 +6,7 @@ import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/transaction_tile.dart';
+import 'investment_list_screen.dart';
 import 'transaction_list_screen.dart';
 
 enum InsightsRange { allTime, thisMonth, last3Months, thisYear }
@@ -72,6 +73,13 @@ class _InsightsScreenState extends State<InsightsScreen> {
         final filteredTransactions = provider.transactions.where((t) {
           if (from != null && t.date.isBefore(from)) return false;
           if (to != null && t.date.isAfter(to)) return false;
+          return true;
+        }).toList()
+          ..sort((a, b) => b.date.compareTo(a.date));
+
+        final filteredInvestments = provider.investments.where((i) {
+          if (from != null && i.date.isBefore(from)) return false;
+          if (to != null && i.date.isAfter(to)) return false;
           return true;
         }).toList()
           ..sort((a, b) => b.date.compareTo(a.date));
@@ -152,7 +160,20 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                       ),
                                     ),
                               const SizedBox(height: 24),
-                              _InvestmentCard(summary: summary),
+                              _InvestmentCard(
+                                summary: summary,
+                                onTap: filteredInvestments.isEmpty
+                                    ? null
+                                    : () => Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => InvestmentListScreen(
+                                              investments: filteredInvestments,
+                                              subtitle: _range.label,
+                                            ),
+                                          ),
+                                        ),
+                              ),
                               const SizedBox(height: 24),
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -364,64 +385,145 @@ class _MonthlyChart extends StatelessWidget {
   final ValueChanged<DateTime> onTapMonth;
   const _MonthlyChart({required this.summary, required this.onTapMonth});
 
+  static const _creditColor = Color(0xFF10B981);
+  static const _debitColor = Color(0xFFEF4444);
+
   @override
   Widget build(BuildContext context) {
     if (summary.monthly.isEmpty) {
       return const SizedBox(height: 120, child: Center(child: Text('Not enough data yet.')));
     }
     final months = summary.monthly;
+    final scheme = Theme.of(context).colorScheme;
     final maxVal = months
         .map((m) => m.credit > m.debit ? m.credit : m.debit)
         .fold<double>(0, (a, b) => a > b ? a : b);
+    final maxY = maxVal == 0 ? 1.0 : maxVal * 1.2;
 
-    return SizedBox(
-      height: 180,
-      child: BarChart(
-        BarChartData(
-          maxY: maxVal == 0 ? 1 : maxVal * 1.2,
-          barTouchData: BarTouchData(
-            touchCallback: (event, response) {
-              if (event is! FlTapUpEvent) return;
-              final idx = response?.spot?.touchedBarGroupIndex;
-              if (idx == null || idx < 0 || idx >= months.length) return;
-              onTapMonth(months[idx].month);
-            },
-          ),
-          barGroups: [
-            for (int i = 0; i < months.length; i++)
-              BarChartGroupData(
-                x: i,
-                barRods: [
-                  BarChartRodData(toY: months[i].credit, color: const Color(0xFF10B981), width: 8),
-                  BarChartRodData(toY: months[i].debit, color: const Color(0xFFEF4444), width: 8),
-                ],
-              ),
+    // However many months are in range, only label a handful of them —
+    // cramming a "d MMM" string under every single point is what made the
+    // old chart unreadable once the range grew past a few months.
+    const maxLabels = 6;
+    final labelInterval = (months.length / maxLabels).ceil().clamp(1, months.length);
+
+    void handleTap(FlTouchEvent event, LineTouchResponse? response) {
+      if (event is! FlTapUpEvent) return;
+      final spots = response?.lineBarSpots;
+      if (spots == null || spots.isEmpty) return;
+      final idx = spots.first.x.toInt();
+      if (idx < 0 || idx >= months.length) return;
+      onTapMonth(months[idx].month);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: const [
+            _LegendDot(color: _creditColor, label: 'Credited'),
+            SizedBox(width: 16),
+            _LegendDot(color: _debitColor, label: 'Debited'),
           ],
-          titlesData: FlTitlesData(
-            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                getTitlesWidget: (value, meta) {
-                  final idx = value.toInt();
-                  if (idx < 0 || idx >= months.length) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      Formatters.monthYear(months[idx].month),
-                      style: const TextStyle(fontSize: 10),
-                    ),
-                  );
-                },
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 200,
+          child: LineChart(
+            LineChartData(
+              minY: 0,
+              maxY: maxY,
+              minX: 0,
+              maxX: (months.length - 1).toDouble(),
+              lineTouchData: LineTouchData(
+                touchCallback: handleTap,
+                touchTooltipData: LineTouchTooltipData(
+                  getTooltipItems: (spots) => spots.map((s) {
+                    final idx = s.x.toInt();
+                    if (idx < 0 || idx >= months.length) return null;
+                    final isCredit = s.barIndex == 0;
+                    return LineTooltipItem(
+                      '${Formatters.monthYear(months[idx].month)}\n'
+                      '${Formatters.currency(s.y)}',
+                      TextStyle(
+                        color: isCredit ? _creditColor : _debitColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    );
+                  }).toList(),
+                ),
               ),
+              lineBarsData: [
+                _line(months.map((m) => m.credit).toList(), _creditColor),
+                _line(months.map((m) => m.debit).toList(), _debitColor),
+              ],
+              titlesData: FlTitlesData(
+                leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 28,
+                    interval: 1,
+                    getTitlesWidget: (value, meta) {
+                      final idx = value.toInt();
+                      if (idx < 0 || idx >= months.length) return const SizedBox.shrink();
+                      final isLast = idx == months.length - 1;
+                      if (idx % labelInterval != 0 && !isLast) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          Formatters.monthYear(months[idx].month),
+                          style: const TextStyle(fontSize: 10),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              gridData: FlGridData(
+                show: true,
+                drawVerticalLine: false,
+                horizontalInterval: maxY / 4,
+                getDrawingHorizontalLine: (_) =>
+                    FlLine(color: scheme.outlineVariant.withOpacity(0.4), strokeWidth: 1),
+              ),
+              borderData: FlBorderData(show: false),
             ),
           ),
-          gridData: const FlGridData(show: false),
-          borderData: FlBorderData(show: false),
         ),
-      ),
+      ],
+    );
+  }
+
+  LineChartBarData _line(List<double> values, Color color) {
+    return LineChartBarData(
+      spots: [for (int i = 0; i < values.length; i++) FlSpot(i.toDouble(), values[i])],
+      isCurved: true,
+      curveSmoothness: 0.15,
+      color: color,
+      barWidth: 2.5,
+      dotData: FlDotData(show: values.length <= 12),
+      belowBarData: BarAreaData(show: true, color: color.withOpacity(0.08)),
+    );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+      ],
     );
   }
 }
@@ -456,40 +558,50 @@ class _InstrumentRow extends StatelessWidget {
 
 class _InvestmentCard extends StatelessWidget {
   final InsightsSummary summary;
-  const _InvestmentCard({required this.summary});
+  final VoidCallback? onTap;
+  const _InvestmentCard({required this.summary, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: const [
-                Icon(Icons.trending_up, color: Color(0xFF3B6DF5)),
-                SizedBox(width: 8),
-                Text('Investments', style: TextStyle(fontWeight: FontWeight.bold)),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _miniStat('Invested', summary.totalInvested, const Color(0xFF3B6DF5)),
-                ),
-                Expanded(
-                  child: _miniStat('Redeemed', summary.totalRedeemed, const Color(0xFFF59E0B)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '${summary.investmentEventCount} SIP / mutual fund / trade SMS detected',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ],
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.trending_up, color: Color(0xFF3B6DF5)),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text('Investments', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                  if (onTap != null)
+                    Icon(Icons.chevron_right, size: 18, color: Theme.of(context).colorScheme.outline),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _miniStat('Invested', summary.totalInvested, const Color(0xFF3B6DF5)),
+                  ),
+                  Expanded(
+                    child: _miniStat('Redeemed', summary.totalRedeemed, const Color(0xFFF59E0B)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${summary.investmentEventCount} SIP / mutual fund / trade SMS detected'
+                '${onTap != null ? ' · tap to view' : ''}',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ),
         ),
       ),
     );

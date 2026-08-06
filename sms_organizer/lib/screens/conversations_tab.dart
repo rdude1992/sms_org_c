@@ -127,13 +127,21 @@ class _ConversationsTabState extends State<ConversationsTab> {
             displayName: provider.displayNameFor(conversation.address),
             selected: selected,
             selectionMode: provider.isSelecting,
+            searchQuery: provider.chatSearchQuery,
             onTap: () {
               if (provider.isSelecting) {
                 provider.toggleSelected(conversation.latest.id);
               } else {
+                final preview = conversation.previewFor(provider.chatSearchQuery);
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => ThreadScreen(threadId: conversation.threadId)),
+                  MaterialPageRoute(
+                    builder: (_) => ThreadScreen(
+                      threadId: conversation.threadId,
+                      highlightMessageId:
+                          provider.chatSearchQuery.trim().isEmpty ? null : preview.id,
+                    ),
+                  ),
                 );
               }
             },
