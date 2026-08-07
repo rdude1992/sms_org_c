@@ -55,8 +55,14 @@ object NotificationChannels {
      * Per-conversation channel derived from the category's parent channel,
      * created lazily the first time a thread gets a notification and
      * reused afterwards (a cheap existence check, not a rebuild every
-     * time). Falls back to the parent category channel id pre-O, where
-     * conversation channels don't exist as a concept.
+     * time). Falls back to the parent category channel id — pre-O, where
+     * conversation channels don't exist as a concept, AND if creation
+     * fails for any reason: a notification posted against a channel id
+     * that doesn't exist gets silently dropped by Android (no exception,
+     * nothing in the UI), which would be a much worse failure than simply
+     * not getting the "Conversation" treatment. [parentId] is guaranteed
+     * to already exist by the time this is called (see [ensureCreated]),
+     * so it's always a safe value to fall back to.
      */
     fun ensureConversationChannel(
         context: Context,
@@ -67,18 +73,29 @@ object NotificationChannels {
         val parentId = "sms_$categoryKey"
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return parentId
 
-        val conversationId = "${parentId}_conv_$threadId"
-        val manager = NotificationManagerCompat.from(context)
-        if (manager.getNotificationChannelCompat(conversationId) == null) {
-            val importance = specs.firstOrNull { it.key == categoryKey }?.importance
-                ?: NotificationManagerCompat.IMPORTANCE_DEFAULT
-            val channel = NotificationChannelCompat.Builder(conversationId, importance)
-                .setName(displayName)
-                .setConversationId(parentId, threadId.toString())
-                .build()
-            manager.createNotificationChannel(channel)
+        return try {
+            val conversationId = "${parentId}_conv_$threadId"
+            val manager = NotificationManagerCompat.from(context)
+            if (manager.getNotificationChannelCompat(conversationId) == null) {
+                val importance = specs.firstOrNull { it.key == categoryKey }?.importance
+                    ?: NotificationManagerCompat.IMPORTANCE_DEFAULT
+                val channel = NotificationChannelCompat.Builder(conversationId, importance)
+                    .setName(displayName)
+                    .setConversationId(parentId, threadId.toString())
+                    .build()
+                manager.createNotificationChannel(channel)
+                // Some OEM builds accept the create call but never actually
+                // materialise a channel with setConversationId() set — so
+                // don't just trust the call succeeded, verify it before
+                // handing back an id nothing will actually post against.
+                if (manager.getNotificationChannelCompat(conversationId) == null) {
+                    return parentId
+                }
+            }
+            conversationId
+        } catch (_: Exception) {
+            parentId
         }
-        return conversationId
     }
 
     /**

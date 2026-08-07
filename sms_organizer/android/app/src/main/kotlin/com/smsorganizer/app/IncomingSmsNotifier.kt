@@ -56,7 +56,7 @@ object IncomingSmsNotifier {
             threadId,
             ConversationHistoryStore.Entry(body, System.currentTimeMillis(), fromMe = false)
         )
-        postNotification(context, threadId, address, category, history)
+        postNotification(context, threadId, address, body, category, history)
     }
 
     /**
@@ -72,10 +72,36 @@ object IncomingSmsNotifier {
             threadId,
             ConversationHistoryStore.Entry(body, System.currentTimeMillis(), fromMe = true)
         )
-        postNotification(context, threadId, address, category, history)
+        postNotification(context, threadId, address, body, category, history)
     }
 
+    /**
+     * Builds and posts the full rich notification, falling back to a bare
+     * minimum one (guaranteed-to-exist parent channel, no actions, no
+     * MessagingStyle/shortcut/bubble) if ANY part of that throws. This
+     * matters because a notification posted against a channel id that
+     * doesn't actually exist — which is exactly the failure mode a bug
+     * anywhere upstream of the notify() call could cause — is silently
+     * dropped by Android: no exception surfaces, no notification appears,
+     * and there's nothing in the UI to explain why. Getting a plain
+     * notification instead of a fancy one beats getting nothing.
+     */
     private fun postNotification(
+        context: Context,
+        threadId: Long,
+        address: String,
+        body: String,
+        category: Categorizer.Category,
+        history: List<ConversationHistoryStore.Entry>
+    ) {
+        try {
+            postRichNotification(context, threadId, address, category, history)
+        } catch (_: Exception) {
+            postFallbackNotification(context, threadId, address, body, category)
+        }
+    }
+
+    private fun postRichNotification(
         context: Context,
         threadId: Long,
         address: String,
@@ -146,6 +172,55 @@ object IncomingSmsNotifier {
             // Permission was revoked between the check above and this call
             // (e.g. user turned it off in Settings mid-broadcast) — the
             // message is still safely in content://sms either way.
+        }
+    }
+
+    /**
+     * The plain, minimal notification this replaced (BigTextStyle, the
+     * always-present parent category channel, a content intent, nothing
+     * fancier) — the safety net [postNotification] falls back to if
+     * anything in [postRichNotification] throws.
+     */
+    private fun postFallbackNotification(
+        context: Context,
+        threadId: Long,
+        address: String,
+        body: String,
+        category: Categorizer.Category
+    ) {
+        try {
+            NotificationChannels.ensureCreated(context)
+            val displayName = ContactsRepository.lookupDisplayName(context, address) ?: address
+
+            val openIntent = Intent(context, MainActivity::class.java).apply {
+                action = Intent.ACTION_MAIN
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("notification_thread_id", threadId)
+            }
+            val contentIntent = PendingIntent.getActivity(
+                context,
+                threadId.toInt(),
+                openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(context, "sms_${category.prefKey}")
+                .setSmallIcon(R.drawable.ic_stat_notify)
+                .setContentTitle(displayName)
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setPriority(
+                    if (category == Categorizer.Category.OTP) NotificationCompat.PRIORITY_HIGH
+                    else NotificationCompat.PRIORITY_DEFAULT
+                )
+                .setAutoCancel(true)
+                .setContentIntent(contentIntent)
+                .build()
+
+            NotificationManagerCompat.from(context).notify(threadId.toInt(), notification)
+        } catch (_: Exception) {
+            // At this point we've already tried the rich path and this
+            // minimal one — nothing left to reasonably fall back to.
         }
     }
 
