@@ -7,7 +7,6 @@ import '../providers/notification_settings_provider.dart';
 import '../providers/sms_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/sms_platform_service.dart';
-import '../widgets/category_badge.dart';
 import '../widgets/ui/grouped_card.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -302,9 +301,10 @@ class _NotificationCategoryRow extends StatelessWidget {
     return Column(
       children: [
         ListTile(
-          leading: CategoryBadge(category: category, compact: true),
-          title: Text(category.label),
-          subtitle: Text(hint),
+          contentPadding: const EdgeInsets.only(left: 16, right: 4),
+          leading: Icon(category.icon, color: category.color),
+          title: Text(category.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: Text(hint, style: const TextStyle(fontSize: 12.5)),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -313,6 +313,7 @@ class _NotificationCategoryRow extends StatelessWidget {
                 icon: const Icon(Icons.tune, size: 20),
                 tooltip: 'Customize in system settings',
                 onPressed: onCustomize,
+                visualDensity: VisualDensity.compact,
               ),
             ],
           ),
