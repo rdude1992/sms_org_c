@@ -350,6 +350,31 @@ class SmsProvider extends ChangeNotifier {
     await refresh();
   }
 
+  // ---- Single-item actions (swipe actions, long-press context menu) ----
+
+  Future<void> deleteMessage(int id) async {
+    await _platform.deleteMessages([id]);
+    await refresh();
+  }
+
+  Future<void> deleteConversation(SmsConversation conversation) async {
+    final ids = conversation.messages.map((m) => m.id).toList();
+    await _platform.deleteMessages(ids);
+    await refresh();
+  }
+
+  Future<void> setMessageRead(int id, bool read) async {
+    await _platform.markRead([id], read);
+    await refresh();
+  }
+
+  Future<void> setConversationRead(SmsConversation conversation, bool read) async {
+    final ids = conversation.messages.where((m) => m.isIncoming).map((m) => m.id).toList();
+    if (ids.isEmpty) return;
+    await _platform.markRead(ids, read);
+    await refresh();
+  }
+
   /// Marks every unread incoming message in [threadId] as read. Call this
   /// when a thread is opened — ThreadScreen previously never did, so
   /// messages stayed "unread" (device SMS store included) no matter how

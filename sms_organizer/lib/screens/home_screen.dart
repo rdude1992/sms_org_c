@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/sms_provider.dart';
+import '../widgets/ui/floating_nav_bar.dart';
 import 'compose_screen.dart';
 import 'inbox_screen.dart';
 import 'insights_screen.dart';
@@ -104,13 +105,13 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Icon(Icons.edit_outlined),
             )
           : null,
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: FloatingNavBar(
         selectedIndex: _tabIndex,
-        onDestinationSelected: _goToTab,
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.inbox_outlined), label: 'Inbox'),
-          NavigationDestination(icon: Icon(Icons.insights_outlined), label: 'Insights'),
-          NavigationDestination(icon: Icon(Icons.settings_outlined), label: 'Settings'),
+        onSelected: _goToTab,
+        items: const [
+          FloatingNavItem(icon: Icons.inbox_outlined, selectedIcon: Icons.inbox, label: 'Inbox'),
+          FloatingNavItem(icon: Icons.insights_outlined, selectedIcon: Icons.insights, label: 'Insights'),
+          FloatingNavItem(icon: Icons.settings_outlined, selectedIcon: Icons.settings, label: 'Settings'),
         ],
       ),
     );

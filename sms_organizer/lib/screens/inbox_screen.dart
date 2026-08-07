@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:provider/provider.dart';
 import '../models/category.dart';
 import '../providers/sms_provider.dart';
@@ -10,6 +11,7 @@ import '../widgets/direction_badge.dart';
 import '../widgets/multi_select_bar.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/filter_chip_bar.dart';
+import '../widgets/ui/skeleton.dart';
 import 'thread_screen.dart';
 
 /// Bottom-nav "Inbox" tab — merges what used to be two separate tabs
@@ -149,7 +151,7 @@ class _ChatsBody extends StatelessWidget {
     final searching = provider.chatSearchQuery.trim().isNotEmpty;
 
     if (provider.state == LoadState.loading && conversations.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return const SkeletonList();
     }
     if (provider.state == LoadState.error) {
       return Center(child: Text('Could not load messages: ${provider.error}'));
@@ -172,29 +174,61 @@ class _ChatsBody extends StatelessWidget {
         itemBuilder: (context, index) {
           final conversation = conversations[index];
           final selected = provider.selectedIds.contains(conversation.latest.id);
-          return ConversationTile(
-            conversation: conversation,
-            displayName: provider.displayNameFor(conversation.address),
-            selected: selected,
-            selectionMode: provider.isSelecting,
-            searchQuery: provider.chatSearchQuery,
-            onTap: () {
-              if (provider.isSelecting) {
-                provider.toggleSelected(conversation.latest.id);
-              } else {
-                final preview = conversation.previewFor(provider.chatSearchQuery);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ThreadScreen(
-                      threadId: conversation.threadId,
-                      highlightMessageId: provider.chatSearchQuery.trim().isEmpty ? null : preview.id,
+          final scheme = Theme.of(context).colorScheme;
+          final unread = conversation.unreadCount > 0;
+          return Slidable(
+            key: ValueKey(conversation.threadId),
+            enabled: !provider.isSelecting,
+            startActionPane: ActionPane(
+              motion: const DrawerMotion(),
+              extentRatio: 0.28,
+              children: [
+                SlidableAction(
+                  onPressed: (_) => provider.setConversationRead(conversation, unread),
+                  backgroundColor: scheme.primary,
+                  foregroundColor: scheme.onPrimary,
+                  icon: unread ? Icons.mark_email_read_outlined : Icons.mark_email_unread_outlined,
+                  label: unread ? 'Read' : 'Unread',
+                ),
+              ],
+            ),
+            endActionPane: ActionPane(
+              motion: const DrawerMotion(),
+              extentRatio: 0.28,
+              children: [
+                SlidableAction(
+                  onPressed: (_) => provider.deleteConversation(conversation),
+                  backgroundColor: scheme.error,
+                  foregroundColor: Colors.white,
+                  icon: Icons.delete_outline,
+                  label: 'Delete',
+                ),
+              ],
+            ),
+            child: ConversationTile(
+              conversation: conversation,
+              displayName: provider.displayNameFor(conversation.address),
+              selected: selected,
+              selectionMode: provider.isSelecting,
+              searchQuery: provider.chatSearchQuery,
+              onTap: () {
+                if (provider.isSelecting) {
+                  provider.toggleSelected(conversation.latest.id);
+                } else {
+                  final preview = conversation.previewFor(provider.chatSearchQuery);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ThreadScreen(
+                        threadId: conversation.threadId,
+                        highlightMessageId: provider.chatSearchQuery.trim().isEmpty ? null : preview.id,
+                      ),
                     ),
-                  ),
-                );
-              }
-            },
-            onLongPress: () => provider.toggleSelected(conversation.latest.id),
+                  );
+                }
+              },
+              onLongPress: () => provider.toggleSelected(conversation.latest.id),
+            ),
           );
         },
       ),
@@ -217,7 +251,7 @@ class _MessagesBody extends StatelessWidget {
         const Divider(height: 1),
         Expanded(
           child: provider.state == LoadState.loading && messages.isEmpty
-              ? const Center(child: CircularProgressIndicator())
+              ? const SkeletonList()
               : messages.isEmpty
                   ? EmptyState(
                       icon: searching ? Icons.search_off_outlined : Icons.inbox_outlined,
@@ -237,7 +271,36 @@ class _MessagesBody extends StatelessWidget {
                           final selected = provider.selectedIds.contains(m.id);
                           final unread = !m.read && m.isIncoming;
                           final scheme = Theme.of(context).colorScheme;
-                          return ListTile(
+                          return Slidable(
+                            key: ValueKey(m.id),
+                            enabled: !provider.isSelecting,
+                            startActionPane: ActionPane(
+                              motion: const DrawerMotion(),
+                              extentRatio: 0.28,
+                              children: [
+                                SlidableAction(
+                                  onPressed: (_) => provider.setMessageRead(m.id, unread),
+                                  backgroundColor: scheme.primary,
+                                  foregroundColor: scheme.onPrimary,
+                                  icon: unread ? Icons.mark_email_read_outlined : Icons.mark_email_unread_outlined,
+                                  label: unread ? 'Read' : 'Unread',
+                                ),
+                              ],
+                            ),
+                            endActionPane: ActionPane(
+                              motion: const DrawerMotion(),
+                              extentRatio: 0.28,
+                              children: [
+                                SlidableAction(
+                                  onPressed: (_) => provider.deleteMessage(m.id),
+                                  backgroundColor: scheme.error,
+                                  foregroundColor: Colors.white,
+                                  icon: Icons.delete_outline,
+                                  label: 'Delete',
+                                ),
+                              ],
+                            ),
+                            child: ListTile(
                             selected: selected,
                             selectedTileColor: scheme.primary.withOpacity(0.06),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -346,6 +409,7 @@ class _MessagesBody extends StatelessWidget {
                               }
                             },
                             onLongPress: () => provider.toggleSelected(m.id),
+                            ),
                           );
                         },
                       ),
