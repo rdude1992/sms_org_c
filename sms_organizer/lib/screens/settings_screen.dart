@@ -7,6 +7,7 @@ import '../providers/notification_settings_provider.dart';
 import '../providers/sms_provider.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/category_badge.dart';
+import '../widgets/ui/grouped_card.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -20,90 +21,111 @@ class SettingsScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
+        padding: const EdgeInsets.only(bottom: 24),
         children: [
           _SectionHeader('Appearance'),
-          SwitchListTile(
-            title: const Text('Dark mode'),
-            subtitle: const Text('Overrides system setting'),
-            value: themeProvider.isDark,
-            onChanged: (v) => themeProvider.setDark(v),
+          GroupedCard(
+            children: [
+              SwitchListTile(
+                title: const Text('Dark mode'),
+                subtitle: const Text('Overrides system setting'),
+                value: themeProvider.isDark,
+                onChanged: (v) => themeProvider.setDark(v),
+              ),
+              ListTile(
+                leading: const Icon(Icons.brightness_auto_outlined),
+                title: const Text('Use system default'),
+                onTap: themeProvider.useSystemDefault,
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: themeProvider.useSystemDefault,
-            child: const Text('Use system default instead'),
-          ),
-          const Divider(),
           _SectionHeader('Default SMS app'),
-          ListTile(
-            leading: Icon(
-              smsProvider.isDefaultSmsApp ? Icons.check_circle : Icons.error_outline,
-              color: smsProvider.isDefaultSmsApp ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
-            ),
-            title: Text(smsProvider.isDefaultSmsApp
-                ? 'This app is your default SMS app'
-                : 'Not set as default SMS app'),
-            subtitle: smsProvider.isDefaultSmsApp
-                ? null
-                : const Text('Sending/receiving may be limited until set as default.'),
-            trailing: smsProvider.isDefaultSmsApp
-                ? null
-                : FilledButton(
-                    onPressed: () => smsProvider.requestDefaultSmsRole(),
-                    child: const Text('Set default'),
-                  ),
+          GroupedCard(
+            children: [
+              ListTile(
+                leading: Icon(
+                  smsProvider.isDefaultSmsApp ? Icons.check_circle : Icons.error_outline,
+                  color: smsProvider.isDefaultSmsApp ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                ),
+                title: Text(smsProvider.isDefaultSmsApp
+                    ? 'This app is your default SMS app'
+                    : 'Not set as default SMS app'),
+                subtitle: smsProvider.isDefaultSmsApp
+                    ? null
+                    : const Text('Sending/receiving may be limited until set as default.'),
+                trailing: smsProvider.isDefaultSmsApp
+                    ? null
+                    : FilledButton(
+                        onPressed: () => smsProvider.requestDefaultSmsRole(),
+                        child: const Text('Set default'),
+                      ),
+              ),
+            ],
           ),
-          const Divider(),
           _SectionHeader('Notifications'),
-          for (final category in SmsCategory.values)
-            SwitchListTile(
-              secondary: CategoryBadge(category: category, compact: true),
-              title: Text(category.label),
-              subtitle: Text(_categoryNotificationHint(category)),
-              value: !notificationSettings.isMuted(category),
-              onChanged: (enabled) =>
-                  context.read<NotificationSettingsProvider>().setMuted(category, !enabled),
-            ),
-          const Divider(),
+          GroupedCard(
+            children: [
+              for (final category in SmsCategory.values)
+                SwitchListTile(
+                  secondary: CategoryBadge(category: category, compact: true),
+                  title: Text(category.label),
+                  subtitle: Text(_categoryNotificationHint(category)),
+                  value: !notificationSettings.isMuted(category),
+                  onChanged: (enabled) =>
+                      context.read<NotificationSettingsProvider>().setMuted(category, !enabled),
+                ),
+            ],
+          ),
           _SectionHeader('Data & sync'),
-          ListTile(
-            leading: const Icon(Icons.storage_outlined),
-            title: const Text('Local cache'),
-            subtitle: Text(
-              '${smsProvider.allMessages.length} messages on-device • '
-              '${smsProvider.transactions.length} transactions cached',
-            ),
+          GroupedCard(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.storage_outlined),
+                title: const Text('Local cache'),
+                subtitle: Text(
+                  '${smsProvider.allMessages.length} messages on-device • '
+                  '${smsProvider.transactions.length} transactions cached',
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.refresh_outlined),
+                title: const Text('Recalculate categorisation'),
+                subtitle: const Text(
+                  'Wipes the local cache and re-scans everything from scratch. '
+                  'Categories are normally cached once and never re-checked — use '
+                  'this if something looks miscategorised.',
+                ),
+                onTap: () => _confirmRecalculate(context),
+              ),
+            ],
           ),
-          ListTile(
-            leading: const Icon(Icons.refresh_outlined),
-            title: const Text('Recalculate categorisation'),
-            subtitle: const Text(
-              'Wipes the local cache and re-scans everything from scratch. '
-              'Categories are normally cached once and never re-checked — use '
-              'this if something looks miscategorised.',
-            ),
-            onTap: () => _confirmRecalculate(context),
-          ),
-          const Divider(),
           _SectionHeader('Backup & restore'),
-          ListTile(
-            leading: const Icon(Icons.ios_share_outlined),
-            title: const Text('Export & share backup'),
-            subtitle: const Text('Saves messages, categories, and parsed transactions as JSON'),
-            onTap: () => _exportBackup(context),
+          GroupedCard(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.ios_share_outlined),
+                title: const Text('Export & share backup'),
+                subtitle: const Text('Saves messages, categories, and parsed transactions as JSON'),
+                onTap: () => _exportBackup(context),
+              ),
+              ListTile(
+                leading: const Icon(Icons.file_open_outlined),
+                title: const Text('Restore from backup file'),
+                onTap: () => _restoreBackup(context),
+              ),
+            ],
           ),
-          ListTile(
-            leading: const Icon(Icons.file_open_outlined),
-            title: const Text('Restore from backup file'),
-            onTap: () => _restoreBackup(context),
-          ),
-          const Divider(),
           _SectionHeader('About'),
-          const ListTile(
-            leading: Icon(Icons.privacy_tip_outlined),
-            title: Text('Your data stays on-device'),
-            subtitle: Text(
-              'Categorisation and transaction parsing run locally. Nothing is sent to a server.',
-            ),
+          GroupedCard(
+            children: [
+              const ListTile(
+                leading: Icon(Icons.privacy_tip_outlined),
+                title: Text('Your data stays on-device'),
+                subtitle: Text(
+                  'Categorisation and transaction parsing run locally. Nothing is sent to a server.',
+                ),
+              ),
+            ],
           ),
         ],
       ),
