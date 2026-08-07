@@ -99,6 +99,15 @@
         </receiver>
 
         <!--
+          Handles the quick actions (reply / mark read / copy OTP) attached
+          to an incoming-SMS notification. Not exported — only ever fired
+          by PendingIntents this app itself creates.
+        -->
+        <receiver
+            android:name=".NotificationActionReceiver"
+            android:exported="false"/>
+
+        <!--
           Required #4: "Respond via message" service for quick-reply from other
           system surfaces (e.g. declining a call with a text). Must exist to be
           eligible as default SMS app, even with a minimal implementation.

@@ -157,6 +157,30 @@ object SmsRepository {
         return updated
     }
 
+    /**
+     * Unread incoming message ids for [threadId] — backs the notification's
+     * "Mark read" quick action, which (unlike the in-app markThreadRead)
+     * has no already-loaded message list to filter and has to ask the
+     * provider directly.
+     */
+    fun getUnreadIncomingIds(context: Context, threadId: Long): List<Long> {
+        val ids = mutableListOf<Long>()
+        val cursor = context.contentResolver.query(
+            Telephony.Sms.CONTENT_URI,
+            arrayOf(Telephony.Sms._ID),
+            "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.READ} = 0 AND ${Telephony.Sms.TYPE} = ?",
+            arrayOf(threadId.toString(), Telephony.Sms.MESSAGE_TYPE_INBOX.toString()),
+            null
+        )
+        cursor?.use {
+            val idIdx = it.getColumnIndexOrThrow(Telephony.Sms._ID)
+            while (it.moveToNext()) {
+                ids.add(it.getLong(idIdx))
+            }
+        }
+        return ids
+    }
+
     fun deleteMessages(context: Context, ids: List<Long>): Int {
         var deleted = 0
         for (id in ids) {

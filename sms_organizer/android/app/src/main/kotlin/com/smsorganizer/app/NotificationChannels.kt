@@ -1,16 +1,21 @@
 package com.smsorganizer.app
 
 import android.content.Context
+import android.os.Build
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationManagerCompat
 
 /**
  * Creates one Android notification channel per SMS category, matching the
  * "sms_<category>" id scheme so the same channels apply whether the
- * notification is posted from a cold-start BroadcastReceiver or (in the
- * future) from anywhere else in the app. Uses the AndroidX compat channel
- * API so this is a safe no-op on API < 26 without needing a Build.VERSION
- * check here.
+ * notification is posted from a cold-start BroadcastReceiver or anywhere
+ * else in the app. Also creates, on demand, one channel per conversation
+ * (thread) — required alongside a notification's shortcut id for Android
+ * to treat a thread as a "Conversation" (priority conversations, bubbles),
+ * which a single per-category channel can't express on its own.
+ *
+ * Uses the AndroidX compat channel API throughout so this is a safe no-op
+ * on API < 26 without needing Build.VERSION checks at most call sites.
  */
 object NotificationChannels {
     private data class ChannelSpec(val key: String, val label: String, val importance: Int)
@@ -22,6 +27,8 @@ object NotificationChannels {
         ChannelSpec("otp", "OTP", NotificationManagerCompat.IMPORTANCE_HIGH),
         ChannelSpec("updates", "Updates", NotificationManagerCompat.IMPORTANCE_DEFAULT),
     )
+
+    const val SUMMARY_CHANNEL_ID = "sms_summary"
 
     @Volatile
     private var created = false
@@ -36,6 +43,55 @@ object NotificationChannels {
                 .build()
             manager.createNotificationChannel(channel)
         }
+        val summary = NotificationChannelCompat.Builder(SUMMARY_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
+            .setName("Message summaries")
+            .setDescription("Bundled summary shown when several new messages arrive at once")
+            .build()
+        manager.createNotificationChannel(summary)
         created = true
+    }
+
+    /**
+     * Per-conversation channel derived from the category's parent channel,
+     * created lazily the first time a thread gets a notification and
+     * reused afterwards (a cheap existence check, not a rebuild every
+     * time). Falls back to the parent category channel id pre-O, where
+     * conversation channels don't exist as a concept.
+     */
+    fun ensureConversationChannel(
+        context: Context,
+        categoryKey: String,
+        threadId: Long,
+        displayName: String
+    ): String {
+        val parentId = "sms_$categoryKey"
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return parentId
+
+        val conversationId = "${parentId}_conv_$threadId"
+        val manager = NotificationManagerCompat.from(context)
+        if (manager.getNotificationChannelCompat(conversationId) == null) {
+            val importance = specs.firstOrNull { it.key == categoryKey }?.importance
+                ?: NotificationManagerCompat.IMPORTANCE_DEFAULT
+            val channel = NotificationChannelCompat.Builder(conversationId, importance)
+                .setName(displayName)
+                .setConversationId(parentId, threadId.toString())
+                .build()
+            manager.createNotificationChannel(channel)
+        }
+        return conversationId
+    }
+
+    /**
+     * The channel's real current importance as configured in system
+     * settings — which the user may have changed directly there,
+     * independent of this app's own mute toggle. Returns
+     * IMPORTANCE_UNSPECIFIED if the channel doesn't exist yet (e.g. before
+     * [ensureCreated] has ever run).
+     */
+    fun channelImportance(context: Context, channelId: String): Int {
+        return NotificationManagerCompat.from(context)
+            .getNotificationChannelCompat(channelId)
+            ?.importance
+            ?: NotificationManagerCompat.IMPORTANCE_UNSPECIFIED
     }
 }

@@ -4,6 +4,7 @@ import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.provider.Settings
 import android.provider.Telephony
 import androidx.annotation.NonNull
 import io.flutter.embedding.android.FlutterActivity
@@ -33,6 +34,11 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // Ensures channels exist as soon as the app is opened (not just
+        // lazily on the first incoming SMS), so Settings can query their
+        // real system-level importance right away.
+        NotificationChannels.ensureCreated(this)
+
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
         methodChannel = channel
 
@@ -51,6 +57,15 @@ class MainActivity : FlutterActivity() {
                 "setMutedCategories" -> {
                     val categories = (call.argument<List<String>>("categories") ?: emptyList()).toSet()
                     NotificationPrefsRepository.setMuted(this, categories)
+                    result.success(null)
+                }
+                "getChannelImportance" -> {
+                    val channelId = call.argument<String>("channelId") ?: ""
+                    result.success(NotificationChannels.channelImportance(this, channelId))
+                }
+                "openChannelSettings" -> {
+                    val channelId = call.argument<String>("channelId") ?: ""
+                    openChannelSettings(channelId)
                     result.success(null)
                 }
                 "getLaunchComposeExtras" -> {
@@ -135,6 +150,34 @@ class MainActivity : FlutterActivity() {
         if (threadId != -1L) {
             intent.removeExtra("notification_thread_id")
             methodChannel?.invokeMethod("onNotificationThreadTapped", threadId)
+        }
+    }
+
+    /**
+     * Deep-links straight into the OS's per-channel notification settings
+     * (sound, vibration, badge, "priority conversation") for [channelId],
+     * so those controls — which this app has no UI of its own for — are
+     * one tap away instead of requiring the user to hunt through Settings
+     * manually. Falls back to the app-level notification settings screen
+     * pre-O, where individual channels don't exist as a concept yet.
+     */
+    private fun openChannelSettings(channelId: String) {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
+            }
+        } else {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra("app_package", packageName)
+                putExtra("app_uid", applicationInfo.uid)
+            }
+        }
+        try {
+            startActivity(intent)
+        } catch (_: Exception) {
+            // No Settings app able to resolve this intent — nothing
+            // sensible to do beyond not crashing.
         }
     }
 

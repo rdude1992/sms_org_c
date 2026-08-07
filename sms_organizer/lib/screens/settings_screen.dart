@@ -6,11 +6,52 @@ import '../models/category.dart';
 import '../providers/notification_settings_provider.dart';
 import '../providers/sms_provider.dart';
 import '../providers/theme_provider.dart';
+import '../services/sms_platform_service.dart';
 import '../widgets/category_badge.dart';
 import '../widgets/ui/grouped_card.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObserver {
+  // The OS's real, current importance for each category's channel — may be
+  // out of sync with NotificationSettingsProvider.isMuted if the user
+  // changed it directly in system settings rather than through this app.
+  // Absent (not yet loaded) entries are treated as "nothing to flag".
+  Map<SmsCategory, int> _channelImportance = {};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refreshChannelStatus();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // The user may have just come back from the system channel-settings
+  // screen (opened via the "tune" button below), so re-check on resume
+  // rather than only once when this screen first loads.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshChannelStatus();
+  }
+
+  Future<void> _refreshChannelStatus() async {
+    final provider = context.read<SmsProvider>();
+    final entries = await Future.wait(
+      SmsCategory.values.map((c) async => MapEntry(c, await provider.channelImportanceFor(c))),
+    );
+    if (mounted) setState(() => _channelImportance = Map.fromEntries(entries));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -66,13 +107,14 @@ class SettingsScreen extends StatelessWidget {
           GroupedCard(
             children: [
               for (final category in SmsCategory.values)
-                SwitchListTile(
-                  secondary: CategoryBadge(category: category, compact: true),
-                  title: Text(category.label),
-                  subtitle: Text(_categoryNotificationHint(category)),
-                  value: !notificationSettings.isMuted(category),
-                  onChanged: (enabled) =>
+                _NotificationCategoryRow(
+                  category: category,
+                  muted: notificationSettings.isMuted(category),
+                  importance: _channelImportance[category],
+                  hint: _categoryNotificationHint(category),
+                  onToggle: (enabled) =>
                       context.read<NotificationSettingsProvider>().setMuted(category, !enabled),
+                  onCustomize: () => context.read<SmsProvider>().openChannelSettingsFor(category),
                 ),
             ],
           ),
@@ -224,6 +266,77 @@ class _SectionHeader extends StatelessWidget {
           letterSpacing: 0.6,
         ),
       ),
+    );
+  }
+}
+
+/// One notification-category row: the mute switch plus a "tune" button
+/// that deep-links into the OS's own per-channel settings (sound,
+/// vibration, priority conversation) — controls this screen otherwise has
+/// no UI for. When the OS reports the channel itself has been silenced or
+/// blocked (independent of, and possibly out of sync with, this app's own
+/// mute toggle above), a small banner surfaces that directly rather than
+/// leaving notifications silently not showing up with no explanation.
+class _NotificationCategoryRow extends StatelessWidget {
+  final SmsCategory category;
+  final bool muted;
+  final int? importance;
+  final String hint;
+  final ValueChanged<bool> onToggle;
+  final VoidCallback onCustomize;
+
+  const _NotificationCategoryRow({
+    required this.category,
+    required this.muted,
+    required this.importance,
+    required this.hint,
+    required this.onToggle,
+    required this.onCustomize,
+  });
+
+  bool get _silencedByOs => importance != null && NotificationImportance.isSilencedByOs(importance!);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      children: [
+        ListTile(
+          leading: CategoryBadge(category: category, compact: true),
+          title: Text(category.label),
+          subtitle: Text(hint),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Switch(value: !muted, onChanged: onToggle),
+              IconButton(
+                icon: const Icon(Icons.tune, size: 20),
+                tooltip: 'Customize in system settings',
+                onPressed: onCustomize,
+              ),
+            ],
+          ),
+        ),
+        if (_silencedByOs)
+          InkWell(
+            onTap: onCustomize,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Row(
+                children: [
+                  Icon(Icons.notifications_off_outlined, size: 14, color: scheme.error),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Silenced in system settings — tap to fix',
+                      style: TextStyle(fontSize: 11.5, color: scheme.error, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

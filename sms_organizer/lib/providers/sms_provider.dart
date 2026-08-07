@@ -145,6 +145,19 @@ class SmsProvider extends ChangeNotifier {
     return isDefaultSmsApp;
   }
 
+  /// The real, current importance of [category]'s notification channel as
+  /// configured in Android system settings — see
+  /// [SmsPlatformService.getChannelImportance] for why this can disagree
+  /// with [NotificationSettingsProvider.isMuted].
+  Future<int> channelImportanceFor(SmsCategory category) =>
+      _platform.getChannelImportance('sms_${category.name}');
+
+  /// Deep-links into the OS's per-channel settings for [category] (sound,
+  /// vibration, badge, priority conversation) — controls this app has no
+  /// UI of its own for.
+  Future<void> openChannelSettingsFor(SmsCategory category) =>
+      _platform.openChannelSettings('sms_${category.name}');
+
   Future<void> initialize() async {
     isDefaultSmsApp = await _platform.isDefaultSmsApp();
     notifyListeners();
