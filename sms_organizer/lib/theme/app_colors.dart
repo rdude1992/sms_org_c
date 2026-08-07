@@ -33,8 +33,12 @@ class AppColors {
   static const lightOnSurface = zinc900;
   static const lightMuted = zinc100;
   static const lightMutedForeground = zinc500;
-  static const lightBorder = zinc200;
-  static const lightBorderStrong = zinc300;
+  // One step darker than the zinc-200/300 shadcn defaults — those read as
+  // basically invisible hairlines against a white/near-white card (E4E4E7
+  // on FFFFFF is ~1.08:1 contrast), which is why list-row dividers and
+  // card outlines weren't actually showing up.
+  static const lightBorder = zinc300;
+  static const lightBorderStrong = zinc400;
 
   // Dark theme surface tokens.
   static const darkScaffold = zinc950;
@@ -42,6 +46,6 @@ class AppColors {
   static const darkOnSurface = zinc50;
   static const darkMuted = zinc800;
   static const darkMutedForeground = zinc400;
-  static const darkBorder = zinc800;
-  static const darkBorderStrong = zinc700;
+  static const darkBorder = zinc700;
+  static const darkBorderStrong = zinc600;
 }
