@@ -105,6 +105,19 @@ class SmsProvider extends ChangeNotifier {
     return list;
   }
 
+  /// Per-category message counts across every sent/received SMS (drafts
+  /// excluded, same as [_sentOrReceived]) — used by the Settings screen's
+  /// message-count summary. Sum of the values equals [totalMessageCount].
+  Map<SmsCategory, int> get categoryCounts {
+    final counts = {for (final c in SmsCategory.values) c: 0};
+    for (final m in _sentOrReceived) {
+      counts[m.category] = counts[m.category]! + 1;
+    }
+    return counts;
+  }
+
+  int get totalMessageCount => _sentOrReceived.length;
+
   bool isPinned(int threadId) => pinnedThreadIds.contains(threadId);
   bool isStarred(int messageId) => starredMessageIds.contains(messageId);
   List<Transaction> get transactions => _transactions;
