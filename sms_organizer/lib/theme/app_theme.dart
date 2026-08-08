@@ -2,20 +2,21 @@ import 'package:flutter/material.dart';
 import 'app_colors.dart';
 
 /// App-wide [ThemeData] for light and dark mode, built to read like
-/// shadcn/ui on the web: flat surfaces, hairline borders instead of
-/// shadows, muted neutral backgrounds with a single brand accent, and
-/// generous rounded corners on cards/inputs/controls.
+/// claude.ai: a warm paper/ink canvas instead of cool gray, hairline
+/// borders instead of shadows, muted neutral backgrounds with a single
+/// terracotta brand accent, and generous rounded corners on
+/// cards/inputs/controls.
 ///
-/// Both themes share one [ColorScheme] seed (see [AppColors.seed]) so
-/// Material 3's contrast-safe tone generation still drives
-/// primary/error/onX pairs — only the neutral surface/border/muted roles
-/// are overridden to match the shadcn "zinc" palette instead of Material's
-/// default tonal surfaces.
+/// Both themes share one [ColorScheme] seed (the brand terracotta) so
+/// Material 3's contrast-safe tone generation still drives secondary/
+/// tertiary tones — the primary, error, and neutral surface/border/muted
+/// roles are overridden with exact brand tokens from [AppColors] instead
+/// of Material's generated tones.
 class AppTheme {
   AppTheme._();
 
-  static const _cardRadius = 14.0;
-  static const _controlRadius = 10.0;
+  static const _cardRadius = 16.0;
+  static const _controlRadius = 12.0;
 
   static ThemeData light = _build(Brightness.light);
   static ThemeData dark = _build(Brightness.dark);
@@ -30,16 +31,21 @@ class AppTheme {
     final mutedForeground = isDark ? AppColors.darkMutedForeground : AppColors.lightMutedForeground;
     final border = isDark ? AppColors.darkBorder : AppColors.lightBorder;
     final borderStrong = isDark ? AppColors.darkBorderStrong : AppColors.lightBorderStrong;
+    final primary = isDark ? AppColors.darkPrimary : AppColors.lightPrimary;
+    final onPrimary = isDark ? AppColors.darkOnPrimary : AppColors.lightOnPrimary;
+    final destructive = isDark ? AppColors.darkDestructive : AppColors.lightDestructive;
 
-    final base = ColorScheme.fromSeed(seedColor: AppColors.seed, brightness: brightness);
+    final base = ColorScheme.fromSeed(seedColor: primary, brightness: brightness);
     final scheme = base.copyWith(
+      primary: primary,
+      onPrimary: onPrimary,
       surface: surface,
       onSurface: onSurface,
       surfaceVariant: muted,
       onSurfaceVariant: mutedForeground,
       outline: borderStrong,
       outlineVariant: border,
-      error: AppColors.destructive,
+      error: destructive,
       onError: Colors.white,
     );
 
@@ -188,7 +194,7 @@ class AppTheme {
         focusElevation: 1,
         hoverElevation: 2,
         highlightElevation: 2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: const CircleBorder(),
       ),
 
       dialogTheme: DialogThemeData(
@@ -244,7 +250,7 @@ class AppTheme {
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) return scheme.primary;
-          return isDark ? AppColors.zinc400 : Colors.white;
+          return isDark ? AppColors.stone400 : Colors.white;
         }),
         trackColor: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) return scheme.primary.withOpacity(0.3);
@@ -318,9 +324,9 @@ class AppTheme {
 
   static TextTheme _textTheme(Color onSurface) {
     return TextTheme(
-      displaySmall: TextStyle(color: onSurface, fontWeight: FontWeight.w700, letterSpacing: -0.5),
-      headlineSmall: TextStyle(color: onSurface, fontWeight: FontWeight.w700, letterSpacing: -0.3),
-      titleLarge: TextStyle(color: onSurface, fontWeight: FontWeight.w700, letterSpacing: -0.2),
+      displaySmall: TextStyle(color: onSurface, fontWeight: FontWeight.w700, letterSpacing: -0.2),
+      headlineSmall: TextStyle(color: onSurface, fontWeight: FontWeight.w700, letterSpacing: -0.1),
+      titleLarge: TextStyle(color: onSurface, fontWeight: FontWeight.w700, letterSpacing: -0.1),
       titleMedium: TextStyle(color: onSurface, fontWeight: FontWeight.w600),
       titleSmall: TextStyle(color: onSurface, fontWeight: FontWeight.w600),
       bodyLarge: TextStyle(color: onSurface),

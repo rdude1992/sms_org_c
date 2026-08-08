@@ -1,51 +1,56 @@
 import 'package:flutter/material.dart';
 
-/// Neutral "zinc" scale and semantic tokens used to flavour Flutter's
-/// Material 3 [ColorScheme] into a flat, bordered, shadcn/ui-style look —
-/// muted neutrals with a single brand accent, rather than the tonal
-/// surfaces Material 3 generates by default.
+/// Warm "stone" neutral scale and semantic tokens styled after Claude's
+/// (claude.ai) UI: a paper/cream canvas rather than cool gray, hairline
+/// borders instead of shadows, and a single terracotta brand accent used
+/// everywhere Material would otherwise default to blue.
 class AppColors {
   AppColors._();
 
-  // Zinc neutral ramp (shared across light/dark).
-  static const zinc50 = Color(0xFFFAFAFA);
-  static const zinc100 = Color(0xFFF4F4F5);
-  static const zinc200 = Color(0xFFE4E4E7);
-  static const zinc300 = Color(0xFFD4D4D8);
-  static const zinc400 = Color(0xFFA1A1AA);
-  static const zinc500 = Color(0xFF71717A);
-  static const zinc600 = Color(0xFF52525B);
-  static const zinc700 = Color(0xFF3F3F46);
-  static const zinc800 = Color(0xFF27272A);
-  static const zinc900 = Color(0xFF18181B);
-  static const zinc950 = Color(0xFF09090B);
+  // Warm neutral ramp (shared across light/dark) — Tailwind's "stone"
+  // scale, which is toned yellow/brown rather than the blue-gray of zinc.
+  static const stone50 = Color(0xFFFAFAF9);
+  static const stone100 = Color(0xFFF5F5F4);
+  static const stone200 = Color(0xFFE7E5E4);
+  static const stone300 = Color(0xFFD6D3D1);
+  static const stone400 = Color(0xFFA8A29E);
+  static const stone500 = Color(0xFF78716C);
+  static const stone600 = Color(0xFF57534E);
+  static const stone700 = Color(0xFF44403C);
+  static const stone800 = Color(0xFF292524);
+  static const stone900 = Color(0xFF1C1917);
+  static const stone950 = Color(0xFF0C0A09);
 
-  /// Brand seed the Material 3 [ColorScheme] is generated from — kept as
-  /// the app's one accent colour so primary/error/tertiary tones stay
-  /// perceptually consistent and accessible in both themes.
-  static const seed = Color(0xFF3B6DF5);
+  /// Claude's signature clay/terracotta accent — the app's one brand
+  /// colour, used for the seeded [ColorScheme] as well as anywhere a
+  /// screen needs the brand colour directly instead of through the theme.
+  static const lightPrimary = Color(0xFFC96442);
+  static const lightOnPrimary = Color(0xFFFFFFFF);
+  // A touch lighter/warmer so it still pops against the near-black dark
+  // background instead of reading muddy.
+  static const darkPrimary = Color(0xFFD97757);
+  static const darkOnPrimary = Color(0xFFFFFFFF);
 
-  static const destructive = Color(0xFFEF4444);
+  static const lightDestructive = Color(0xFFC0152F);
+  static const darkDestructive = Color(0xFFE5484D);
 
-  // Light theme surface tokens.
-  static const lightScaffold = zinc50;
+  // Light theme surface tokens — warm cream canvas with white cards, the
+  // same "paper" feel as claude.ai's light mode.
+  static const lightScaffold = Color(0xFFFAF9F5);
   static const lightSurface = Color(0xFFFFFFFF);
-  static const lightOnSurface = zinc900;
-  static const lightMuted = zinc100;
-  static const lightMutedForeground = zinc500;
-  // One step darker than the zinc-200/300 shadcn defaults — those read as
-  // basically invisible hairlines against a white/near-white card (E4E4E7
-  // on FFFFFF is ~1.08:1 contrast), which is why list-row dividers and
-  // card outlines weren't actually showing up.
-  static const lightBorder = zinc300;
-  static const lightBorderStrong = zinc400;
+  static const lightOnSurface = Color(0xFF262624);
+  static const lightMuted = Color(0xFFF0EEE6);
+  static const lightMutedForeground = Color(0xFF83827D);
+  static const lightBorder = Color(0xFFE1DED4);
+  static const lightBorderStrong = Color(0xFFC9C4B8);
 
-  // Dark theme surface tokens.
-  static const darkScaffold = zinc950;
-  static const darkSurface = zinc900;
-  static const darkOnSurface = zinc50;
-  static const darkMuted = zinc800;
-  static const darkMutedForeground = zinc400;
-  static const darkBorder = zinc700;
-  static const darkBorderStrong = zinc600;
+  // Dark theme surface tokens — warm near-black ink instead of a cool
+  // slate/zinc dark mode.
+  static const darkScaffold = Color(0xFF262624);
+  static const darkSurface = Color(0xFF30302E);
+  static const darkOnSurface = Color(0xFFF5F4EE);
+  static const darkMuted = Color(0xFF3A3935);
+  static const darkMutedForeground = Color(0xFFA3A299);
+  static const darkBorder = Color(0xFF45443F);
+  static const darkBorderStrong = Color(0xFF57554D);
 }

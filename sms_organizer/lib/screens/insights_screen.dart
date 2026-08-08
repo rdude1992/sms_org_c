@@ -572,7 +572,7 @@ class _InstrumentDonut extends StatelessWidget {
   });
 
   static const _palette = [
-    Color(0xFF3B6DF5),
+    Color(0xFFC96442),
     Color(0xFF10B981),
     Color(0xFFF59E0B),
     Color(0xFF8B5CF6),
@@ -770,7 +770,7 @@ class _InvestmentCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.trending_up, color: Color(0xFF3B6DF5)),
+                  Icon(Icons.trending_up, color: Theme.of(context).colorScheme.primary),
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text('Investments', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -783,7 +783,8 @@ class _InvestmentCard extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: _miniStat(context, 'Invested', summary.totalInvested, const Color(0xFF3B6DF5)),
+                    child: _miniStat(
+                        context, 'Invested', summary.totalInvested, Theme.of(context).colorScheme.primary),
                   ),
                   Expanded(
                     child: _miniStat(context, 'Redeemed', summary.totalRedeemed, const Color(0xFFF59E0B)),

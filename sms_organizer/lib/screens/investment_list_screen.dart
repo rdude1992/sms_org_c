@@ -66,7 +66,7 @@ class InvestmentListScreen extends StatelessWidget {
                     child: Row(
                       children: [
                         Expanded(
-                          child: TotalStat(label: 'Invested', value: investedTotal, color: const Color(0xFF3B6DF5)),
+                          child: TotalStat(label: 'Invested', value: investedTotal, color: scheme.primary),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -165,12 +165,13 @@ class _AmcListView extends StatelessWidget {
       separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
       itemBuilder: (context, index) {
         final p = providers[index];
+        final primary = Theme.of(context).colorScheme.primary;
         return ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           leading: CircleAvatar(
             radius: 20,
-            backgroundColor: const Color(0xFF3B6DF5).withOpacity(0.12),
-            child: const Icon(Icons.account_balance_outlined, color: Color(0xFF3B6DF5), size: 18),
+            backgroundColor: primary.withOpacity(0.12),
+            child: Icon(Icons.account_balance_outlined, color: primary, size: 18),
           ),
           title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w600)),
           subtitle: Text('${p.count} event${p.count == 1 ? '' : 's'}'),
@@ -180,7 +181,7 @@ class _AmcListView extends StatelessWidget {
             children: [
               if (p.invested > 0)
                 Text('-${Formatters.currency(p.invested)}',
-                    style: const TextStyle(color: Color(0xFF3B6DF5), fontSize: 12)),
+                    style: TextStyle(color: primary, fontSize: 12)),
               if (p.redeemed > 0)
                 Text('+${Formatters.currency(p.redeemed)}',
                     style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 12)),

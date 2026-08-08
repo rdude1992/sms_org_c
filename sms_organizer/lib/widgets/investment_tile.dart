@@ -11,7 +11,7 @@ class InvestmentTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isRedemption = investment.kind.isRedemption;
-    final color = isRedemption ? const Color(0xFFF59E0B) : const Color(0xFF3B6DF5);
+    final color = isRedemption ? const Color(0xFFF59E0B) : Theme.of(context).colorScheme.primary;
     final sign = isRedemption ? '+' : '-';
     final icon = isRedemption ? Icons.call_received : Icons.trending_up;
 
