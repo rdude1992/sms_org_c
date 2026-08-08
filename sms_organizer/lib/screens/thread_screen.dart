@@ -8,6 +8,7 @@ import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
 import '../widgets/date_separator.dart';
 import '../widgets/message_bubble.dart';
+import '../widgets/category_badge.dart';
 import '../widgets/multi_select_bar.dart';
 import '../widgets/sim_picker.dart';
 import 'compose_screen.dart';
@@ -108,7 +109,15 @@ class _ThreadScreenState extends State<ThreadScreen> {
                   onMarkUnread: () => provider.markSelectedRead(false),
                   onDelete: provider.deleteSelected,
                 )
-              : AppBar(title: Text(provider.displayNameFor(conversation.address))),
+              : AppBar(
+                  title: Text(provider.displayNameFor(conversation.address)),
+                  actions: [
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: CategoryBadge(category: conversation.latest.category, compact: true),
+                    ),
+                  ],
+                ),
           body: Column(
             children: [
               Expanded(
