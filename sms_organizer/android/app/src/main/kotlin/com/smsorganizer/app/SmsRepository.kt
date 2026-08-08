@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Telephony
 import android.telephony.SmsManager
+import androidx.core.app.NotificationManagerCompat
 
 /**
  * Thin wrapper around the platform SMS ContentProvider (content://sms).
@@ -147,12 +148,40 @@ object SmsRepository {
         }
     }
 
+    /**
+     * Marking read here (whether from the app's own UI or a notification
+     * quick-action) is the one place all "read" state changes funnel
+     * through, so it's also where the stacked notification for a thread
+     * gets cleared once every incoming message in it has been read — the
+     * notification group should only ever be stacking unread threads, not
+     * ones the user has already caught up on.
+     */
     fun markRead(context: Context, ids: List<Long>, read: Boolean): Int {
         var updated = 0
+        val affectedThreadIds = mutableSetOf<Long>()
         val values = ContentValues().apply { put(Telephony.Sms.READ, if (read) 1 else 0) }
         for (id in ids) {
             val uri = Uri.withAppendedPath(Telephony.Sms.CONTENT_URI, id.toString())
+            if (read) {
+                context.contentResolver.query(
+                    uri,
+                    arrayOf(Telephony.Sms.THREAD_ID),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) affectedThreadIds.add(cursor.getLong(0))
+                }
+            }
             updated += context.contentResolver.update(uri, values, null, null)
+        }
+        if (read) {
+            for (threadId in affectedThreadIds) {
+                if (getUnreadIncomingIds(context, threadId).isEmpty()) {
+                    NotificationManagerCompat.from(context).cancel(threadId.toInt())
+                    ConversationHistoryStore.clear(context, threadId)
+                }
+            }
         }
         return updated
     }
