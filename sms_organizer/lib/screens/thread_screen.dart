@@ -19,7 +19,18 @@ class ThreadScreen extends StatefulWidget {
   /// scrolls to and briefly highlights this message on open.
   final int? highlightMessageId;
 
-  const ThreadScreen({super.key, required this.threadId, this.highlightMessageId});
+  /// Reply text to pre-fill, taking priority over any saved draft — set
+  /// when the compose screen hands off to an existing thread after the
+  /// user picks a contact they'd already started typing a message to, so
+  /// that in-progress text isn't lost in the handoff.
+  final String? initialReplyText;
+
+  const ThreadScreen({
+    super.key,
+    required this.threadId,
+    this.highlightMessageId,
+    this.initialReplyText,
+  });
 
   @override
   State<ThreadScreen> createState() => _ThreadScreenState();
@@ -75,6 +86,13 @@ class _ThreadScreenState extends State<ThreadScreen> {
         _replyController.text = d.body;
         break;
       }
+    }
+    // Text carried over from the compose screen wins over whatever was on
+    // disk — it hasn't been saved anywhere yet, so the on-disk draft (if
+    // any) would otherwise silently clobber it.
+    final initialText = widget.initialReplyText?.trim();
+    if (initialText != null && initialText.isNotEmpty) {
+      _replyController.text = initialText;
     }
   }
 
