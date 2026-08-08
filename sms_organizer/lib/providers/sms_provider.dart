@@ -194,8 +194,18 @@ class SmsProvider extends ChangeNotifier {
   /// alive) when a notification was tapped. Subscribe once at startup.
   Stream<int> get onNotificationThreadTapped => _platform.onNotificationThreadTapped;
 
-  InsightsSummary insightsSummary({DateTime? from, DateTime? to}) {
-    return _insights.build(transactions: _transactions, investments: _investments, from: from, to: to);
+  InsightsSummary insightsSummary({
+    DateTime? from,
+    DateTime? to,
+    TrendGranularity granularity = TrendGranularity.month,
+  }) {
+    return _insights.build(
+      transactions: _transactions,
+      investments: _investments,
+      from: from,
+      to: to,
+      granularity: granularity,
+    );
   }
 
   Future<Map<String, String?>?> checkLaunchComposeExtras() => _platform.getLaunchComposeExtras();

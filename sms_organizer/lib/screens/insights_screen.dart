@@ -42,6 +42,33 @@ extension on InsightsRange {
         return (DateTime(now.year, 1, 1), now);
     }
   }
+
+  /// How finely the trend chart should bucket this range — day-by-day for
+  /// a single month is readable, but the same granularity across a whole
+  /// year (or all time) would be hundreds of unreadable bars, so wider
+  /// ranges bucket coarser.
+  TrendGranularity get trendGranularity {
+    switch (this) {
+      case InsightsRange.thisMonth:
+        return TrendGranularity.day;
+      case InsightsRange.last3Months:
+        return TrendGranularity.week;
+      case InsightsRange.thisYear:
+      case InsightsRange.allTime:
+        return TrendGranularity.month;
+    }
+  }
+
+  String get trendTitle {
+    switch (trendGranularity) {
+      case TrendGranularity.day:
+        return 'Daily trend';
+      case TrendGranularity.week:
+        return 'Weekly trend';
+      case TrendGranularity.month:
+        return 'Monthly trend';
+    }
+  }
 }
 
 class InsightsScreen extends StatefulWidget {
@@ -60,7 +87,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
       builder: (context, provider, _) {
         final now = DateTime.now();
         final (from, to) = _range.boundsFrom(now);
-        final summary = provider.insightsSummary(from: from, to: to);
+        final summary =
+            provider.insightsSummary(from: from, to: to, granularity: _range.trendGranularity);
 
         // Previous period of equal length, for the trend deltas — undefined
         // (and hidden) for "All time" since there's no prior window to
@@ -124,17 +152,15 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ),
                               ),
                               const SizedBox(height: 20),
-                              Text('Monthly trend', style: Theme.of(context).textTheme.titleMedium),
+                              Text(_range.trendTitle, style: Theme.of(context).textTheme.titleMedium),
                               const SizedBox(height: 12),
-                              _MonthlyChart(
+                              _TrendChart(
                                 summary: summary,
-                                onTapMonth: (month) => _openDrilldown(
+                                onTapBucket: (bucketStart) => _openTrendDrilldown(
                                   context,
-                                  title: Formatters.monthYear(month),
-                                  transactions: filteredTransactions
-                                      .where((t) =>
-                                          t.date.year == month.year && t.date.month == month.month)
-                                      .toList(),
+                                  granularity: summary.trendGranularity,
+                                  bucketStart: bucketStart,
+                                  transactions: filteredTransactions,
                                 ),
                               ),
                               const SizedBox(height: 24),
@@ -245,6 +271,41 @@ class _InsightsScreenState extends State<InsightsScreen> {
       MaterialPageRoute(
         builder: (_) => TransactionListScreen(title: title, subtitle: subtitle, transactions: transactions),
       ),
+    );
+  }
+
+  /// Same as [_openDrilldown], but for a tapped trend-chart bar — the
+  /// matching window and title both depend on [granularity], since
+  /// [bucketStart] means a different span (a day, a week, a month)
+  /// depending on it.
+  void _openTrendDrilldown(
+    BuildContext context, {
+    required TrendGranularity granularity,
+    required DateTime bucketStart,
+    required List<Transaction> transactions,
+  }) {
+    late final String title;
+    late final bool Function(Transaction) matchesBucket;
+    switch (granularity) {
+      case TrendGranularity.day:
+        title = Formatters.dayMonthYear(bucketStart);
+        matchesBucket = (t) => Formatters.isSameDay(t.date, bucketStart);
+        break;
+      case TrendGranularity.week:
+        final weekEnd = DateTime(bucketStart.year, bucketStart.month, bucketStart.day + 6, 23, 59, 59);
+        title = 'Week of ${Formatters.dayMonth(bucketStart)}';
+        matchesBucket = (t) => !t.date.isBefore(bucketStart) && !t.date.isAfter(weekEnd);
+        break;
+      case TrendGranularity.month:
+        title = Formatters.monthYear(bucketStart);
+        matchesBucket = (t) => t.date.year == bucketStart.year && t.date.month == bucketStart.month;
+        break;
+    }
+    _openDrilldown(
+      context,
+      title: title,
+      subtitle: _range.label,
+      transactions: transactions.where(matchesBucket).toList(),
     );
   }
 }
@@ -403,19 +464,47 @@ class _TrendBadge extends StatelessWidget {
   }
 }
 
-class _MonthlyChart extends StatelessWidget {
+/// Stacked bar chart of credit/debit per [InsightsSummary.trend] bucket —
+/// each bar's height is the bucket's total activity, split into a credit
+/// segment and a debit segment stacked on top of it. Bucketing (day / week
+/// / month) comes from [InsightsSummary.trendGranularity], set by the
+/// selected [InsightsRange] — one bar per day for "This month" instead of
+/// the single point a whole-range monthly bucket used to collapse into.
+class _TrendChart extends StatelessWidget {
   final InsightsSummary summary;
-  final ValueChanged<DateTime> onTapMonth;
-  const _MonthlyChart({required this.summary, required this.onTapMonth});
+  final ValueChanged<DateTime> onTapBucket;
+  const _TrendChart({required this.summary, required this.onTapBucket});
 
   static const _creditColor = Color(0xFF10B981);
   static const _debitColor = Color(0xFFEF4444);
+
+  String _bucketLabel(DateTime date) {
+    switch (summary.trendGranularity) {
+      case TrendGranularity.day:
+        return Formatters.dayOnly(date);
+      case TrendGranularity.week:
+        return Formatters.dayMonth(date);
+      case TrendGranularity.month:
+        return Formatters.monthYear(date);
+    }
+  }
+
+  String get _perBucketLabel {
+    switch (summary.trendGranularity) {
+      case TrendGranularity.day:
+        return 'day';
+      case TrendGranularity.week:
+        return 'week';
+      case TrendGranularity.month:
+        return 'month';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    if (summary.monthly.isEmpty) {
+    if (summary.trend.isEmpty) {
       return Card(
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -425,27 +514,28 @@ class _MonthlyChart extends StatelessWidget {
         ),
       );
     }
-    final months = summary.monthly;
-    final maxVal = months
-        .map((m) => m.credit > m.debit ? m.credit : m.debit)
-        .fold<double>(0, (a, b) => a > b ? a : b);
+    final points = summary.trend;
+    final maxVal = points.map((p) => p.credit + p.debit).fold<double>(0, (a, b) => a > b ? a : b);
     final maxY = maxVal == 0 ? 1.0 : maxVal * 1.2;
-    final avgCredit = months.map((m) => m.credit).reduce((a, b) => a + b) / months.length;
-    final avgDebit = months.map((m) => m.debit).reduce((a, b) => a + b) / months.length;
+    final avgCredit = points.map((p) => p.credit).reduce((a, b) => a + b) / points.length;
+    final avgDebit = points.map((p) => p.debit).reduce((a, b) => a + b) / points.length;
 
-    // However many months are in range, only label a handful of them —
-    // cramming a "d MMM" string under every single point is what made the
-    // old chart unreadable once the range grew past a few months.
+    // However many buckets are in range, only label a handful of them —
+    // cramming a label under every single bar is what made this unreadable
+    // once "This month" started putting up to 31 daily bars on screen.
     const maxLabels = 6;
-    final labelInterval = (months.length / maxLabels).ceil().clamp(1, months.length);
+    final labelInterval = (points.length / maxLabels).ceil().clamp(1, points.length);
 
-    void handleTap(FlTouchEvent event, LineTouchResponse? response) {
+    // Narrower, tighter-packed bars once there are enough buckets that
+    // full-width bars would overlap (31 daily bars vs. 12 monthly ones).
+    final barWidth = points.length > 20 ? 5.0 : (points.length > 10 ? 9.0 : 16.0);
+    final groupsSpace = points.length > 20 ? 3.0 : (points.length > 10 ? 6.0 : 14.0);
+
+    void handleTap(FlTouchEvent event, BarTouchResponse? response) {
       if (event is! FlTapUpEvent) return;
-      final spots = response?.lineBarSpots;
-      if (spots == null || spots.isEmpty) return;
-      final idx = spots.first.x.toInt();
-      if (idx < 0 || idx >= months.length) return;
-      onTapMonth(months[idx].month);
+      final index = response?.spot?.touchedBarGroupIndex;
+      if (index == null || index < 0 || index >= points.length) return;
+      onTapBucket(points[index].date);
     }
 
     return Card(
@@ -464,44 +554,70 @@ class _MonthlyChart extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Avg ${Formatters.currency(avgCredit)} in · ${Formatters.currency(avgDebit)} out / month',
+              'Avg ${Formatters.currency(avgCredit)} in · ${Formatters.currency(avgDebit)} out / $_perBucketLabel',
               style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 12),
             SizedBox(
               height: 200,
-              child: LineChart(
-                LineChartData(
+              child: BarChart(
+                BarChartData(
                   minY: 0,
                   maxY: maxY,
-                  minX: 0,
-                  maxX: (months.length - 1).toDouble(),
-                  lineTouchData: LineTouchData(
+                  alignment: BarChartAlignment.spaceEvenly,
+                  groupsSpace: groupsSpace,
+                  barTouchData: BarTouchData(
                     touchCallback: handleTap,
-                    touchTooltipData: LineTouchTooltipData(
+                    touchTooltipData: BarTouchTooltipData(
                       tooltipRoundedRadius: 8,
                       tooltipPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       getTooltipColor: (_) => scheme.onSurface,
-                      getTooltipItems: (spots) => spots.map((s) {
-                        final idx = s.x.toInt();
-                        if (idx < 0 || idx >= months.length) return null;
-                        final isCredit = s.barIndex == 0;
-                        return LineTooltipItem(
-                          '${Formatters.monthYear(months[idx].month)}\n'
-                          '${Formatters.currency(s.y)}',
+                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                        if (groupIndex < 0 || groupIndex >= points.length) return null;
+                        final p = points[groupIndex];
+                        return BarTooltipItem(
+                          '${_bucketLabel(p.date)}\n',
                           TextStyle(
-                            color: isCredit ? _creditColor : _debitColor,
+                            color: scheme.surface,
                             fontSize: 11,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w700,
                             fontFamily: 'Inter',
                           ),
+                          children: [
+                            TextSpan(
+                              text: 'In ${Formatters.currency(p.credit)}\n',
+                              style:
+                                  const TextStyle(color: _creditColor, fontSize: 11, fontFamily: 'Inter'),
+                            ),
+                            TextSpan(
+                              text: 'Out ${Formatters.currency(p.debit)}',
+                              style: const TextStyle(color: _debitColor, fontSize: 11, fontFamily: 'Inter'),
+                            ),
+                          ],
                         );
-                      }).toList(),
+                      },
                     ),
                   ),
-                  lineBarsData: [
-                    _line(months.map((m) => m.credit).toList(), _creditColor),
-                    _line(months.map((m) => m.debit).toList(), _debitColor),
+                  barGroups: [
+                    for (var i = 0; i < points.length; i++)
+                      BarChartGroupData(
+                        x: i,
+                        barRods: [
+                          BarChartRodData(
+                            toY: points[i].credit + points[i].debit,
+                            width: barWidth,
+                            borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
+                            rodStackItems: [
+                              BarChartRodStackItem(0, points[i].credit, _creditColor),
+                              BarChartRodStackItem(
+                                points[i].credit,
+                                points[i].credit + points[i].debit,
+                                _debitColor,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                   ],
                   titlesData: FlTitlesData(
                     leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -511,16 +627,15 @@ class _MonthlyChart extends StatelessWidget {
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: 28,
-                        interval: 1,
                         getTitlesWidget: (value, meta) {
                           final idx = value.toInt();
-                          if (idx < 0 || idx >= months.length) return const SizedBox.shrink();
-                          final isLast = idx == months.length - 1;
+                          if (idx < 0 || idx >= points.length) return const SizedBox.shrink();
+                          final isLast = idx == points.length - 1;
                           if (idx % labelInterval != 0 && !isLast) return const SizedBox.shrink();
                           return Padding(
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
-                              Formatters.monthYear(months[idx].month),
+                              _bucketLabel(points[idx].date),
                               style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
                             ),
                           );
@@ -540,26 +655,6 @@ class _MonthlyChart extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  LineChartBarData _line(List<double> values, Color color) {
-    return LineChartBarData(
-      spots: [for (int i = 0; i < values.length; i++) FlSpot(i.toDouble(), values[i])],
-      isCurved: true,
-      curveSmoothness: 0.15,
-      color: color,
-      barWidth: 2.5,
-      isStrokeCapRound: true,
-      dotData: FlDotData(show: values.length <= 12),
-      belowBarData: BarAreaData(
-        show: true,
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [color.withOpacity(0.22), color.withOpacity(0)],
         ),
       ),
     );

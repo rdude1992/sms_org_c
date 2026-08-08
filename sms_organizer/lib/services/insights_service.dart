@@ -1,10 +1,16 @@
 import '../models/transaction.dart';
 
-class MonthlyTotal {
-  final DateTime month; // normalised to the 1st of the month
+/// How finely [InsightsSummary.trend] buckets transactions — chosen by the
+/// caller to match how wide a date range it's summarizing (a single month
+/// reads best bucketed by day; a whole year needs to be by month, or
+/// there'd be hundreds of bars).
+enum TrendGranularity { day, week, month }
+
+class TrendPoint {
+  final DateTime date; // bucket start; meaning depends on the granularity used to build it
   final double credit;
   final double debit;
-  MonthlyTotal(this.month, this.credit, this.debit);
+  TrendPoint(this.date, this.credit, this.debit);
 }
 
 class InstrumentSummary {
@@ -93,7 +99,8 @@ class InsightsSummary {
   final double totalDebit;
   final int transactionCount;
   final List<InstrumentSummary> byInstrument;
-  final List<MonthlyTotal> monthly;
+  final List<TrendPoint> trend;
+  final TrendGranularity trendGranularity;
   final double totalInvested;
   final double totalRedeemed;
   final int investmentEventCount;
@@ -103,7 +110,8 @@ class InsightsSummary {
     required this.totalDebit,
     required this.transactionCount,
     required this.byInstrument,
-    required this.monthly,
+    required this.trend,
+    required this.trendGranularity,
     required this.totalInvested,
     required this.totalRedeemed,
     required this.investmentEventCount,
@@ -118,6 +126,7 @@ class InsightsService {
     required List<InvestmentEvent> investments,
     DateTime? from,
     DateTime? to,
+    TrendGranularity granularity = TrendGranularity.month,
   }) {
     final filtered = transactions.where((t) {
       if (from != null && t.date.isBefore(from)) return false;
@@ -128,7 +137,7 @@ class InsightsService {
     double totalCredit = 0;
     double totalDebit = 0;
     final Map<String, InstrumentSummary> instrumentMap = {};
-    final Map<String, MonthlyTotal> monthlyMap = {};
+    final Map<String, TrendPoint> trendMap = {};
 
     for (final t in filtered) {
       if (t.direction == TxnDirection.credit) {
@@ -155,14 +164,14 @@ class InsightsService {
       }
       summary.count += 1;
 
-      final monthKey = DateTime(t.date.year, t.date.month);
-      final existing = monthlyMap[monthKey.toIso8601String()];
+      final bucketStart = _bucketStart(t.date, granularity);
+      final existing = trendMap[bucketStart.toIso8601String()];
       final newCredit = (existing?.credit ?? 0) + (t.direction == TxnDirection.credit ? t.amount : 0);
       final newDebit = (existing?.debit ?? 0) + (t.direction == TxnDirection.debit ? t.amount : 0);
-      monthlyMap[monthKey.toIso8601String()] = MonthlyTotal(monthKey, newCredit, newDebit);
+      trendMap[bucketStart.toIso8601String()] = TrendPoint(bucketStart, newCredit, newDebit);
     }
 
-    final monthlyList = monthlyMap.values.toList()..sort((a, b) => a.month.compareTo(b.month));
+    final trendList = trendMap.values.toList()..sort((a, b) => a.date.compareTo(b.date));
     final instrumentList = instrumentMap.values.toList()
       ..sort((a, b) => (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit));
 
@@ -185,10 +194,25 @@ class InsightsService {
       totalDebit: totalDebit,
       transactionCount: filtered.length,
       byInstrument: instrumentList,
-      monthly: monthlyList,
+      trend: trendList,
+      trendGranularity: granularity,
       totalInvested: invested,
       totalRedeemed: redeemed,
       investmentEventCount: investmentEvents,
     );
+  }
+
+  /// Truncates [date] to the start of its bucket for [granularity] — a
+  /// calendar day, the Monday of its week, or the 1st of its month.
+  DateTime _bucketStart(DateTime date, TrendGranularity granularity) {
+    switch (granularity) {
+      case TrendGranularity.day:
+        return DateTime(date.year, date.month, date.day);
+      case TrendGranularity.week:
+        final dayOnly = DateTime(date.year, date.month, date.day);
+        return dayOnly.subtract(Duration(days: date.weekday - 1));
+      case TrendGranularity.month:
+        return DateTime(date.year, date.month);
+    }
   }
 }
