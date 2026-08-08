@@ -413,15 +413,25 @@ class _MonthlyChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     if (summary.monthly.isEmpty) {
-      return const SizedBox(height: 120, child: Center(child: Text('Not enough data yet.')));
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Center(
+            child: Text('Not enough data yet.', style: TextStyle(color: scheme.onSurfaceVariant)),
+          ),
+        ),
+      );
     }
     final months = summary.monthly;
-    final scheme = Theme.of(context).colorScheme;
     final maxVal = months
         .map((m) => m.credit > m.debit ? m.credit : m.debit)
         .fold<double>(0, (a, b) => a > b ? a : b);
     final maxY = maxVal == 0 ? 1.0 : maxVal * 1.2;
+    final avgCredit = months.map((m) => m.credit).reduce((a, b) => a + b) / months.length;
+    final avgDebit = months.map((m) => m.debit).reduce((a, b) => a + b) / months.length;
 
     // However many months are in range, only label a handful of them —
     // cramming a "d MMM" string under every single point is what made the
@@ -438,85 +448,100 @@ class _MonthlyChart extends StatelessWidget {
       onTapMonth(months[idx].month);
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: const [
-            _LegendDot(color: _creditColor, label: 'Credited'),
-            SizedBox(width: 16),
-            _LegendDot(color: _debitColor, label: 'Debited'),
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                _LegendDot(color: _creditColor, label: 'Credited'),
+                SizedBox(width: 16),
+                _LegendDot(color: _debitColor, label: 'Debited'),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Avg ${Formatters.currency(avgCredit)} in · ${Formatters.currency(avgDebit)} out / month',
+              style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 200,
+              child: LineChart(
+                LineChartData(
+                  minY: 0,
+                  maxY: maxY,
+                  minX: 0,
+                  maxX: (months.length - 1).toDouble(),
+                  lineTouchData: LineTouchData(
+                    touchCallback: handleTap,
+                    touchTooltipData: LineTouchTooltipData(
+                      tooltipRoundedRadius: 8,
+                      tooltipPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      getTooltipColor: (_) => scheme.onSurface,
+                      getTooltipItems: (spots) => spots.map((s) {
+                        final idx = s.x.toInt();
+                        if (idx < 0 || idx >= months.length) return null;
+                        final isCredit = s.barIndex == 0;
+                        return LineTooltipItem(
+                          '${Formatters.monthYear(months[idx].month)}\n'
+                          '${Formatters.currency(s.y)}',
+                          TextStyle(
+                            color: isCredit ? _creditColor : _debitColor,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            fontFamily: 'Inter',
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                  lineBarsData: [
+                    _line(months.map((m) => m.credit).toList(), _creditColor),
+                    _line(months.map((m) => m.debit).toList(), _debitColor),
+                  ],
+                  titlesData: FlTitlesData(
+                    leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 28,
+                        interval: 1,
+                        getTitlesWidget: (value, meta) {
+                          final idx = value.toInt();
+                          if (idx < 0 || idx >= months.length) return const SizedBox.shrink();
+                          final isLast = idx == months.length - 1;
+                          if (idx % labelInterval != 0 && !isLast) return const SizedBox.shrink();
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              Formatters.monthYear(months[idx].month),
+                              style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    horizontalInterval: maxY / 4,
+                    getDrawingHorizontalLine: (_) =>
+                        FlLine(color: scheme.outlineVariant.withOpacity(0.5), strokeWidth: 1),
+                  ),
+                  borderData: FlBorderData(show: false),
+                ),
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 200,
-          child: LineChart(
-            LineChartData(
-              minY: 0,
-              maxY: maxY,
-              minX: 0,
-              maxX: (months.length - 1).toDouble(),
-              lineTouchData: LineTouchData(
-                touchCallback: handleTap,
-                touchTooltipData: LineTouchTooltipData(
-                  getTooltipItems: (spots) => spots.map((s) {
-                    final idx = s.x.toInt();
-                    if (idx < 0 || idx >= months.length) return null;
-                    final isCredit = s.barIndex == 0;
-                    return LineTooltipItem(
-                      '${Formatters.monthYear(months[idx].month)}\n'
-                      '${Formatters.currency(s.y)}',
-                      TextStyle(
-                        color: isCredit ? _creditColor : _debitColor,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              lineBarsData: [
-                _line(months.map((m) => m.credit).toList(), _creditColor),
-                _line(months.map((m) => m.debit).toList(), _debitColor),
-              ],
-              titlesData: FlTitlesData(
-                leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                bottomTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    reservedSize: 28,
-                    interval: 1,
-                    getTitlesWidget: (value, meta) {
-                      final idx = value.toInt();
-                      if (idx < 0 || idx >= months.length) return const SizedBox.shrink();
-                      final isLast = idx == months.length - 1;
-                      if (idx % labelInterval != 0 && !isLast) return const SizedBox.shrink();
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Text(
-                          Formatters.monthYear(months[idx].month),
-                          style: const TextStyle(fontSize: 10),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-              gridData: FlGridData(
-                show: true,
-                drawVerticalLine: false,
-                horizontalInterval: maxY / 4,
-                getDrawingHorizontalLine: (_) =>
-                    FlLine(color: scheme.outlineVariant.withOpacity(0.4), strokeWidth: 1),
-              ),
-              borderData: FlBorderData(show: false),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -527,8 +552,16 @@ class _MonthlyChart extends StatelessWidget {
       curveSmoothness: 0.15,
       color: color,
       barWidth: 2.5,
+      isStrokeCapRound: true,
       dotData: FlDotData(show: values.length <= 12),
-      belowBarData: BarAreaData(show: true, color: color.withOpacity(0.08)),
+      belowBarData: BarAreaData(
+        show: true,
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [color.withOpacity(0.22), color.withOpacity(0)],
+        ),
+      ),
     );
   }
 }
