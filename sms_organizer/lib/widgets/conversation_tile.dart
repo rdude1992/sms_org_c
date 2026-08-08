@@ -10,6 +10,7 @@ class ConversationTile extends StatelessWidget {
   final String displayName;
   final bool selected;
   final bool selectionMode;
+  final bool pinned;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -27,6 +28,7 @@ class ConversationTile extends StatelessWidget {
     required this.selectionMode,
     required this.onTap,
     required this.onLongPress,
+    this.pinned = false,
     this.searchQuery,
   });
 
@@ -79,6 +81,10 @@ class ConversationTile extends StatelessWidget {
                             decoration: BoxDecoration(color: scheme.primary, shape: BoxShape.circle),
                           ),
                           const SizedBox(width: 6),
+                        ],
+                        if (pinned) ...[
+                          Icon(Icons.push_pin, size: 13, color: scheme.onSurfaceVariant),
+                          const SizedBox(width: 4),
                         ],
                         Expanded(
                           child: Text(

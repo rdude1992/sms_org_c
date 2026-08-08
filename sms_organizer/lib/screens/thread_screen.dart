@@ -35,10 +35,19 @@ class _ThreadScreenState extends State<ThreadScreen> {
   int? _selectedSubscriptionId;
   bool _simInitialized = false;
 
+  // The draft (if any) saved for this thread — loaded once into the reply
+  // box below, and kept up to date on the way out so leaving with unsent
+  // text behaves like any other messaging app instead of silently losing it.
+  int? _draftId;
+  bool _draftLoaded = false;
+  String? _address;
+  late final SmsProvider _provider;
+
   @override
   void initState() {
     super.initState();
     _highlightedId = widget.highlightMessageId;
+    _provider = context.read<SmsProvider>();
     // Opening a thread should mark its unread messages read, same as any
     // other SMS app — fire once after the first frame rather than in
     // build(), which reruns on every provider notifyListeners().
@@ -54,10 +63,41 @@ class _ThreadScreenState extends State<ThreadScreen> {
     if (sims.isNotEmpty) _selectedSubscriptionId = sims.first.subscriptionId;
   }
 
+  /// Pre-fills the reply box from a saved draft the first time [provider]
+  /// has actually finished a sync — done once, guarded by [_draftLoaded], so
+  /// it never clobbers text the user has since typed.
+  void _loadDraftIfNeeded(SmsProvider provider) {
+    if (_draftLoaded || provider.state != LoadState.ready) return;
+    _draftLoaded = true;
+    for (final d in provider.drafts) {
+      if (d.threadId == widget.threadId) {
+        _draftId = d.id;
+        _replyController.text = d.body;
+        break;
+      }
+    }
+  }
+
   @override
   void dispose() {
+    _persistDraftOnExit();
     _replyController.dispose();
     super.dispose();
+  }
+
+  /// Leaving the thread with unsent reply text saves/updates its draft;
+  /// leaving with the box empty removes a stale one. Fire-and-forget since
+  /// dispose() can't be awaited — the provider outlives this widget either
+  /// way.
+  void _persistDraftOnExit() {
+    final address = _address;
+    if (address == null) return;
+    final text = _replyController.text.trim();
+    if (text.isEmpty) {
+      if (_draftId != null) _provider.deleteMessage(_draftId!);
+    } else {
+      _provider.saveDraft(address, text, existingId: _draftId);
+    }
   }
 
   void _scrollToHighlightIfNeeded(List<SmsMessage> messages) {
@@ -94,7 +134,10 @@ class _ThreadScreenState extends State<ThreadScreen> {
           );
         }
         final conversation = matches.first;
+        _address = conversation.address;
         final messages = conversation.messages.reversed.toList(); // oldest first for chat view
+
+        _loadDraftIfNeeded(provider);
 
         // Land on the highlighted message if the thread was opened from a
         // search/tap-through, otherwise on the newest message — like any
@@ -116,7 +159,18 @@ class _ThreadScreenState extends State<ThreadScreen> {
                   onMarkUnread: () => provider.markSelectedRead(false),
                   onDelete: provider.deleteSelected,
                 )
-              : AppBar(title: Text(provider.displayNameFor(conversation.address))),
+              : AppBar(
+                  title: Text(provider.displayNameFor(conversation.address)),
+                  actions: [
+                    IconButton(
+                      icon: Icon(
+                        provider.isPinned(conversation.threadId) ? Icons.push_pin : Icons.push_pin_outlined,
+                      ),
+                      tooltip: provider.isPinned(conversation.threadId) ? 'Unpin' : 'Pin conversation',
+                      onPressed: () => provider.togglePinned(conversation.threadId),
+                    ),
+                  ],
+                ),
           body: Column(
             children: [
               Expanded(
@@ -139,6 +193,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           selected: selected,
                           selectionMode: provider.isSelecting,
                           highlighted: m.id == _highlightedId,
+                          starred: provider.isStarred(m.id),
                           onTap: () {
                             if (provider.isSelecting) provider.toggleSelected(m.id);
                           },
@@ -193,6 +248,10 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           final text = _replyController.text.trim();
                           if (text.isEmpty) return;
                           _replyController.clear();
+                          if (_draftId != null) {
+                            provider.deleteMessage(_draftId!);
+                            _draftId = null;
+                          }
                           await provider.sendSms(
                             conversation.address,
                             text,
@@ -261,6 +320,14 @@ void _showMessageActions(BuildContext context, SmsProvider provider, SmsMessage 
                   context,
                   MaterialPageRoute(builder: (_) => ComposeScreen(initialBody: message.body)),
                 );
+              },
+            ),
+            ListTile(
+              leading: Icon(provider.isStarred(message.id) ? Icons.star : Icons.star_outline),
+              title: Text(provider.isStarred(message.id) ? 'Unstar' : 'Star'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                provider.toggleStarred(message.id);
               },
             ),
             ListTile(

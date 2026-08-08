@@ -13,7 +13,11 @@ import '../widgets/multi_select_bar.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/filter_chip_bar.dart';
 import '../widgets/ui/skeleton.dart';
+import 'drafts_screen.dart';
+import 'starred_screen.dart';
 import 'thread_screen.dart';
+
+enum _InboxMenuAction { starred, drafts }
 
 /// Bottom-nav "Inbox" tab — merges what used to be two separate tabs
 /// (Chats, All) into one screen with a toggle between them, so the app
@@ -132,6 +136,38 @@ class _InboxScreenState extends State<InboxScreen> {
                         icon: const Icon(Icons.refresh),
                         onPressed: provider.refresh,
                       ),
+                      PopupMenuButton<_InboxMenuAction>(
+                        icon: const Icon(Icons.more_vert),
+                        onSelected: (action) {
+                          final screen = switch (action) {
+                            _InboxMenuAction.starred => const StarredScreen(),
+                            _InboxMenuAction.drafts => const DraftsScreen(),
+                          };
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(
+                            value: _InboxMenuAction.starred,
+                            child: Row(
+                              children: [
+                                Icon(Icons.star_outline),
+                                SizedBox(width: 12),
+                                Text('Starred messages'),
+                              ],
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: _InboxMenuAction.drafts,
+                            child: Row(
+                              children: [
+                                Icon(Icons.drafts_outlined),
+                                SizedBox(width: 12),
+                                Text('Drafts'),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ],
                 ),
@@ -178,13 +214,21 @@ class _ChatsBody extends StatelessWidget {
             final selected = provider.selectedIds.contains(conversation.latest.id);
             final scheme = Theme.of(context).colorScheme;
             final unread = conversation.unreadCount > 0;
+            final pinned = provider.isPinned(conversation.threadId);
             return Slidable(
               key: ValueKey(conversation.threadId),
               enabled: !provider.isSelecting,
               startActionPane: ActionPane(
                 motion: const DrawerMotion(),
-                extentRatio: 0.28,
+                extentRatio: 0.5,
                 children: [
+                  SlidableAction(
+                    onPressed: (_) => provider.togglePinned(conversation.threadId),
+                    backgroundColor: scheme.secondary,
+                    foregroundColor: scheme.onSecondary,
+                    icon: pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                    label: pinned ? 'Unpin' : 'Pin',
+                  ),
                   SlidableAction(
                     onPressed: (_) => provider.setConversationRead(conversation, unread),
                     backgroundColor: scheme.primary,
@@ -212,6 +256,7 @@ class _ChatsBody extends StatelessWidget {
                 displayName: provider.displayNameFor(conversation.address),
                 selected: selected,
                 selectionMode: provider.isSelecting,
+                pinned: pinned,
                 searchQuery: provider.chatSearchQuery,
                 onTap: () {
                   if (provider.isSelecting) {
