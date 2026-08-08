@@ -51,80 +51,100 @@ class MessageBubble extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       child: Container(
-        color: selected ? scheme.primary.withOpacity(0.08) : Colors.transparent,
+        color: selected ? scheme.primary.withOpacity(0.14) : Colors.transparent,
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
-          mainAxisAlignment: isOutgoing ? MainAxisAlignment.end : MainAxisAlignment.start,
           children: [
-            Flexible(
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 400),
-                curve: Curves.easeOut,
-                margin: EdgeInsets.only(
-                  left: isOutgoing ? 48 : 12,
-                  right: isOutgoing ? 12 : 48,
+            // Always sits at the row's leading edge (regardless of which
+            // side the bubble itself hugs) so it reads the same way for
+            // every row instead of jumping sides with the message
+            // direction — same idea as a checkbox column in a list.
+            if (selectionMode)
+              Padding(
+                padding: const EdgeInsets.only(left: 12, right: 4),
+                child: Icon(
+                  selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                  color: selected ? scheme.primary : scheme.outline,
+                  size: 22,
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: bubbleColor,
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(16),
-                    topRight: const Radius.circular(16),
-                    bottomLeft: Radius.circular(isOutgoing ? 16 : 4),
-                    bottomRight: Radius.circular(isOutgoing ? 4 : 16),
-                  ),
-                  border: Border.all(
-                    color: highlighted ? scheme.primary : scheme.primary.withOpacity(0),
-                    width: 2,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    LinkifiedText(
-                      text: message.body,
-                      style: TextStyle(color: textColor, fontSize: 15, height: 1.45),
-                      // Outgoing bubbles are already primary-coloured, so a
-                      // primary link colour would vanish against it —
-                      // underline is the only differentiator there instead.
-                      linkColor: isOutgoing ? textColor : scheme.primary,
-                    ),
-                    if (otpCode != null) ...[
-                      const SizedBox(height: 8),
-                      _CopyOtpButton(code: otpCode, outgoingTint: isOutgoing, textColor: textColor),
-                    ],
-                    const SizedBox(height: 4),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          Formatters.timeOfDay(message.date),
-                          style: TextStyle(color: textColor.withOpacity(0.7), fontSize: 10),
+              ),
+            Expanded(
+              child: Row(
+                mainAxisAlignment: isOutgoing ? MainAxisAlignment.end : MainAxisAlignment.start,
+                children: [
+                  Flexible(
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 400),
+                      curve: Curves.easeOut,
+                      margin: EdgeInsets.only(
+                        left: isOutgoing ? 48 : 12,
+                        right: isOutgoing ? 12 : 48,
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: bubbleColor,
+                        borderRadius: BorderRadius.only(
+                          topLeft: const Radius.circular(16),
+                          topRight: const Radius.circular(16),
+                          bottomLeft: Radius.circular(isOutgoing ? 16 : 4),
+                          bottomRight: Radius.circular(isOutgoing ? 4 : 16),
                         ),
-                        if (message.simSlot != null) ...[
-                          const SizedBox(width: 6),
-                          Text(
-                            '·',
-                            style: TextStyle(color: textColor.withOpacity(0.5), fontSize: 10),
+                        border: Border.all(
+                          color:
+                              (highlighted || selected) ? scheme.primary : scheme.primary.withOpacity(0),
+                          width: 2,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          LinkifiedText(
+                            text: message.body,
+                            style: TextStyle(color: textColor, fontSize: 15, height: 1.45),
+                            // Outgoing bubbles are already primary-coloured, so a
+                            // primary link colour would vanish against it —
+                            // underline is the only differentiator there instead.
+                            linkColor: isOutgoing ? textColor : scheme.primary,
                           ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'SIM ${message.simSlot! + 1}',
-                            style: TextStyle(
-                              color: textColor.withOpacity(0.7),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                            ),
+                          if (otpCode != null) ...[
+                            const SizedBox(height: 8),
+                            _CopyOtpButton(code: otpCode, outgoingTint: isOutgoing, textColor: textColor),
+                          ],
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                Formatters.timeOfDay(message.date),
+                                style: TextStyle(color: textColor.withOpacity(0.7), fontSize: 10),
+                              ),
+                              if (message.simSlot != null) ...[
+                                const SizedBox(width: 6),
+                                Text(
+                                  '·',
+                                  style: TextStyle(color: textColor.withOpacity(0.5), fontSize: 10),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'SIM ${message.simSlot! + 1}',
+                                  style: TextStyle(
+                                    color: textColor.withOpacity(0.7),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                              if (starred) ...[
+                                const SizedBox(width: 6),
+                                Icon(Icons.star, size: 11, color: Colors.amber.shade600),
+                              ],
+                            ],
                           ),
                         ],
-                        if (starred) ...[
-                          const SizedBox(width: 6),
-                          Icon(Icons.star, size: 11, color: Colors.amber.shade600),
-                        ],
-                      ],
+                      ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ],
