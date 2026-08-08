@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../models/sim_info.dart';
@@ -9,6 +10,7 @@ import '../widgets/date_separator.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/multi_select_bar.dart';
 import '../widgets/sim_picker.dart';
+import 'compose_screen.dart';
 
 class ThreadScreen extends StatefulWidget {
   final int threadId;
@@ -130,7 +132,13 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           onTap: () {
                             if (provider.isSelecting) provider.toggleSelected(m.id);
                           },
-                          onLongPress: () => provider.toggleSelected(m.id),
+                          onLongPress: () {
+                            if (provider.isSelecting) {
+                              provider.toggleSelected(m.id);
+                            } else {
+                              _showMessageActions(context, provider, m);
+                            }
+                          },
                         ),
                       ],
                     );
@@ -192,4 +200,98 @@ class _ThreadScreenState extends State<ThreadScreen> {
       },
     );
   }
+}
+
+/// Long-press-on-a-bubble context menu — copy / forward / select / delete —
+/// in place of jumping straight into multi-select the way it used to.
+/// "Select" is kept as an explicit option here so multi-select is still
+/// reachable, just one tap deeper instead of the only long-press outcome.
+void _showMessageActions(BuildContext context, SmsProvider provider, SmsMessage message) {
+  final scheme = Theme.of(context).colorScheme;
+  showModalBottomSheet(
+    context: context,
+    builder: (sheetContext) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  message.body,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.copy_outlined),
+              title: const Text('Copy text'),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                await Clipboard.setData(ClipboardData(text: message.body));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Copied message'), duration: Duration(seconds: 1)),
+                  );
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.forward_outlined),
+              title: const Text('Forward'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => ComposeScreen(initialBody: message.body)),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle_outline),
+              title: const Text('Select'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                provider.toggleSelected(message.id);
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: scheme.error),
+              title: Text('Delete', style: TextStyle(color: scheme.error)),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _confirmDeleteMessage(context, provider, message.id);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+Future<void> _confirmDeleteMessage(BuildContext context, SmsProvider provider, int id) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Delete message?'),
+      content: const Text('This cannot be undone.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text('Delete', style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true) await provider.deleteMessage(id);
 }

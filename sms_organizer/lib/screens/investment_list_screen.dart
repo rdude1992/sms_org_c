@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/transaction.dart';
 import '../utils/formatters.dart';
 import '../widgets/investment_tile.dart';
+import '../widgets/ui/empty_state.dart';
+import '../widgets/ui/total_stat.dart';
 
 /// Drilldown target for the Insights "Investments" card — mirrors
 /// TransactionListScreen's All/split-direction tab pattern, split here into
@@ -54,7 +56,7 @@ class InvestmentListScreen extends StatelessWidget {
           ),
         ),
         body: sorted.isEmpty
-            ? const Center(child: Text('No investment activity in this range.'))
+            ? const EmptyState(icon: Icons.trending_up, title: 'No investment activity in this range')
             : Column(
                 children: [
                   Container(
@@ -64,11 +66,11 @@ class InvestmentListScreen extends StatelessWidget {
                     child: Row(
                       children: [
                         Expanded(
-                          child: _totalChip('Invested', investedTotal, const Color(0xFF3B6DF5)),
+                          child: TotalStat(label: 'Invested', value: investedTotal, color: const Color(0xFF3B6DF5)),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: _totalChip('Redeemed', redeemedTotal, const Color(0xFFF59E0B)),
+                          child: TotalStat(label: 'Redeemed', value: redeemedTotal, color: const Color(0xFFF59E0B)),
                         ),
                         Text(
                           '${sorted.length} events',
@@ -93,20 +95,6 @@ class InvestmentListScreen extends StatelessWidget {
       ),
     );
   }
-
-  Widget _totalChip(String label, double value, Color color) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-        Text(
-          Formatters.currency(value),
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color),
-        ),
-      ],
-    );
-  }
 }
 
 class _InvestmentListView extends StatelessWidget {
@@ -118,7 +106,7 @@ class _InvestmentListView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (investments.isEmpty) {
-      return Center(child: Text(emptyText, style: const TextStyle(color: Colors.grey)));
+      return EmptyState(icon: Icons.trending_up, title: emptyText);
     }
     return ListView.separated(
       itemCount: investments.length,
@@ -170,7 +158,7 @@ class _AmcListView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (providers.isEmpty) {
-      return const Center(child: Text('No investment activity.', style: TextStyle(color: Colors.grey)));
+      return const EmptyState(icon: Icons.trending_up, title: 'No investment activity.');
     }
     return ListView.separated(
       itemCount: providers.length,

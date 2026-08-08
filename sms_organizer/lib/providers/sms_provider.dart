@@ -145,6 +145,19 @@ class SmsProvider extends ChangeNotifier {
     return isDefaultSmsApp;
   }
 
+  /// The real, current importance of [category]'s notification channel as
+  /// configured in Android system settings — see
+  /// [SmsPlatformService.getChannelImportance] for why this can disagree
+  /// with [NotificationSettingsProvider.isMuted].
+  Future<int> channelImportanceFor(SmsCategory category) =>
+      _platform.getChannelImportance('sms_${category.name}');
+
+  /// Deep-links into the OS's per-channel settings for [category] (sound,
+  /// vibration, badge, priority conversation) — controls this app has no
+  /// UI of its own for.
+  Future<void> openChannelSettingsFor(SmsCategory category) =>
+      _platform.openChannelSettings('sms_${category.name}');
+
   Future<void> initialize() async {
     isDefaultSmsApp = await _platform.isDefaultSmsApp();
     notifyListeners();
@@ -347,6 +360,31 @@ class SmsProvider extends ChangeNotifier {
   Future<void> markSelectedRead(bool read) async {
     await _platform.markRead(selectedIds.toList(), read);
     clearSelection();
+    await refresh();
+  }
+
+  // ---- Single-item actions (swipe actions, long-press context menu) ----
+
+  Future<void> deleteMessage(int id) async {
+    await _platform.deleteMessages([id]);
+    await refresh();
+  }
+
+  Future<void> deleteConversation(SmsConversation conversation) async {
+    final ids = conversation.messages.map((m) => m.id).toList();
+    await _platform.deleteMessages(ids);
+    await refresh();
+  }
+
+  Future<void> setMessageRead(int id, bool read) async {
+    await _platform.markRead([id], read);
+    await refresh();
+  }
+
+  Future<void> setConversationRead(SmsConversation conversation, bool read) async {
+    final ids = conversation.messages.where((m) => m.isIncoming).map((m) => m.id).toList();
+    if (ids.isEmpty) return;
+    await _platform.markRead(ids, read);
     await refresh();
   }
 

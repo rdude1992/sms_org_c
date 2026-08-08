@@ -1,8 +1,10 @@
 package com.smsorganizer.app
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.ContactsContract
+import androidx.core.graphics.drawable.IconCompat
 
 /**
  * Reads the full contacts list once so the Dart side can build a
@@ -70,6 +72,44 @@ object ContactsRepository {
             // Missing permission, malformed number (e.g. a short alphanumeric
             // sender ID like "HDFCBK" that PhoneLookup can't match), etc. —
             // fall back to showing the raw address, same as the Dart side.
+            null
+        }
+    }
+
+    /**
+     * Contact thumbnail for the sender [Person] on a MessagingStyle
+     * notification, or null if there's no match/photo/permission — callers
+     * fall back to a generic icon in that case. Uses the thumbnail column
+     * (not the full-resolution photo) since this decodes synchronously
+     * inside a BroadcastReceiver's short execution window.
+     */
+    fun lookupPhotoIcon(context: Context, number: String): IconCompat? {
+        return try {
+            val uri = Uri.withAppendedPath(
+                ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
+                Uri.encode(number)
+            )
+            val photoUriString = context.contentResolver.query(
+                uri,
+                arrayOf(ContactsContract.PhoneLookup.PHOTO_THUMBNAIL_URI),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    cursor.getString(
+                        cursor.getColumnIndexOrThrow(ContactsContract.PhoneLookup.PHOTO_THUMBNAIL_URI)
+                    )
+                } else {
+                    null
+                }
+            }
+            if (photoUriString.isNullOrEmpty()) return null
+
+            context.contentResolver.openInputStream(Uri.parse(photoUriString))?.use { stream ->
+                BitmapFactory.decodeStream(stream)?.let { IconCompat.createWithBitmap(it) }
+            }
+        } catch (_: Exception) {
             null
         }
     }

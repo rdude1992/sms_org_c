@@ -82,14 +82,23 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Spacer(),
-              Icon(Icons.forum_outlined, size: 64, color: Theme.of(context).colorScheme.primary),
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Icon(Icons.forum_outlined, size: 30, color: Theme.of(context).colorScheme.primary),
+              ),
               const SizedBox(height: 24),
               Text('Set up SMS Organiser', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 'To read, send, and organise your messages — including detecting '
                 'transactions and investments from bank SMS — this app needs a '
                 'couple of permissions and needs to become your default SMS app.',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, height: 1.4),
               ),
               const SizedBox(height: 32),
               _StepTile(
@@ -111,7 +120,10 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
               const SizedBox(height: 8),
               Text(
                 'Your messages stay on your device. Nothing is uploaded anywhere by this app.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -140,9 +152,11 @@ class _StepTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         leading: CircleAvatar(
-          backgroundColor: done ? Colors.green : Theme.of(context).colorScheme.primary,
-          child: done ? const Icon(Icons.check, color: Colors.white) : Text('$step'),
+          backgroundColor: done ? const Color(0xFF10B981) : Theme.of(context).colorScheme.primary,
+          foregroundColor: Colors.white,
+          child: done ? const Icon(Icons.check) : Text('$step'),
         ),
         title: Text(title),
         subtitle: subtitle != null ? Text(subtitle!) : null,

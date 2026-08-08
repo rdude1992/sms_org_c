@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/sms_provider.dart';
 import '../services/contact_service.dart';
+import '../widgets/ui/empty_state.dart';
 
 /// Full-screen searchable contact list. Pops with the selected contact's
 /// phone number (a String), or null if dismissed without a pick.
@@ -46,17 +47,13 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
         ),
       ),
       body: contacts.isEmpty
-          ? const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'No contacts found. Make sure contacts permission is granted.',
-                  textAlign: TextAlign.center,
-                ),
-              ),
+          ? const EmptyState(
+              icon: Icons.contacts_outlined,
+              title: 'No contacts found',
+              message: 'Make sure contacts permission is granted.',
             )
           : filtered.isEmpty
-              ? const Center(child: Text('No matching contacts.'))
+              ? const EmptyState(icon: Icons.search_off_outlined, title: 'No matching contacts')
               : ListView.separated(
                   itemCount: filtered.length,
                   separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),

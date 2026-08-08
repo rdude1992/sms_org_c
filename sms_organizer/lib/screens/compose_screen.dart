@@ -92,7 +92,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
                   child: TextField(
                     controller: _toController,
                     keyboardType: TextInputType.phone,
-                    decoration: const InputDecoration(labelText: 'To', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(labelText: 'To'),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -118,10 +118,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
                 maxLines: null,
                 expands: true,
                 textAlignVertical: TextAlignVertical.top,
-                decoration: const InputDecoration(
-                  labelText: 'Message',
-                  border: OutlineInputBorder(),
-                ),
+                decoration: const InputDecoration(labelText: 'Message'),
               ),
             ),
             const SizedBox(height: 12),
@@ -130,10 +127,13 @@ class _ComposeScreenState extends State<ComposeScreen> {
               child: FilledButton.icon(
                 onPressed: _sending ? null : _send,
                 icon: _sending
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Theme.of(context).colorScheme.onPrimary,
+                        ),
                       )
                     : const Icon(Icons.send),
                 label: const Text('Send'),

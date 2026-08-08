@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/transaction.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
+import '../widgets/ui/empty_state.dart';
+import '../widgets/ui/sparkline.dart';
 import 'transaction_list_screen.dart';
 
 /// Segregated "Cards & Accounts" drilldown for the Insights "by card /
@@ -37,18 +39,28 @@ class InstrumentListScreen extends StatelessWidget {
                 preferredSize: const Size.fromHeight(28),
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(subtitle!, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  child: Text(
+                    subtitle!,
+                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
                 ),
               ),
       ),
       body: instruments.isEmpty
-          ? const Center(child: Text('No cards or accounts detected in this range.'))
+          ? const EmptyState(
+              icon: Icons.credit_card_off_outlined,
+              title: 'No cards or accounts detected in this range',
+            )
           : ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
               children: [
                 for (final section in sections)
                   if (section.items.isNotEmpty)
-                    _Section(section: section, onTapItem: (s) => _openDrilldown(context, s)),
+                    _Section(
+                      section: section,
+                      transactions: transactions,
+                      onTapItem: (s) => _openDrilldown(context, s),
+                    ),
               ],
             ),
     );
@@ -129,8 +141,9 @@ class _SectionData {
 
 class _Section extends StatelessWidget {
   final _SectionData section;
+  final List<Transaction> transactions;
   final ValueChanged<InstrumentSummary> onTapItem;
-  const _Section({required this.section, required this.onTapItem});
+  const _Section({required this.section, required this.transactions, required this.onTapItem});
 
   @override
   Widget build(BuildContext context) {
@@ -150,11 +163,13 @@ class _Section extends StatelessWidget {
               ),
               const Spacer(),
               Text(Formatters.currency(total),
-                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ],
           ),
         ),
-        ...section.items.map((s) => _InstrumentTile(summary: s, onTap: () => onTapItem(s))),
+        ...section.items.map(
+          (s) => _InstrumentTile(summary: s, transactions: transactions, onTap: () => onTapItem(s)),
+        ),
         const Divider(height: 16),
       ],
     );
@@ -163,11 +178,31 @@ class _Section extends StatelessWidget {
 
 class _InstrumentTile extends StatelessWidget {
   final InstrumentSummary summary;
+  final List<Transaction> transactions;
   final VoidCallback onTap;
-  const _InstrumentTile({required this.summary, required this.onTap});
+  const _InstrumentTile({required this.summary, required this.transactions, required this.onTap});
+
+  /// Up to the last 10 transactions for this instrument, oldest first,
+  /// signed by direction — the series the row's sparkline traces.
+  List<double> get _series {
+    final own = transactions.where((t) => t.instrumentGroupKey == summary.key).toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+    final recent = own.length > 10 ? own.sublist(own.length - 10) : own;
+    return [
+      for (final t in recent)
+        if (t.direction == TxnDirection.credit)
+          t.amount
+        else if (t.direction == TxnDirection.debit)
+          -t.amount
+        else
+          0.0,
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
+    final trendColor =
+        summary.totalDebit >= summary.totalCredit ? const Color(0xFFEF4444) : const Color(0xFF10B981);
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16),
       dense: true,
@@ -179,14 +214,21 @@ class _InstrumentTile extends StatelessWidget {
             : '${summary.count} transactions',
         style: const TextStyle(fontSize: 11.5),
       ),
-      trailing: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('+${Formatters.currency(summary.totalCredit)}',
-              style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
-          Text('-${Formatters.currency(summary.totalDebit)}',
-              style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
+          Sparkline(values: _series, color: trendColor),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('+${Formatters.currency(summary.totalCredit)}',
+                  style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
+              Text('-${Formatters.currency(summary.totalDebit)}',
+                  style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
+            ],
+          ),
         ],
       ),
       onTap: onTap,

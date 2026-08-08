@@ -6,6 +6,8 @@ import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/transaction_tile.dart';
+import '../widgets/ui/empty_state.dart';
+import '../widgets/ui/filter_chip_bar.dart';
 import 'instrument_list_screen.dart';
 import 'investment_list_screen.dart';
 import 'transaction_list_screen.dart';
@@ -96,18 +98,17 @@ class _InsightsScreenState extends State<InsightsScreen> {
               const Divider(height: 1),
               Expanded(
                 child: provider.transactions.isEmpty
-                    ? const Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(24),
-                          child: Text(
-                            'No transaction SMS detected yet. Once bank/card alerts arrive '
+                    ? const EmptyState(
+                        icon: Icons.insights_outlined,
+                        title: 'No insights yet',
+                        message: 'No transaction SMS detected yet. Once bank/card alerts arrive '
                             '(or after the first sync), spend and investment insights will show up here.',
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
                       )
                     : filteredTransactions.isEmpty
-                        ? const Center(child: Text('No transactions in this range.'))
+                        ? const EmptyState(
+                            icon: Icons.filter_alt_off_outlined,
+                            title: 'No transactions in this range',
+                          )
                         : ListView(
                             padding: const EdgeInsets.all(16),
                             children: [
@@ -160,11 +161,21 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ],
                               ),
                               const SizedBox(height: 8),
+                              if (summary.byInstrument.isNotEmpty) ...[
+                                _InstrumentDonut(
+                                  instruments: summary.byInstrument,
+                                  filteredTransactions: filteredTransactions,
+                                  rangeLabel: _range.label,
+                                ),
+                                const SizedBox(height: 16),
+                              ],
                               if (summary.byInstrument.isEmpty)
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 8),
-                                  child: Text('No transactions in this range.',
-                                      style: TextStyle(color: Colors.grey)),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  child: Text(
+                                    'No transactions in this range.',
+                                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                  ),
                                 )
                               else
                                 ...summary.byInstrument.take(6).map(
@@ -246,23 +257,11 @@ class _RangeFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 48,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        children: [
-          for (final r in InsightsRange.values)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text(r.label),
-                selected: selected == r,
-                onSelected: (_) => onSelected(r),
-              ),
-            ),
-        ],
-      ),
+    return FilterChipBar<InsightsRange>(
+      values: InsightsRange.values,
+      selected: selected,
+      labelBuilder: (r) => r.label,
+      onSelected: onSelected,
     );
   }
 }
@@ -342,7 +341,10 @@ class _TotalCard extends StatelessWidget {
                 children: [
                   Icon(icon, color: color, size: 18),
                   const SizedBox(width: 6),
-                  Text(label, style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                  Text(
+                    label,
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13),
+                  ),
                 ],
               ),
               const SizedBox(height: 10),
@@ -371,8 +373,9 @@ class _TrendBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
     if (previous == 0 && current == 0) {
-      return const Text('No change', style: TextStyle(fontSize: 11, color: Colors.grey));
+      return Text('No change', style: TextStyle(fontSize: 11, color: mutedColor));
     }
     final delta = current - previous;
     final pct = previous == 0 ? 100.0 : (delta / previous * 100).abs();
@@ -380,7 +383,7 @@ class _TrendBadge extends StatelessWidget {
     final isFlat = delta == 0;
     final favourable = isFlat ? null : (isUp == increaseIsGood);
     final color = isFlat
-        ? Colors.grey
+        ? mutedColor
         : (favourable! ? const Color(0xFF10B981) : const Color(0xFFEF4444));
 
     return Row(
@@ -543,7 +546,162 @@ class _LegendDot extends StatelessWidget {
       children: [
         Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
         const SizedBox(width: 6),
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        Text(
+          label,
+          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+}
+
+/// Tappable donut breakdown of spend/activity by card or account — the top
+/// 6 instruments each get their own slice, with anything past that folded
+/// into a single "Other" slice so the chart doesn't fragment into slivers
+/// once someone has a dozen linked cards. Tapping a slice (or its legend
+/// row) opens the same drilldown as tapping the row in the list below.
+class _InstrumentDonut extends StatelessWidget {
+  final List<InstrumentSummary> instruments;
+  final List<Transaction> filteredTransactions;
+  final String rangeLabel;
+
+  const _InstrumentDonut({
+    required this.instruments,
+    required this.filteredTransactions,
+    required this.rangeLabel,
+  });
+
+  static const _palette = [
+    Color(0xFF3B6DF5),
+    Color(0xFF10B981),
+    Color(0xFFF59E0B),
+    Color(0xFF8B5CF6),
+    Color(0xFFEF4444),
+    Color(0xFF06B6D4),
+    Color(0xFFEC4899),
+    Color(0xFF64748B),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final top = instruments.take(6).toList();
+    final otherTotal =
+        instruments.skip(6).fold<double>(0, (a, s) => a + s.totalCredit + s.totalDebit);
+
+    final labels = [for (final s in top) s.displayName, if (otherTotal > 0) 'Other'];
+    final keys = [for (final s in top) s.key, if (otherTotal > 0) null];
+    final values = [
+      for (final s in top) s.totalCredit + s.totalDebit,
+      if (otherTotal > 0) otherTotal,
+    ];
+    final grandTotal = values.fold<double>(0, (a, v) => a + v);
+    if (grandTotal <= 0) return const SizedBox.shrink();
+
+    void openFor(String? key) {
+      if (key == null) return;
+      final match = instruments.firstWhere((s) => s.key == key);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => TransactionListScreen(
+            title: match.displayName,
+            subtitle: rangeLabel,
+            transactions: filteredTransactions.where((t) => t.instrumentGroupKey == key).toList(),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: 132,
+          height: 132,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              PieChart(
+                PieChartData(
+                  sectionsSpace: 2,
+                  centerSpaceRadius: 42,
+                  pieTouchData: PieTouchData(
+                    touchCallback: (event, response) {
+                      if (event is! FlTapUpEvent) return;
+                      final index = response?.touchedSection?.touchedSectionIndex;
+                      if (index == null || index < 0 || index >= keys.length) return;
+                      openFor(keys[index]);
+                    },
+                  ),
+                  sections: [
+                    for (var i = 0; i < values.length; i++)
+                      PieChartSectionData(
+                        value: values[i],
+                        color: _palette[i % _palette.length],
+                        radius: 20,
+                        showTitle: false,
+                      ),
+                  ],
+                ),
+              ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    Formatters.currency(grandTotal),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: scheme.onSurface),
+                  ),
+                  Text('total', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < labels.length; i++)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: InkWell(
+                    onTap: keys[i] == null ? null : () => openFor(keys[i]),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration:
+                              BoxDecoration(color: _palette[i % _palette.length], shape: BoxShape.circle),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            labels[i],
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12.5, color: scheme.onSurface),
+                          ),
+                        ),
+                        Text(
+                          '${(values[i] / grandTotal * 100).toStringAsFixed(0)}%',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: scheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -625,10 +783,10 @@ class _InvestmentCard extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: _miniStat('Invested', summary.totalInvested, const Color(0xFF3B6DF5)),
+                    child: _miniStat(context, 'Invested', summary.totalInvested, const Color(0xFF3B6DF5)),
                   ),
                   Expanded(
-                    child: _miniStat('Redeemed', summary.totalRedeemed, const Color(0xFFF59E0B)),
+                    child: _miniStat(context, 'Redeemed', summary.totalRedeemed, const Color(0xFFF59E0B)),
                   ),
                 ],
               ),
@@ -636,7 +794,7 @@ class _InvestmentCard extends StatelessWidget {
               Text(
                 '${summary.investmentEventCount} SIP / mutual fund / trade SMS detected'
                 '${onTap != null ? ' · tap to view' : ''}',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -645,11 +803,14 @@ class _InvestmentCard extends StatelessWidget {
     );
   }
 
-  Widget _miniStat(String label, double value, Color color) {
+  Widget _miniStat(BuildContext context, String label, double value, Color color) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        Text(
+          label,
+          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
         Text(Formatters.currency(value),
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
       ],

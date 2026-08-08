@@ -98,6 +98,21 @@ class SmsPlatformService {
     await _methodChannel.invokeMethod('setMutedCategories', {'categories': categories.toList()});
   }
 
+  /// The channel's real current importance as configured in Android system
+  /// settings (which the user may have changed directly there, independent
+  /// of this app's own mute toggle) — see [NotificationImportance].
+  Future<int> getChannelImportance(String channelId) async {
+    final result =
+        await _methodChannel.invokeMethod<int>('getChannelImportance', {'channelId': channelId});
+    return result ?? NotificationImportance.unspecified;
+  }
+
+  /// Deep-links into the OS's per-channel notification settings (sound,
+  /// vibration, badge, priority conversation) for [channelId].
+  Future<void> openChannelSettings(String channelId) async {
+    await _methodChannel.invokeMethod('openChannelSettings', {'channelId': channelId});
+  }
+
   Future<List<SmsMessage>> getAllMessages() async {
     final raw = await _methodChannel.invokeMethod<List<dynamic>>('getAllMessages');
     if (raw == null) return [];
@@ -159,4 +174,25 @@ class SmsPlatformService {
         .map((event) => Map<String, dynamic>.from(event as Map));
     return _incomingStream!;
   }
+}
+
+/// Mirrors android.app.NotificationManager / NotificationManagerCompat's
+/// IMPORTANCE_* constants — plain ints (not an enum) since that's exactly
+/// what [SmsPlatformService.getChannelImportance] hands back off the
+/// platform channel.
+class NotificationImportance {
+  NotificationImportance._();
+
+  static const unspecified = -1000;
+  static const none = 0;
+  static const min = 1;
+  static const low = 2;
+  static const defaultImportance = 3;
+  static const high = 4;
+  static const max = 5;
+
+  /// True once the OS itself has silenced this channel (blocked, or
+  /// downgraded to no sound/no peek) — independent of, and possibly out of
+  /// sync with, this app's own per-category mute toggle.
+  static bool isSilencedByOs(int importance) => importance >= none && importance <= low;
 }
