@@ -36,7 +36,7 @@ class ContactService {
         final number = c['number'];
         if (name == null || number == null || name.isEmpty || number.isEmpty) continue;
         entries.add(ContactEntry(name: name, number: number));
-        final normalized = _normalize(number);
+        final normalized = normalize(number);
         if (normalized.isNotEmpty) {
           map[normalized] = name;
         }

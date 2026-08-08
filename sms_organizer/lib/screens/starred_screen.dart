@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../models/category.dart';
 import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
 import '../widgets/category_badge.dart';
