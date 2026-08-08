@@ -8,10 +8,8 @@ import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
 import '../widgets/date_separator.dart';
 import '../widgets/message_bubble.dart';
-import '../models/category.dart';
 import '../widgets/multi_select_bar.dart';
 import '../widgets/sim_picker.dart';
-import '../widgets/ui/filter_chip_bar.dart';
 import 'compose_screen.dart';
 
 class ThreadScreen extends StatefulWidget {
@@ -36,8 +34,6 @@ class _ThreadScreenState extends State<ThreadScreen> {
 
   int? _selectedSubscriptionId;
   bool _simInitialized = false;
-
-  SmsCategory? _categoryFilter;
 
   @override
   void initState() {
@@ -98,10 +94,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
           );
         }
         final conversation = matches.first;
-        final allMessages = conversation.messages.reversed.toList(); // oldest first for chat view
-        final messages = _categoryFilter == null
-            ? allMessages
-            : allMessages.where((m) => m.category == _categoryFilter).toList();
+        final messages = conversation.messages.reversed.toList(); // oldest first for chat view
 
         _scrollToHighlightIfNeeded(messages);
         _initSelectedSim(provider.activeSims);
@@ -118,13 +111,6 @@ class _ThreadScreenState extends State<ThreadScreen> {
               : AppBar(title: Text(provider.displayNameFor(conversation.address))),
           body: Column(
             children: [
-              FilterChipBar<SmsCategory?>(
-                values: [null, for (final cat in SmsCategory.values) cat],
-                selected: _categoryFilter,
-                labelBuilder: (category) => category?.label ?? 'All',
-                onSelected: (category) => setState(() => _categoryFilter = category),
-              ),
-              const Divider(height: 1),
               Expanded(
                 child: ScrollablePositionedList.builder(
                   itemScrollController: _itemScrollController,

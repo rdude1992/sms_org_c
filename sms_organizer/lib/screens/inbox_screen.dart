@@ -151,88 +151,98 @@ class _ChatsBody extends StatelessWidget {
     final conversations = provider.filteredConversations;
     final searching = provider.chatSearchQuery.trim().isNotEmpty;
 
+    Widget body;
     if (provider.state == LoadState.loading && conversations.isEmpty) {
-      return const SkeletonList();
-    }
-    if (provider.state == LoadState.error) {
-      return Center(child: Text('Could not load messages: ${provider.error}'));
-    }
-    if (conversations.isEmpty) {
-      return EmptyState(
+      body = const SkeletonList();
+    } else if (provider.state == LoadState.error) {
+      body = Center(child: Text('Could not load messages: ${provider.error}'));
+    } else if (conversations.isEmpty) {
+      body = EmptyState(
         icon: searching ? Icons.search_off_outlined : Icons.chat_bubble_outline,
         title: searching
             ? 'No chats match "${provider.chatSearchQuery.trim()}"'
             : provider.showUnreadOnly
                 ? 'No unread chats'
-                : 'No conversations yet',
+                : provider.activeCategoryFilter != null
+                    ? 'No conversations in this category'
+                    : 'No conversations yet',
+      );
+    } else {
+      body = RefreshIndicator(
+        onRefresh: provider.refresh,
+        child: ListView.separated(
+          itemCount: conversations.length,
+          separatorBuilder: (_, __) => const Divider(height: 1, indent: 78),
+          itemBuilder: (context, index) {
+            final conversation = conversations[index];
+            final selected = provider.selectedIds.contains(conversation.latest.id);
+            final scheme = Theme.of(context).colorScheme;
+            final unread = conversation.unreadCount > 0;
+            return Slidable(
+              key: ValueKey(conversation.threadId),
+              enabled: !provider.isSelecting,
+              startActionPane: ActionPane(
+                motion: const DrawerMotion(),
+                extentRatio: 0.28,
+                children: [
+                  SlidableAction(
+                    onPressed: (_) => provider.setConversationRead(conversation, unread),
+                    backgroundColor: scheme.primary,
+                    foregroundColor: scheme.onPrimary,
+                    icon: unread ? Icons.mark_email_read_outlined : Icons.mark_email_unread_outlined,
+                    label: unread ? 'Read' : 'Unread',
+                  ),
+                ],
+              ),
+              endActionPane: ActionPane(
+                motion: const DrawerMotion(),
+                extentRatio: 0.28,
+                children: [
+                  SlidableAction(
+                    onPressed: (_) => provider.deleteConversation(conversation),
+                    backgroundColor: scheme.error,
+                    foregroundColor: Colors.white,
+                    icon: Icons.delete_outline,
+                    label: 'Delete',
+                  ),
+                ],
+              ),
+              child: ConversationTile(
+                conversation: conversation,
+                displayName: provider.displayNameFor(conversation.address),
+                selected: selected,
+                selectionMode: provider.isSelecting,
+                searchQuery: provider.chatSearchQuery,
+                onTap: () {
+                  if (provider.isSelecting) {
+                    provider.toggleSelected(conversation.latest.id);
+                  } else {
+                    final preview = conversation.previewFor(provider.chatSearchQuery);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ThreadScreen(
+                          threadId: conversation.threadId,
+                          highlightMessageId: provider.chatSearchQuery.trim().isEmpty ? null : preview.id,
+                        ),
+                      ),
+                    );
+                  }
+                },
+                onLongPress: () => provider.toggleSelected(conversation.latest.id),
+              ),
+            );
+          },
+        ),
       );
     }
-    return RefreshIndicator(
-      onRefresh: provider.refresh,
-      child: ListView.separated(
-        itemCount: conversations.length,
-        separatorBuilder: (_, __) => const Divider(height: 1, indent: 78),
-        itemBuilder: (context, index) {
-          final conversation = conversations[index];
-          final selected = provider.selectedIds.contains(conversation.latest.id);
-          final scheme = Theme.of(context).colorScheme;
-          final unread = conversation.unreadCount > 0;
-          return Slidable(
-            key: ValueKey(conversation.threadId),
-            enabled: !provider.isSelecting,
-            startActionPane: ActionPane(
-              motion: const DrawerMotion(),
-              extentRatio: 0.28,
-              children: [
-                SlidableAction(
-                  onPressed: (_) => provider.setConversationRead(conversation, unread),
-                  backgroundColor: scheme.primary,
-                  foregroundColor: scheme.onPrimary,
-                  icon: unread ? Icons.mark_email_read_outlined : Icons.mark_email_unread_outlined,
-                  label: unread ? 'Read' : 'Unread',
-                ),
-              ],
-            ),
-            endActionPane: ActionPane(
-              motion: const DrawerMotion(),
-              extentRatio: 0.28,
-              children: [
-                SlidableAction(
-                  onPressed: (_) => provider.deleteConversation(conversation),
-                  backgroundColor: scheme.error,
-                  foregroundColor: Colors.white,
-                  icon: Icons.delete_outline,
-                  label: 'Delete',
-                ),
-              ],
-            ),
-            child: ConversationTile(
-              conversation: conversation,
-              displayName: provider.displayNameFor(conversation.address),
-              selected: selected,
-              selectionMode: provider.isSelecting,
-              searchQuery: provider.chatSearchQuery,
-              onTap: () {
-                if (provider.isSelecting) {
-                  provider.toggleSelected(conversation.latest.id);
-                } else {
-                  final preview = conversation.previewFor(provider.chatSearchQuery);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ThreadScreen(
-                        threadId: conversation.threadId,
-                        highlightMessageId: provider.chatSearchQuery.trim().isEmpty ? null : preview.id,
-                      ),
-                    ),
-                  );
-                }
-              },
-              onLongPress: () => provider.toggleSelected(conversation.latest.id),
-            ),
-          );
-        },
-      ),
+
+    return Column(
+      children: [
+        _CategoryFilterBar(provider: provider),
+        const Divider(height: 1),
+        Expanded(child: body),
+      ],
     );
   }
 }

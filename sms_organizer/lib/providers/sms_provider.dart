@@ -45,7 +45,9 @@ class SmsProvider extends ChangeNotifier {
   final Set<int> selectedIds = {};
   bool get isSelecting => selectedIds.isNotEmpty;
 
-  // Category filter for the "all messages" list view.
+  // Category filter shared by both Inbox layouts: the "all messages" flat
+  // list and the "chats" conversation list (filters by each conversation's
+  // latest message).
   SmsCategory? activeCategoryFilter;
 
   // Free-text search over the "all messages" list view — matches message
@@ -111,6 +113,9 @@ class SmsProvider extends ChangeNotifier {
 
   List<SmsConversation> get filteredConversations {
     Iterable<SmsConversation> convs = conversations;
+    if (activeCategoryFilter != null) {
+      convs = convs.where((c) => c.latest.category == activeCategoryFilter);
+    }
     if (showUnreadOnly) {
       convs = convs.where((c) => c.unreadCount > 0);
     }
