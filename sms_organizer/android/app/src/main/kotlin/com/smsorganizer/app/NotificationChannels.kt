@@ -2,6 +2,7 @@ package com.smsorganizer.app
 
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationManagerCompat
 
@@ -93,7 +94,8 @@ object NotificationChannels {
                 }
             }
             conversationId
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w("IncomingSmsNotif", "Conversation channel creation failed, using parent channel", e)
             parentId
         }
     }

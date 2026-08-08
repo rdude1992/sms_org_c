@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Telephony
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
@@ -96,7 +97,12 @@ object IncomingSmsNotifier {
     ) {
         try {
             postRichNotification(context, threadId, address, category, history)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // Logged at ERROR (not silently swallowed) specifically so this
+            // is greppable in logcat — `adb logcat | grep IncomingSmsNotif`
+            // around an incoming SMS shows exactly what's throwing here,
+            // rather than just "it fell back to the plain notification".
+            Log.e("IncomingSmsNotif", "Rich notification failed, falling back to plain", e)
             postFallbackNotification(context, threadId, address, body, category)
         }
     }
@@ -168,10 +174,11 @@ object IncomingSmsNotifier {
         try {
             NotificationManagerCompat.from(context).notify(threadId.toInt(), builder.build())
             postGroupSummary(context)
-        } catch (_: SecurityException) {
+        } catch (e: SecurityException) {
             // Permission was revoked between the check above and this call
             // (e.g. user turned it off in Settings mid-broadcast) — the
             // message is still safely in content://sms either way.
+            Log.w("IncomingSmsNotif", "Notify denied by SecurityException", e)
         }
     }
 
@@ -218,9 +225,11 @@ object IncomingSmsNotifier {
                 .build()
 
             NotificationManagerCompat.from(context).notify(threadId.toInt(), notification)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             // At this point we've already tried the rich path and this
-            // minimal one — nothing left to reasonably fall back to.
+            // minimal one — nothing left to reasonably fall back to, but
+            // this is the one that would explain total silence, so log it.
+            Log.e("IncomingSmsNotif", "Fallback notification also failed", e)
         }
     }
 
@@ -309,7 +318,8 @@ object IncomingSmsNotifier {
                 .setIntent(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW))
                 .build()
             ShortcutManagerCompat.pushDynamicShortcut(context, shortcut)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w("IncomingSmsNotif", "Shortcut publish failed (non-fatal)", e)
         }
     }
 
@@ -327,7 +337,8 @@ object IncomingSmsNotifier {
                 .setSuppressNotification(false)
                 .build()
             builder.setBubbleMetadata(metadata)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w("IncomingSmsNotif", "Bubble metadata failed (non-fatal)", e)
         }
     }
 
