@@ -96,6 +96,14 @@ class _ThreadScreenState extends State<ThreadScreen> {
         final conversation = matches.first;
         final messages = conversation.messages.reversed.toList(); // oldest first for chat view
 
+        // Land on the highlighted message if the thread was opened from a
+        // search/tap-through, otherwise on the newest message — like any
+        // other chat app opens at the bottom, not wherever the list's
+        // estimated item extents happen to settle.
+        final highlightIndex =
+            widget.highlightMessageId == null ? -1 : messages.indexWhere((m) => m.id == widget.highlightMessageId);
+        final initialIndex = highlightIndex != -1 ? highlightIndex : messages.length - 1;
+
         _scrollToHighlightIfNeeded(messages);
         _initSelectedSim(provider.activeSims);
 
@@ -114,6 +122,8 @@ class _ThreadScreenState extends State<ThreadScreen> {
               Expanded(
                 child: ScrollablePositionedList.builder(
                   itemScrollController: _itemScrollController,
+                  initialScrollIndex: initialIndex < 0 ? 0 : initialIndex,
+                  initialAlignment: 1,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
