@@ -94,11 +94,29 @@ class InstrumentSummary {
   }
 }
 
+/// One row of [InsightsSummary.byMerchant] — see
+/// [Transaction.merchantGroupKey] for how transactions are grouped into
+/// these.
+class MerchantSummary {
+  final String key;
+
+  /// Original casing of the first transaction seen for this merchant —
+  /// [key] itself is lower-cased/normalised and not fit for display.
+  final String displayName;
+
+  double totalCredit = 0;
+  double totalDebit = 0;
+  int count = 0;
+
+  MerchantSummary({required this.key, required this.displayName});
+}
+
 class InsightsSummary {
   final double totalCredit;
   final double totalDebit;
   final int transactionCount;
   final List<InstrumentSummary> byInstrument;
+  final List<MerchantSummary> byMerchant;
   final List<TrendPoint> trend;
   final TrendGranularity trendGranularity;
   final double totalInvested;
@@ -110,6 +128,7 @@ class InsightsSummary {
     required this.totalDebit,
     required this.transactionCount,
     required this.byInstrument,
+    required this.byMerchant,
     required this.trend,
     required this.trendGranularity,
     required this.totalInvested,
@@ -137,6 +156,7 @@ class InsightsService {
     double totalCredit = 0;
     double totalDebit = 0;
     final Map<String, InstrumentSummary> instrumentMap = {};
+    final Map<String, MerchantSummary> merchantMap = {};
     final Map<String, TrendPoint> trendMap = {};
 
     for (final t in filtered) {
@@ -164,6 +184,20 @@ class InsightsService {
       }
       summary.count += 1;
 
+      final merchantKey = t.merchantGroupKey;
+      if (merchantKey != null) {
+        final merchant = merchantMap.putIfAbsent(
+          merchantKey,
+          () => MerchantSummary(key: merchantKey, displayName: t.merchant!.trim()),
+        );
+        if (t.direction == TxnDirection.credit) {
+          merchant.totalCredit += t.amount;
+        } else if (t.direction == TxnDirection.debit) {
+          merchant.totalDebit += t.amount;
+        }
+        merchant.count += 1;
+      }
+
       final bucketStart = _bucketStart(t.date, granularity);
       final existing = trendMap[bucketStart.toIso8601String()];
       final newCredit = (existing?.credit ?? 0) + (t.direction == TxnDirection.credit ? t.amount : 0);
@@ -173,6 +207,8 @@ class InsightsService {
 
     final trendList = trendMap.values.toList()..sort((a, b) => a.date.compareTo(b.date));
     final instrumentList = instrumentMap.values.toList()
+      ..sort((a, b) => (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit));
+    final merchantList = merchantMap.values.toList()
       ..sort((a, b) => (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit));
 
     double invested = 0;
@@ -194,6 +230,7 @@ class InsightsService {
       totalDebit: totalDebit,
       transactionCount: filtered.length,
       byInstrument: instrumentList,
+      byMerchant: merchantList,
       trend: trendList,
       trendGranularity: granularity,
       totalInvested: invested,

@@ -10,6 +10,7 @@ import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/filter_chip_bar.dart';
 import 'instrument_list_screen.dart';
 import 'investment_list_screen.dart';
+import 'merchant_list_screen.dart';
 import 'transaction_list_screen.dart';
 
 enum InsightsRange { allTime, thisMonth, last3Months, thisYear }
@@ -212,6 +213,58 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                           subtitle: _range.label,
                                           transactions: filteredTransactions
                                               .where((t) => t.instrumentGroupKey == s.key)
+                                              .toList(),
+                                        ),
+                                      ),
+                                    ),
+                              const SizedBox(height: 24),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('By merchant', style: Theme.of(context).textTheme.titleMedium),
+                                  if (summary.byMerchant.isNotEmpty)
+                                    TextButton(
+                                      onPressed: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => MerchantListScreen(
+                                            merchants: summary.byMerchant,
+                                            transactions: filteredTransactions,
+                                            subtitle: _range.label,
+                                          ),
+                                        ),
+                                      ),
+                                      child: const Text('See all'),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              if (summary.byMerchant.isNotEmpty) ...[
+                                _MerchantDonut(
+                                  merchants: summary.byMerchant,
+                                  filteredTransactions: filteredTransactions,
+                                  rangeLabel: _range.label,
+                                ),
+                                const SizedBox(height: 16),
+                              ],
+                              if (summary.byMerchant.isEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  child: Text(
+                                    'No merchants detected in this range.',
+                                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                  ),
+                                )
+                              else
+                                ...summary.byMerchant.take(6).map(
+                                      (s) => _MerchantRow(
+                                        summary: s,
+                                        onTap: () => _openDrilldown(
+                                          context,
+                                          title: s.displayName,
+                                          subtitle: _range.label,
+                                          transactions: filteredTransactions
+                                              .where((t) => t.merchantGroupKey == s.key)
                                               .toList(),
                                         ),
                                       ),
@@ -682,20 +735,22 @@ class _LegendDot extends StatelessWidget {
   }
 }
 
-/// Tappable donut breakdown of spend/activity by card or account — the top
-/// 6 instruments each get their own slice, with anything past that folded
-/// into a single "Other" slice so the chart doesn't fragment into slivers
-/// once someone has a dozen linked cards. Tapping a slice (or its legend
-/// row) opens the same drilldown as tapping the row in the list below.
-class _InstrumentDonut extends StatelessWidget {
-  final List<InstrumentSummary> instruments;
-  final List<Transaction> filteredTransactions;
-  final String rangeLabel;
+/// Tappable donut + legend breakdown of pre-bucketed slices — shared by
+/// the "By card / account" and "By merchant" sections, which both need the
+/// same "top N slices + Other" pie chart with a tap-to-drill legend, just
+/// fed from different summary types. [keys] entries of `null` render as an
+/// untappable "Other" slice.
+class _BreakdownDonut extends StatelessWidget {
+  final List<String> labels;
+  final List<String?> keys;
+  final List<double> values;
+  final ValueChanged<String> onTapKey;
 
-  const _InstrumentDonut({
-    required this.instruments,
-    required this.filteredTransactions,
-    required this.rangeLabel,
+  const _BreakdownDonut({
+    required this.labels,
+    required this.keys,
+    required this.values,
+    required this.onTapKey,
   });
 
   static const _palette = [
@@ -712,32 +767,11 @@ class _InstrumentDonut extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final top = instruments.take(6).toList();
-    final otherTotal =
-        instruments.skip(6).fold<double>(0, (a, s) => a + s.totalCredit + s.totalDebit);
-
-    final labels = [for (final s in top) s.displayName, if (otherTotal > 0) 'Other'];
-    final keys = [for (final s in top) s.key, if (otherTotal > 0) null];
-    final values = [
-      for (final s in top) s.totalCredit + s.totalDebit,
-      if (otherTotal > 0) otherTotal,
-    ];
     final grandTotal = values.fold<double>(0, (a, v) => a + v);
     if (grandTotal <= 0) return const SizedBox.shrink();
 
     void openFor(String? key) {
-      if (key == null) return;
-      final match = instruments.firstWhere((s) => s.key == key);
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => TransactionListScreen(
-            title: match.displayName,
-            subtitle: rangeLabel,
-            transactions: filteredTransactions.where((t) => t.instrumentGroupKey == key).toList(),
-          ),
-        ),
-      );
+      if (key != null) onTapKey(key);
     }
 
     return Row(
@@ -834,6 +868,86 @@ class _InstrumentDonut extends StatelessWidget {
   }
 }
 
+/// The top 6 instruments each get their own [_BreakdownDonut] slice, with
+/// anything past that folded into a single "Other" slice so the chart
+/// doesn't fragment into slivers once someone has a dozen linked cards.
+class _InstrumentDonut extends StatelessWidget {
+  final List<InstrumentSummary> instruments;
+  final List<Transaction> filteredTransactions;
+  final String rangeLabel;
+
+  const _InstrumentDonut({
+    required this.instruments,
+    required this.filteredTransactions,
+    required this.rangeLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final top = instruments.take(6).toList();
+    final otherTotal =
+        instruments.skip(6).fold<double>(0, (a, s) => a + s.totalCredit + s.totalDebit);
+
+    return _BreakdownDonut(
+      labels: [for (final s in top) s.displayName, if (otherTotal > 0) 'Other'],
+      keys: [for (final s in top) s.key, if (otherTotal > 0) null],
+      values: [for (final s in top) s.totalCredit + s.totalDebit, if (otherTotal > 0) otherTotal],
+      onTapKey: (key) {
+        final match = instruments.firstWhere((s) => s.key == key);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TransactionListScreen(
+              title: match.displayName,
+              subtitle: rangeLabel,
+              transactions: filteredTransactions.where((t) => t.instrumentGroupKey == key).toList(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Same idea as [_InstrumentDonut], grouped by [Transaction.merchantGroupKey]
+/// instead of by instrument.
+class _MerchantDonut extends StatelessWidget {
+  final List<MerchantSummary> merchants;
+  final List<Transaction> filteredTransactions;
+  final String rangeLabel;
+
+  const _MerchantDonut({
+    required this.merchants,
+    required this.filteredTransactions,
+    required this.rangeLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final top = merchants.take(6).toList();
+    final otherTotal = merchants.skip(6).fold<double>(0, (a, s) => a + s.totalCredit + s.totalDebit);
+
+    return _BreakdownDonut(
+      labels: [for (final s in top) s.displayName, if (otherTotal > 0) 'Other'],
+      keys: [for (final s in top) s.key, if (otherTotal > 0) null],
+      values: [for (final s in top) s.totalCredit + s.totalDebit, if (otherTotal > 0) otherTotal],
+      onTapKey: (key) {
+        final match = merchants.firstWhere((s) => s.key == key);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TransactionListScreen(
+              title: match.displayName,
+              subtitle: rangeLabel,
+              transactions: filteredTransactions.where((t) => t.merchantGroupKey == key).toList(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _InstrumentRow extends StatelessWidget {
   final InstrumentSummary summary;
   final VoidCallback onTap;
@@ -872,6 +986,36 @@ class _InstrumentRow extends StatelessWidget {
               style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
           Text('-${Formatters.currency(summary.totalDebit)}',
               style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
+        ],
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
+class _MerchantRow extends StatelessWidget {
+  final MerchantSummary summary;
+  final VoidCallback onTap;
+  const _MerchantRow({required this.summary, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      minVerticalPadding: 10,
+      leading: const Icon(Icons.storefront_outlined),
+      title: Text(summary.displayName),
+      subtitle: Text('${summary.count} transactions'),
+      trailing: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (summary.totalCredit > 0)
+            Text('+${Formatters.currency(summary.totalCredit)}',
+                style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
+          if (summary.totalDebit > 0)
+            Text('-${Formatters.currency(summary.totalDebit)}',
+                style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
         ],
       ),
       onTap: onTap,
