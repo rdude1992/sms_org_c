@@ -145,6 +145,19 @@ object IncomingSmsNotifier {
             openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        // Bubbles specifically require a MUTABLE PendingIntent — the
+        // opposite of the (correctly immutable) one above — so this can't
+        // just reuse contentIntent. Posting a BubbleMetadata built from an
+        // immutable intent doesn't fail until the system server validates
+        // it at notify() time, as an IllegalArgumentException ("PendingIntents
+        // attached to bubbles must be mutable") that's easy to mistake for
+        // something else going wrong in the rich notification path.
+        val bubbleIntent = PendingIntent.getActivity(
+            context,
+            threadId.toInt() * 10 + 4,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
 
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_stat_notify)
@@ -169,7 +182,7 @@ object IncomingSmsNotifier {
             }
         }
 
-        attachBubbleMetadata(builder, contentIntent, avatarIcon)
+        attachBubbleMetadata(builder, bubbleIntent, avatarIcon)
 
         try {
             NotificationManagerCompat.from(context).notify(threadId.toInt(), builder.build())
@@ -323,15 +336,20 @@ object IncomingSmsNotifier {
         }
     }
 
-    /** Best-effort: bubbles require API 30+ and are opt-in per conversation by the user regardless. */
+    /**
+     * Best-effort: bubbles require API 30+ and are opt-in per conversation
+     * by the user regardless. [bubbleIntent] must be a MUTABLE
+     * PendingIntent — Android rejects the whole notification at post time
+     * otherwise (see the comment where it's built in [postRichNotification]).
+     */
     private fun attachBubbleMetadata(
         builder: NotificationCompat.Builder,
-        contentIntent: PendingIntent,
+        bubbleIntent: PendingIntent,
         icon: IconCompat
     ) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         try {
-            val metadata = NotificationCompat.BubbleMetadata.Builder(contentIntent, icon)
+            val metadata = NotificationCompat.BubbleMetadata.Builder(bubbleIntent, icon)
                 .setDesiredHeight(600)
                 .setAutoExpandBubble(false)
                 .setSuppressNotification(false)
