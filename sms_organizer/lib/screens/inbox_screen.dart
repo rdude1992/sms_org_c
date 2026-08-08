@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:provider/provider.dart';
 import '../models/category.dart';
 import '../models/sms_message.dart';
@@ -279,70 +278,38 @@ class _ConversationListView extends StatelessWidget {
           itemBuilder: (context, index) {
             final conversation = conversations[index];
             final selected = provider.selectedIds.contains(conversation.latest.id);
-            final scheme = Theme.of(context).colorScheme;
-            final unread = conversation.unreadCount > 0;
             final pinned = provider.isPinned(conversation.threadId);
-            return Slidable(
+            return ConversationTile(
               key: ValueKey(conversation.threadId),
-              enabled: !provider.isSelecting,
-              startActionPane: ActionPane(
-                motion: const DrawerMotion(),
-                extentRatio: 0.5,
-                children: [
-                  SlidableAction(
-                    onPressed: (_) => provider.togglePinned(conversation.threadId),
-                    backgroundColor: scheme.secondary,
-                    foregroundColor: scheme.onSecondary,
-                    icon: pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                    label: pinned ? 'Unpin' : 'Pin',
-                  ),
-                  SlidableAction(
-                    onPressed: (_) => provider.setConversationRead(conversation, unread),
-                    backgroundColor: scheme.primary,
-                    foregroundColor: scheme.onPrimary,
-                    icon: unread ? Icons.mark_email_read_outlined : Icons.mark_email_unread_outlined,
-                    label: unread ? 'Read' : 'Unread',
-                  ),
-                ],
-              ),
-              endActionPane: ActionPane(
-                motion: const DrawerMotion(),
-                extentRatio: 0.28,
-                children: [
-                  SlidableAction(
-                    onPressed: (_) => provider.deleteConversation(conversation),
-                    backgroundColor: scheme.error,
-                    foregroundColor: Colors.white,
-                    icon: Icons.delete_outline,
-                    label: 'Delete',
-                  ),
-                ],
-              ),
-              child: ConversationTile(
-                conversation: conversation,
-                displayName: provider.displayNameFor(conversation.address),
-                selected: selected,
-                selectionMode: provider.isSelecting,
-                pinned: pinned,
-                searchQuery: provider.chatSearchQuery,
-                onTap: () {
-                  if (provider.isSelecting) {
-                    provider.toggleSelected(conversation.latest.id);
-                  } else {
-                    final preview = conversation.previewFor(provider.chatSearchQuery);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ThreadScreen(
-                          threadId: conversation.threadId,
-                          highlightMessageId: provider.chatSearchQuery.trim().isEmpty ? null : preview.id,
-                        ),
+              conversation: conversation,
+              displayName: provider.displayNameFor(conversation.address),
+              selected: selected,
+              selectionMode: provider.isSelecting,
+              pinned: pinned,
+              searchQuery: provider.chatSearchQuery,
+              onTap: () {
+                if (provider.isSelecting) {
+                  provider.toggleSelected(conversation.latest.id);
+                } else {
+                  final preview = conversation.previewFor(provider.chatSearchQuery);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ThreadScreen(
+                        threadId: conversation.threadId,
+                        highlightMessageId: provider.chatSearchQuery.trim().isEmpty ? null : preview.id,
                       ),
-                    );
-                  }
-                },
-                onLongPress: () => provider.toggleSelected(conversation.latest.id),
-              ),
+                    ),
+                  );
+                }
+              },
+              onLongPress: () {
+                if (provider.isSelecting) {
+                  provider.toggleSelected(conversation.latest.id);
+                } else {
+                  _showConversationActions(context, provider, conversation);
+                }
+              },
             );
           },
         ),
@@ -535,139 +502,255 @@ class _MessageRow extends StatelessWidget {
     final selected = provider.selectedIds.contains(m.id);
     final unread = !m.read && m.isIncoming;
     final scheme = Theme.of(context).colorScheme;
-    return Slidable(
+    return ListTile(
       key: ValueKey(m.id),
-      enabled: !provider.isSelecting,
-      startActionPane: ActionPane(
-        motion: const DrawerMotion(),
-        extentRatio: 0.28,
-        children: [
-          SlidableAction(
-            onPressed: (_) => provider.setMessageRead(m.id, unread),
-            backgroundColor: scheme.primary,
-            foregroundColor: scheme.onPrimary,
-            icon: unread ? Icons.mark_email_read_outlined : Icons.mark_email_unread_outlined,
-            label: unread ? 'Read' : 'Unread',
-          ),
-        ],
-      ),
-      endActionPane: ActionPane(
-        motion: const DrawerMotion(),
-        extentRatio: 0.28,
-        children: [
-          SlidableAction(
-            onPressed: (_) => provider.deleteMessage(m.id),
-            backgroundColor: scheme.error,
-            foregroundColor: Colors.white,
-            icon: Icons.delete_outline,
-            label: 'Delete',
-          ),
-        ],
-      ),
-      child: ListTile(
-        selected: selected,
-        selectedTileColor: scheme.primary.withOpacity(0.06),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        minVerticalPadding: 10,
-        leading: provider.isSelecting
-            ? Icon(
-                selected ? Icons.check_circle : Icons.radio_button_unchecked,
-                color: selected ? scheme.primary : scheme.outline,
-              )
-            : Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  CircleAvatar(
-                    backgroundColor: m.category.color.withOpacity(0.15),
-                    child: Icon(m.category.icon, color: m.category.color, size: 18),
-                  ),
-                  Positioned(
-                    bottom: -2,
-                    right: -2,
-                    child: DirectionBadge(isIncoming: m.isIncoming),
-                  ),
-                ],
-              ),
-        title: Row(
-          children: [
-            if (unread) ...[
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(color: scheme.primary, shape: BoxShape.circle),
-              ),
-              const SizedBox(width: 6),
-            ],
-            Expanded(
-              child: Text(
-                provider.displayNameFor(m.address),
-                style: TextStyle(
-                  fontWeight: unread ? FontWeight.bold : FontWeight.w600,
-                  color: unread ? scheme.onSurface : null,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 3),
-          child: SearchPreviewText(
-            body: m.body,
-            query: provider.searchQuery,
-            baseStyle: TextStyle(
-              color: unread ? scheme.onSurface.withOpacity(0.85) : scheme.onSurfaceVariant,
-              fontWeight: unread ? FontWeight.w600 : FontWeight.normal,
-            ),
-            matchColor: scheme.primary,
-          ),
-        ),
-        trailing: Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
+      selected: selected,
+      selectedTileColor: scheme.primary.withOpacity(0.06),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      minVerticalPadding: 10,
+      leading: provider.isSelecting
+          ? Icon(
+              selected ? Icons.check_circle : Icons.radio_button_unchecked,
+              color: selected ? scheme.primary : scheme.outline,
+            )
+          : Stack(
+              clipBehavior: Clip.none,
               children: [
-                if (m.simSlot != null) ...[
-                  Text(
-                    'SIM ${m.simSlot! + 1}',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                Text(
-                  Formatters.relativeOrTime(m.date),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: unread ? scheme.primary : scheme.onSurfaceVariant,
-                    fontWeight: unread ? FontWeight.bold : FontWeight.normal,
-                  ),
+                CircleAvatar(
+                  backgroundColor: m.category.color.withOpacity(0.15),
+                  child: Icon(m.category.icon, color: m.category.color, size: 18),
+                ),
+                Positioned(
+                  bottom: -2,
+                  right: -2,
+                  child: DirectionBadge(isIncoming: m.isIncoming),
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-            CategoryBadge(category: m.category, compact: true, showLabel: false),
+      title: Row(
+        children: [
+          if (unread) ...[
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: scheme.primary, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
           ],
-        ),
-        onTap: () {
-          if (provider.isSelecting) {
-            provider.toggleSelected(m.id);
-          } else {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ThreadScreen(threadId: m.threadId, highlightMessageId: m.id),
+          Expanded(
+            child: Text(
+              provider.displayNameFor(m.address),
+              style: TextStyle(
+                fontWeight: unread ? FontWeight.bold : FontWeight.w600,
+                color: unread ? scheme.onSurface : null,
               ),
-            );
-          }
-        },
-        onLongPress: () => provider.toggleSelected(m.id),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 3),
+        child: SearchPreviewText(
+          body: m.body,
+          query: provider.searchQuery,
+          baseStyle: TextStyle(
+            color: unread ? scheme.onSurface.withOpacity(0.85) : scheme.onSurfaceVariant,
+            fontWeight: unread ? FontWeight.w600 : FontWeight.normal,
+          ),
+          matchColor: scheme.primary,
+        ),
+      ),
+      trailing: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (m.simSlot != null) ...[
+                Text(
+                  'SIM ${m.simSlot! + 1}',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                Formatters.relativeOrTime(m.date),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: unread ? scheme.primary : scheme.onSurfaceVariant,
+                  fontWeight: unread ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          CategoryBadge(category: m.category, compact: true, showLabel: false),
+        ],
+      ),
+      onTap: () {
+        if (provider.isSelecting) {
+          provider.toggleSelected(m.id);
+        } else {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ThreadScreen(threadId: m.threadId, highlightMessageId: m.id),
+            ),
+          );
+        }
+      },
+      onLongPress: () {
+        if (provider.isSelecting) {
+          provider.toggleSelected(m.id);
+        } else {
+          _showMessageRowActions(context, provider, m);
+        }
+      },
     );
   }
+}
+
+/// Long-press-on-a-row context menu for a conversation — pin/unpin, mark
+/// read/unread, select, delete — in place of the swipe actions this list
+/// used to have. "Select" is kept as an explicit option here so multi-select
+/// is still reachable, just one tap deeper instead of the only long-press
+/// outcome (matches the pattern ThreadScreen already uses for messages).
+void _showConversationActions(BuildContext context, SmsProvider provider, SmsConversation conversation) {
+  final scheme = Theme.of(context).colorScheme;
+  final unread = conversation.unreadCount > 0;
+  final pinned = provider.isPinned(conversation.threadId);
+  showModalBottomSheet(
+    context: context,
+    builder: (sheetContext) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            ListTile(
+              leading: Icon(pinned ? Icons.push_pin : Icons.push_pin_outlined),
+              title: Text(pinned ? 'Unpin' : 'Pin'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                provider.togglePinned(conversation.threadId);
+              },
+            ),
+            ListTile(
+              leading: Icon(unread ? Icons.mark_email_read_outlined : Icons.mark_email_unread_outlined),
+              title: Text(unread ? 'Mark as read' : 'Mark as unread'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                provider.setConversationRead(conversation, unread);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle_outline),
+              title: const Text('Select'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                provider.toggleSelected(conversation.latest.id);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: scheme.error),
+              title: Text('Delete conversation', style: TextStyle(color: scheme.error)),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _confirmDeleteConversation(context, provider, conversation);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+Future<void> _confirmDeleteConversation(
+    BuildContext context, SmsProvider provider, SmsConversation conversation) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Delete conversation?'),
+      content: const Text('All messages in this conversation will be deleted. This cannot be undone.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text('Delete', style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true) await provider.deleteConversation(conversation);
+}
+
+/// Long-press-on-a-row context menu for a flat message-list row — mark
+/// read/unread, select, delete — see [_showConversationActions].
+void _showMessageRowActions(BuildContext context, SmsProvider provider, SmsMessage message) {
+  final scheme = Theme.of(context).colorScheme;
+  final unread = !message.read && message.isIncoming;
+  showModalBottomSheet(
+    context: context,
+    builder: (sheetContext) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            ListTile(
+              leading: Icon(unread ? Icons.mark_email_read_outlined : Icons.mark_email_unread_outlined),
+              title: Text(unread ? 'Mark as read' : 'Mark as unread'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                provider.setMessageRead(message.id, unread);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle_outline),
+              title: const Text('Select'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                provider.toggleSelected(message.id);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: scheme.error),
+              title: Text('Delete', style: TextStyle(color: scheme.error)),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _confirmDeleteMessageRow(context, provider, message.id);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+Future<void> _confirmDeleteMessageRow(BuildContext context, SmsProvider provider, int id) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Delete message?'),
+      content: const Text('This cannot be undone.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text('Delete', style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true) await provider.deleteMessage(id);
 }
