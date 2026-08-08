@@ -83,7 +83,7 @@ class MessageBubble extends StatelessWidget {
                   children: [
                     LinkifiedText(
                       text: message.body,
-                      style: TextStyle(color: textColor, fontSize: 14),
+                      style: TextStyle(color: textColor, fontSize: 15, height: 1.45),
                       // Outgoing bubbles are already primary-coloured, so a
                       // primary link colour would vanish against it —
                       // underline is the only differentiator there instead.

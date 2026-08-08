@@ -62,6 +62,7 @@ class AppTheme {
       scaffoldBackgroundColor: scaffold,
       canvasColor: scaffold,
       splashFactory: InkRipple.splashFactory,
+      fontFamily: 'Inter',
       textTheme: textTheme,
       primaryTextTheme: textTheme,
       dividerColor: border,
@@ -322,19 +323,27 @@ class AppTheme {
     );
   }
 
+  /// Sizes/weights tuned to claude.ai's own type scale rather than
+  /// Material 3's defaults: a comfortable ~15-16px reading size with
+  /// generous line-height for body copy, and restrained, moderately-sized
+  /// (not oversized) headings — Claude leans on weight and spacing for
+  /// hierarchy rather than large jumps in font size.
   static TextTheme _textTheme(Color onSurface) {
     return TextTheme(
-      displaySmall: TextStyle(color: onSurface, fontWeight: FontWeight.w700, letterSpacing: -0.2),
-      headlineSmall: TextStyle(color: onSurface, fontWeight: FontWeight.w700, letterSpacing: -0.1),
-      titleLarge: TextStyle(color: onSurface, fontWeight: FontWeight.w700, letterSpacing: -0.1),
-      titleMedium: TextStyle(color: onSurface, fontWeight: FontWeight.w600),
-      titleSmall: TextStyle(color: onSurface, fontWeight: FontWeight.w600),
-      bodyLarge: TextStyle(color: onSurface),
-      bodyMedium: TextStyle(color: onSurface),
-      bodySmall: TextStyle(color: onSurface),
-      labelLarge: TextStyle(color: onSurface, fontWeight: FontWeight.w600),
-      labelMedium: TextStyle(color: onSurface, fontWeight: FontWeight.w600),
-      labelSmall: TextStyle(color: onSurface, fontWeight: FontWeight.w600),
+      displaySmall: TextStyle(
+        color: onSurface, fontSize: 30, fontWeight: FontWeight.w700, letterSpacing: -0.2, height: 1.2),
+      headlineSmall: TextStyle(
+        color: onSurface, fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: -0.1, height: 1.25),
+      titleLarge: TextStyle(
+        color: onSurface, fontSize: 19, fontWeight: FontWeight.w700, letterSpacing: -0.1, height: 1.3),
+      titleMedium: TextStyle(color: onSurface, fontSize: 16, fontWeight: FontWeight.w600, height: 1.35),
+      titleSmall: TextStyle(color: onSurface, fontSize: 14, fontWeight: FontWeight.w600, height: 1.35),
+      bodyLarge: TextStyle(color: onSurface, fontSize: 16, fontWeight: FontWeight.w400, height: 1.55),
+      bodyMedium: TextStyle(color: onSurface, fontSize: 14.5, fontWeight: FontWeight.w400, height: 1.45),
+      bodySmall: TextStyle(color: onSurface, fontSize: 12.5, fontWeight: FontWeight.w400, height: 1.4),
+      labelLarge: TextStyle(color: onSurface, fontSize: 14, fontWeight: FontWeight.w600, height: 1.2),
+      labelMedium: TextStyle(color: onSurface, fontSize: 12.5, fontWeight: FontWeight.w600, height: 1.2),
+      labelSmall: TextStyle(color: onSurface, fontSize: 11.5, fontWeight: FontWeight.w600, height: 1.2),
     );
   }
 }

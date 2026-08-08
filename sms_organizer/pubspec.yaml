@@ -30,3 +30,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Variable.ttf
+        - asset: assets/fonts/Inter-Italic-Variable.ttf
+          style: italic
