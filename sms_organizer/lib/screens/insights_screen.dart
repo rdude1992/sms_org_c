@@ -1,4 +1,3 @@
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/transaction.dart';
@@ -6,8 +5,10 @@ import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/transaction_tile.dart';
+import '../widgets/ui/breakdown_donut.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/filter_chip_bar.dart';
+import '../widgets/ui/trend_bar_chart.dart';
 import 'instrument_list_screen.dart';
 import 'investment_list_screen.dart';
 import 'merchant_list_screen.dart';
@@ -531,344 +532,23 @@ class _TrendChart extends StatelessWidget {
   static const _creditColor = Color(0xFF10B981);
   static const _debitColor = Color(0xFFEF4444);
 
-  String _bucketLabel(DateTime date) {
-    switch (summary.trendGranularity) {
-      case TrendGranularity.day:
-        return Formatters.dayOnly(date);
-      case TrendGranularity.week:
-        return Formatters.dayMonth(date);
-      case TrendGranularity.month:
-        return Formatters.monthYear(date);
-    }
-  }
-
-  String get _perBucketLabel {
-    switch (summary.trendGranularity) {
-      case TrendGranularity.day:
-        return 'day';
-      case TrendGranularity.week:
-        return 'week';
-      case TrendGranularity.month:
-        return 'month';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
-    if (summary.trend.isEmpty) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Center(
-            child: Text('Not enough data yet.', style: TextStyle(color: scheme.onSurfaceVariant)),
-          ),
-        ),
-      );
-    }
-    final points = summary.trend;
-    final maxVal = points.map((p) => p.credit + p.debit).fold<double>(0, (a, b) => a > b ? a : b);
-    final maxY = maxVal == 0 ? 1.0 : maxVal * 1.2;
-    final avgCredit = points.map((p) => p.credit).reduce((a, b) => a + b) / points.length;
-    final avgDebit = points.map((p) => p.debit).reduce((a, b) => a + b) / points.length;
-
-    // However many buckets are in range, only label a handful of them —
-    // cramming a label under every single bar is what made this unreadable
-    // once "This month" started putting up to 31 daily bars on screen.
-    const maxLabels = 6;
-    final labelInterval = (points.length / maxLabels).ceil().clamp(1, points.length);
-
-    // Narrower, tighter-packed bars once there are enough buckets that
-    // full-width bars would overlap (31 daily bars vs. 12 monthly ones).
-    final barWidth = points.length > 20 ? 5.0 : (points.length > 10 ? 9.0 : 16.0);
-    final groupsSpace = points.length > 20 ? 3.0 : (points.length > 10 ? 6.0 : 14.0);
-
-    void handleTap(FlTouchEvent event, BarTouchResponse? response) {
-      if (event is! FlTapUpEvent) return;
-      final index = response?.spot?.touchedBarGroupIndex;
-      if (index == null || index < 0 || index >= points.length) return;
-      onTapBucket(points[index].date);
-    }
-
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: const [
-                _LegendDot(color: _creditColor, label: 'Credited'),
-                SizedBox(width: 16),
-                _LegendDot(color: _debitColor, label: 'Debited'),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Avg ${Formatters.currency(avgCredit)} in · ${Formatters.currency(avgDebit)} out / $_perBucketLabel',
-              style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 200,
-              child: BarChart(
-                BarChartData(
-                  minY: 0,
-                  maxY: maxY,
-                  alignment: BarChartAlignment.spaceEvenly,
-                  groupsSpace: groupsSpace,
-                  barTouchData: BarTouchData(
-                    touchCallback: handleTap,
-                    touchTooltipData: BarTouchTooltipData(
-                      tooltipRoundedRadius: 8,
-                      tooltipPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      getTooltipColor: (_) => scheme.onSurface,
-                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                        if (groupIndex < 0 || groupIndex >= points.length) return null;
-                        final p = points[groupIndex];
-                        return BarTooltipItem(
-                          '${_bucketLabel(p.date)}\n',
-                          TextStyle(
-                            color: scheme.surface,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            fontFamily: 'Inter',
-                          ),
-                          children: [
-                            TextSpan(
-                              text: 'In ${Formatters.currency(p.credit)}\n',
-                              style:
-                                  const TextStyle(color: _creditColor, fontSize: 11, fontFamily: 'Inter'),
-                            ),
-                            TextSpan(
-                              text: 'Out ${Formatters.currency(p.debit)}',
-                              style: const TextStyle(color: _debitColor, fontSize: 11, fontFamily: 'Inter'),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                  barGroups: [
-                    for (var i = 0; i < points.length; i++)
-                      BarChartGroupData(
-                        x: i,
-                        barRods: [
-                          BarChartRodData(
-                            toY: points[i].credit + points[i].debit,
-                            width: barWidth,
-                            borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
-                            rodStackItems: [
-                              BarChartRodStackItem(0, points[i].credit, _creditColor),
-                              BarChartRodStackItem(
-                                points[i].credit,
-                                points[i].credit + points[i].debit,
-                                _debitColor,
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                  ],
-                  titlesData: FlTitlesData(
-                    leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 28,
-                        getTitlesWidget: (value, meta) {
-                          final idx = value.toInt();
-                          if (idx < 0 || idx >= points.length) return const SizedBox.shrink();
-                          final isLast = idx == points.length - 1;
-                          if (idx % labelInterval != 0 && !isLast) return const SizedBox.shrink();
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              _bucketLabel(points[idx].date),
-                              style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  gridData: FlGridData(
-                    show: true,
-                    drawVerticalLine: false,
-                    horizontalInterval: maxY / 4,
-                    getDrawingHorizontalLine: (_) =>
-                        FlLine(color: scheme.outlineVariant.withOpacity(0.5), strokeWidth: 1),
-                  ),
-                  borderData: FlBorderData(show: false),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return TrendBarChart(
+      dates: [for (final p in summary.trend) p.date],
+      primaryValues: [for (final p in summary.trend) p.credit],
+      secondaryValues: [for (final p in summary.trend) p.debit],
+      granularity: summary.trendGranularity,
+      primaryLabel: 'Credited',
+      secondaryLabel: 'Debited',
+      primaryColor: _creditColor,
+      secondaryColor: _debitColor,
+      onTapBucket: onTapBucket,
     );
   }
 }
 
-class _LegendDot extends StatelessWidget {
-  final Color color;
-  final String label;
-  const _LegendDot({required this.color, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-        ),
-      ],
-    );
-  }
-}
-
-/// Tappable donut + legend breakdown of pre-bucketed slices — shared by
-/// the "By card / account" and "By merchant" sections, which both need the
-/// same "top N slices + Other" pie chart with a tap-to-drill legend, just
-/// fed from different summary types. [keys] entries of `null` render as an
-/// untappable "Other" slice.
-class _BreakdownDonut extends StatelessWidget {
-  final List<String> labels;
-  final List<String?> keys;
-  final List<double> values;
-  final ValueChanged<String> onTapKey;
-
-  const _BreakdownDonut({
-    required this.labels,
-    required this.keys,
-    required this.values,
-    required this.onTapKey,
-  });
-
-  static const _palette = [
-    Color(0xFFC96442),
-    Color(0xFF10B981),
-    Color(0xFFF59E0B),
-    Color(0xFF8B5CF6),
-    Color(0xFFEF4444),
-    Color(0xFF06B6D4),
-    Color(0xFFEC4899),
-    Color(0xFF64748B),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final grandTotal = values.fold<double>(0, (a, v) => a + v);
-    if (grandTotal <= 0) return const SizedBox.shrink();
-
-    void openFor(String? key) {
-      if (key != null) onTapKey(key);
-    }
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        SizedBox(
-          width: 132,
-          height: 132,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              PieChart(
-                PieChartData(
-                  sectionsSpace: 2,
-                  centerSpaceRadius: 42,
-                  pieTouchData: PieTouchData(
-                    touchCallback: (event, response) {
-                      if (event is! FlTapUpEvent) return;
-                      final index = response?.touchedSection?.touchedSectionIndex;
-                      if (index == null || index < 0 || index >= keys.length) return;
-                      openFor(keys[index]);
-                    },
-                  ),
-                  sections: [
-                    for (var i = 0; i < values.length; i++)
-                      PieChartSectionData(
-                        value: values[i],
-                        color: _palette[i % _palette.length],
-                        radius: 20,
-                        showTitle: false,
-                      ),
-                  ],
-                ),
-              ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    Formatters.currency(grandTotal),
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: scheme.onSurface),
-                  ),
-                  Text('total', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var i = 0; i < labels.length; i++)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: InkWell(
-                    onTap: keys[i] == null ? null : () => openFor(keys[i]),
-                    borderRadius: BorderRadius.circular(6),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration:
-                              BoxDecoration(color: _palette[i % _palette.length], shape: BoxShape.circle),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            labels[i],
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 12.5, color: scheme.onSurface),
-                          ),
-                        ),
-                        Text(
-                          '${(values[i] / grandTotal * 100).toStringAsFixed(0)}%',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: scheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// The top 6 instruments each get their own [_BreakdownDonut] slice, with
+/// The top 6 instruments each get their own [BreakdownDonut] slice, with
 /// anything past that folded into a single "Other" slice so the chart
 /// doesn't fragment into slivers once someone has a dozen linked cards.
 class _InstrumentDonut extends StatelessWidget {
@@ -888,7 +568,7 @@ class _InstrumentDonut extends StatelessWidget {
     final otherTotal =
         instruments.skip(6).fold<double>(0, (a, s) => a + s.totalCredit + s.totalDebit);
 
-    return _BreakdownDonut(
+    return BreakdownDonut(
       labels: [for (final s in top) s.displayName, if (otherTotal > 0) 'Other'],
       keys: [for (final s in top) s.key, if (otherTotal > 0) null],
       values: [for (final s in top) s.totalCredit + s.totalDebit, if (otherTotal > 0) otherTotal],
@@ -927,7 +607,7 @@ class _MerchantDonut extends StatelessWidget {
     final top = merchants.take(6).toList();
     final otherTotal = merchants.skip(6).fold<double>(0, (a, s) => a + s.totalCredit + s.totalDebit);
 
-    return _BreakdownDonut(
+    return BreakdownDonut(
       labels: [for (final s in top) s.displayName, if (otherTotal > 0) 'Other'],
       keys: [for (final s in top) s.key, if (otherTotal > 0) null],
       values: [for (final s in top) s.totalCredit + s.totalDebit, if (otherTotal > 0) otherTotal],

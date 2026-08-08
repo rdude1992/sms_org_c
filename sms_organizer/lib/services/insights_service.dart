@@ -198,7 +198,7 @@ class InsightsService {
         merchant.count += 1;
       }
 
-      final bucketStart = _bucketStart(t.date, granularity);
+      final bucketStart = trendBucketStart(t.date, granularity);
       final existing = trendMap[bucketStart.toIso8601String()];
       final newCredit = (existing?.credit ?? 0) + (t.direction == TxnDirection.credit ? t.amount : 0);
       final newDebit = (existing?.debit ?? 0) + (t.direction == TxnDirection.debit ? t.amount : 0);
@@ -239,17 +239,21 @@ class InsightsService {
     );
   }
 
-  /// Truncates [date] to the start of its bucket for [granularity] — a
-  /// calendar day, the Monday of its week, or the 1st of its month.
-  DateTime _bucketStart(DateTime date, TrendGranularity granularity) {
-    switch (granularity) {
-      case TrendGranularity.day:
-        return DateTime(date.year, date.month, date.day);
-      case TrendGranularity.week:
-        final dayOnly = DateTime(date.year, date.month, date.day);
-        return dayOnly.subtract(Duration(days: date.weekday - 1));
-      case TrendGranularity.month:
-        return DateTime(date.year, date.month);
-    }
+}
+
+/// Truncates [date] to the start of its bucket for [granularity] — a
+/// calendar day, the Monday of its week, or the 1st of its month. Shared
+/// (not just used by [InsightsService.build]) so other screens that bucket
+/// their own data by the same granularity — e.g. the Investments "by AMC"
+/// trend chart — stay in lockstep with how Insights buckets transactions.
+DateTime trendBucketStart(DateTime date, TrendGranularity granularity) {
+  switch (granularity) {
+    case TrendGranularity.day:
+      return DateTime(date.year, date.month, date.day);
+    case TrendGranularity.week:
+      final dayOnly = DateTime(date.year, date.month, date.day);
+      return dayOnly.subtract(Duration(days: date.weekday - 1));
+    case TrendGranularity.month:
+      return DateTime(date.year, date.month);
   }
 }
