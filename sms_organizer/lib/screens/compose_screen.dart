@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/sim_info.dart';
 import '../providers/sms_provider.dart';
+import '../services/contact_service.dart';
 import '../widgets/sim_picker.dart';
 import 'contact_picker_screen.dart';
 
@@ -17,6 +18,7 @@ class ComposeScreen extends StatefulWidget {
 
 class _ComposeScreenState extends State<ComposeScreen> {
   late final _toController = TextEditingController(text: widget.initialAddress ?? '');
+  final _toFocusNode = FocusNode();
   late final _bodyController = TextEditingController(text: widget.initialBody ?? '');
   bool _sending = false;
   int? _selectedSubscriptionId;
@@ -25,6 +27,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
   @override
   void dispose() {
     _toController.dispose();
+    _toFocusNode.dispose();
     _bodyController.dispose();
     super.dispose();
   }
@@ -89,10 +92,62 @@ class _ComposeScreenState extends State<ComposeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: _toController,
-                    keyboardType: TextInputType.phone,
-                    decoration: const InputDecoration(labelText: 'To'),
+                  child: RawAutocomplete<ContactEntry>(
+                    textEditingController: _toController,
+                    focusNode: _toFocusNode,
+                    optionsBuilder: (value) {
+                      final query = value.text.trim().toLowerCase();
+                      if (query.isEmpty) return const Iterable<ContactEntry>.empty();
+                      final contacts = context.read<SmsProvider>().contactService.entries;
+                      return contacts
+                          .where((c) =>
+                              c.name.toLowerCase().contains(query) ||
+                              c.number.replaceAll(RegExp(r'\s'), '').contains(query))
+                          .take(6);
+                    },
+                    displayStringForOption: (c) => c.number,
+                    onSelected: (c) => _toController.text = c.number,
+                    fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                      return TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(labelText: 'To'),
+                      );
+                    },
+                    optionsViewBuilder: (context, onSelected, options) {
+                      return Align(
+                        alignment: Alignment.topLeft,
+                        child: Material(
+                          elevation: 4,
+                          borderRadius: BorderRadius.circular(12),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 240),
+                            child: ListView.builder(
+                              padding: EdgeInsets.zero,
+                              shrinkWrap: true,
+                              itemCount: options.length,
+                              itemBuilder: (context, index) {
+                                final c = options.elementAt(index);
+                                return ListTile(
+                                  dense: true,
+                                  leading: CircleAvatar(
+                                    radius: 16,
+                                    child: Text(
+                                      c.name.isNotEmpty ? c.name[0].toUpperCase() : '?',
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                  ),
+                                  title: Text(c.name),
+                                  subtitle: Text(c.number),
+                                  onTap: () => onSelected(c),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
