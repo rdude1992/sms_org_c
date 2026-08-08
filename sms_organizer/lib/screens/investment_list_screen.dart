@@ -79,7 +79,6 @@ class InvestmentListScreen extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const Divider(height: 1),
                   Expanded(
                     child: TabBarView(
                       children: [
@@ -108,9 +107,8 @@ class _InvestmentListView extends StatelessWidget {
     if (investments.isEmpty) {
       return EmptyState(icon: Icons.trending_up, title: emptyText);
     }
-    return ListView.separated(
+    return ListView.builder(
       itemCount: investments.length,
-      separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
       itemBuilder: (context, index) => InvestmentTile(investment: investments[index]),
     );
   }
@@ -160,9 +158,8 @@ class _AmcListView extends StatelessWidget {
     if (providers.isEmpty) {
       return const EmptyState(icon: Icons.trending_up, title: 'No investment activity.');
     }
-    return ListView.separated(
+    return ListView.builder(
       itemCount: providers.length,
-      separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
       itemBuilder: (context, index) {
         final p = providers[index];
         final primary = Theme.of(context).colorScheme.primary;

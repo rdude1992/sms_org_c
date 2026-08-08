@@ -356,7 +356,6 @@ void _showMessageActions(BuildContext context, SmsProvider provider, SmsMessage 
                 provider.toggleSelected(message.id);
               },
             ),
-            const Divider(height: 1),
             ListTile(
               leading: Icon(Icons.delete_outline, color: scheme.error),
               title: Text('Delete', style: TextStyle(color: scheme.error)),

@@ -28,9 +28,8 @@ class StarredScreen extends StatelessWidget {
                   title: 'No starred messages',
                   message: 'Long-press a message in a chat and tap "Star" to save it here.',
                 )
-              : ListView.separated(
+              : ListView.builder(
                   itemCount: starred.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1, indent: 16),
                   itemBuilder: (context, index) {
                     final m = starred[index];
                     return ListTile(

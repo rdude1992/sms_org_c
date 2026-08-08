@@ -86,10 +86,9 @@ class SkeletonList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView.separated(
+    return ListView.builder(
       physics: const NeverScrollableScrollPhysics(),
       itemCount: count,
-      separatorBuilder: (_, __) => const Divider(height: 1, indent: 74),
       itemBuilder: (_, __) => const SkeletonListTile(),
     );
   }

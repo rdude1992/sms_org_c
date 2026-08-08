@@ -27,9 +27,8 @@ class DraftsScreen extends StatelessWidget {
                   title: 'No drafts',
                   message: 'Unsent replies you leave typed in a chat are saved here.',
                 )
-              : ListView.separated(
+              : ListView.builder(
                   itemCount: drafts.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1, indent: 16),
                   itemBuilder: (context, index) {
                     final d = drafts[index];
                     return Slidable(

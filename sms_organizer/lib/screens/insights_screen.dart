@@ -95,7 +95,6 @@ class _InsightsScreenState extends State<InsightsScreen> {
                 selected: _range,
                 onSelected: (r) => setState(() => _range = r),
               ),
-              const Divider(height: 1),
               Expanded(
                 child: provider.transactions.isEmpty
                     ? const EmptyState(

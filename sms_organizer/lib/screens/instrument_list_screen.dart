@@ -170,7 +170,7 @@ class _Section extends StatelessWidget {
         ...section.items.map(
           (s) => _InstrumentTile(summary: s, transactions: transactions, onTap: () => onTapItem(s)),
         ),
-        const Divider(height: 16),
+        const SizedBox(height: 16),
       ],
     );
   }

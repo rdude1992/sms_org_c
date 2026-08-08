@@ -206,9 +206,8 @@ class _ChatsBody extends StatelessWidget {
     } else {
       body = RefreshIndicator(
         onRefresh: provider.refresh,
-        child: ListView.separated(
+        child: ListView.builder(
           itemCount: conversations.length,
-          separatorBuilder: (_, __) => const Divider(height: 1, indent: 78),
           itemBuilder: (context, index) {
             final conversation = conversations[index];
             final selected = provider.selectedIds.contains(conversation.latest.id);
@@ -285,7 +284,6 @@ class _ChatsBody extends StatelessWidget {
     return Column(
       children: [
         _CategoryFilterBar(provider: provider),
-        const Divider(height: 1),
         Expanded(child: body),
       ],
     );
@@ -304,7 +302,6 @@ class _MessagesBody extends StatelessWidget {
     return Column(
       children: [
         _CategoryFilterBar(provider: provider),
-        const Divider(height: 1),
         Expanded(
           child: provider.state == LoadState.loading && messages.isEmpty
               ? const SkeletonList()
@@ -348,11 +345,7 @@ class _StickyMessageList extends StatelessWidget {
             ),
             SliverList(
               delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final row = _MessageRow(provider: provider, message: group.items[index]);
-                  if (index == group.items.length - 1) return row;
-                  return Column(children: [row, const Divider(height: 1, indent: 72)]);
-                },
+                (context, index) => _MessageRow(provider: provider, message: group.items[index]),
                 childCount: group.items.length,
               ),
             ),

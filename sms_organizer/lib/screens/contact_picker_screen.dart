@@ -54,9 +54,8 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
             )
           : filtered.isEmpty
               ? const EmptyState(icon: Icons.search_off_outlined, title: 'No matching contacts')
-              : ListView.separated(
+              : ListView.builder(
                   itemCount: filtered.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
                   itemBuilder: (context, index) {
                     final contact = filtered[index];
                     return ListTile(
