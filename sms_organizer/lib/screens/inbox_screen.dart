@@ -11,7 +11,6 @@ import '../widgets/conversation_tile.dart';
 import '../widgets/direction_badge.dart';
 import '../widgets/multi_select_bar.dart';
 import '../widgets/ui/empty_state.dart';
-import '../widgets/ui/filter_chip_bar.dart';
 import '../widgets/ui/skeleton.dart';
 import 'drafts_screen.dart';
 import 'starred_screen.dart';
@@ -178,13 +177,82 @@ class _InboxScreenState extends State<InboxScreen> {
   }
 }
 
-class _ChatsBody extends StatelessWidget {
+/// Every category tab shown across the Inbox, in order — a leading "All"
+/// (null) followed by each [SmsCategory]. Shared by both Inbox layouts so
+/// they swipe through the exact same set of tabs.
+const _categoryTabs = <SmsCategory?>[null, ...SmsCategory.values];
+
+class _ChatsBody extends StatefulWidget {
   final SmsProvider provider;
   const _ChatsBody({required this.provider});
 
   @override
+  State<_ChatsBody> createState() => _ChatsBodyState();
+}
+
+class _ChatsBodyState extends State<_ChatsBody> with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    final initialIndex = _categoryTabs.indexOf(widget.provider.activeCategoryFilter);
+    _tabController = TabController(
+      length: _categoryTabs.length,
+      vsync: this,
+      initialIndex: initialIndex < 0 ? 0 : initialIndex,
+    )..addListener(_syncCategoryFilter);
+  }
+
+  // Fires on both a tab tap and a swipe — keeps SmsProvider's shared
+  // activeCategoryFilter in step with whichever tab is now showing, so it's
+  // still correct if the user switches to the Messages layout and back.
+  void _syncCategoryFilter() {
+    final category = _categoryTabs[_tabController.index];
+    if (category != widget.provider.activeCategoryFilter) {
+      widget.provider.setCategoryFilter(category);
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.removeListener(_syncCategoryFilter);
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final conversations = provider.filteredConversations;
+    return Column(
+      children: [
+        TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          tabs: [for (final category in _categoryTabs) Tab(text: category?.label ?? 'All')],
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              for (final category in _categoryTabs)
+                _ConversationListView(provider: widget.provider, category: category),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ConversationListView extends StatelessWidget {
+  final SmsProvider provider;
+  final SmsCategory? category;
+  const _ConversationListView({required this.provider, required this.category});
+
+  @override
+  Widget build(BuildContext context) {
+    final conversations = provider.conversationsForCategory(category);
     final searching = provider.chatSearchQuery.trim().isNotEmpty;
 
     Widget body;
@@ -199,7 +267,7 @@ class _ChatsBody extends StatelessWidget {
             ? 'No chats match "${provider.chatSearchQuery.trim()}"'
             : provider.showUnreadOnly
                 ? 'No unread chats'
-                : provider.activeCategoryFilter != null
+                : category != null
                     ? 'No conversations in this category'
                     : 'No conversations yet',
       );
@@ -281,43 +349,94 @@ class _ChatsBody extends StatelessWidget {
       );
     }
 
+    return body;
+  }
+}
+
+class _MessagesBody extends StatefulWidget {
+  final SmsProvider provider;
+  const _MessagesBody({required this.provider});
+
+  @override
+  State<_MessagesBody> createState() => _MessagesBodyState();
+}
+
+class _MessagesBodyState extends State<_MessagesBody> with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    final initialIndex = _categoryTabs.indexOf(widget.provider.activeCategoryFilter);
+    _tabController = TabController(
+      length: _categoryTabs.length,
+      vsync: this,
+      initialIndex: initialIndex < 0 ? 0 : initialIndex,
+    )..addListener(_syncCategoryFilter);
+  }
+
+  void _syncCategoryFilter() {
+    final category = _categoryTabs[_tabController.index];
+    if (category != widget.provider.activeCategoryFilter) {
+      widget.provider.setCategoryFilter(category);
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.removeListener(_syncCategoryFilter);
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Column(
       children: [
-        _CategoryFilterBar(provider: provider),
-        Expanded(child: body),
+        TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          tabs: [for (final category in _categoryTabs) Tab(text: category?.label ?? 'All')],
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              for (final category in _categoryTabs)
+                _MessagesListView(provider: widget.provider, category: category),
+            ],
+          ),
+        ),
       ],
     );
   }
 }
 
-class _MessagesBody extends StatelessWidget {
+class _MessagesListView extends StatelessWidget {
   final SmsProvider provider;
-  const _MessagesBody({required this.provider});
+  final SmsCategory? category;
+  const _MessagesListView({required this.provider, required this.category});
 
   @override
   Widget build(BuildContext context) {
-    final messages = provider.filteredMessages;
+    final messages = provider.messagesForCategory(category);
     final searching = provider.searchQuery.trim().isNotEmpty;
 
-    return Column(
-      children: [
-        _CategoryFilterBar(provider: provider),
-        Expanded(
-          child: provider.state == LoadState.loading && messages.isEmpty
-              ? const SkeletonList()
-              : messages.isEmpty
-                  ? EmptyState(
-                      icon: searching ? Icons.search_off_outlined : Icons.inbox_outlined,
-                      title: searching
-                          ? 'No messages match "${provider.searchQuery.trim()}"'
-                          : provider.showUnreadOnly
-                              ? 'No unread messages'
-                              : 'No messages in this category',
-                    )
-                  : _StickyMessageList(provider: provider, messages: messages),
-        ),
-      ],
-    );
+    if (provider.state == LoadState.loading && messages.isEmpty) {
+      return const SkeletonList();
+    }
+    if (messages.isEmpty) {
+      return EmptyState(
+        icon: searching ? Icons.search_off_outlined : Icons.inbox_outlined,
+        title: searching
+            ? 'No messages match "${provider.searchQuery.trim()}"'
+            : provider.showUnreadOnly
+                ? 'No unread messages'
+                : 'No messages in this category',
+      );
+    }
+    return _StickyMessageList(provider: provider, messages: messages);
   }
 }
 
@@ -549,21 +668,6 @@ class _MessageRow extends StatelessWidget {
         },
         onLongPress: () => provider.toggleSelected(m.id),
       ),
-    );
-  }
-}
-
-class _CategoryFilterBar extends StatelessWidget {
-  final SmsProvider provider;
-  const _CategoryFilterBar({required this.provider});
-
-  @override
-  Widget build(BuildContext context) {
-    return FilterChipBar<SmsCategory?>(
-      values: [null, for (final cat in SmsCategory.values) cat],
-      selected: provider.activeCategoryFilter,
-      labelBuilder: (category) => category?.label ?? 'All',
-      onSelected: provider.setCategoryFilter,
     );
   }
 }

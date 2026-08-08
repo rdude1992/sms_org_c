@@ -93,6 +93,11 @@ class _HomeScreenState extends State<HomeScreen> {
       // swiping away and back doesn't reset it.
       body: PageView(
         controller: _pageController,
+        // Swiping between main tabs conflicts with swiping between category
+        // tabs / list-item slide actions within each tab — the bottom nav
+        // bar is the only way to switch tabs, so this only animates via
+        // _goToTab's programmatic animateToPage.
+        physics: const NeverScrollableScrollPhysics(),
         onPageChanged: (i) => setState(() => _tabIndex = i),
         children: [for (final tab in _tabs) _KeepAlivePage(child: tab)],
       ),

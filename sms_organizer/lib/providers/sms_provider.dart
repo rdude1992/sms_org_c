@@ -112,10 +112,13 @@ class SmsProvider extends ChangeNotifier {
   List<SimInfo> get activeSims => _activeSims;
   bool get hasMultipleSims => _activeSims.length > 1;
 
-  List<SmsMessage> get filteredMessages {
+  /// Filtered by [category] (unread-only and search query always apply) —
+  /// lets the Inbox build one independently-filtered list per swipeable
+  /// category tab rather than just a single currently-active one.
+  List<SmsMessage> messagesForCategory(SmsCategory? category) {
     Iterable<SmsMessage> msgs = _sentOrReceived;
-    if (activeCategoryFilter != null) {
-      msgs = msgs.where((m) => m.category == activeCategoryFilter);
+    if (category != null) {
+      msgs = msgs.where((m) => m.category == category);
     }
     if (showUnreadOnly) {
       msgs = msgs.where((m) => m.isIncoming && !m.read);
@@ -150,10 +153,11 @@ class SmsProvider extends ChangeNotifier {
     return result;
   }
 
-  List<SmsConversation> get filteredConversations {
+  /// Filtered by [category] — see [messagesForCategory].
+  List<SmsConversation> conversationsForCategory(SmsCategory? category) {
     Iterable<SmsConversation> convs = conversations;
-    if (activeCategoryFilter != null) {
-      convs = convs.where((c) => c.latest.category == activeCategoryFilter);
+    if (category != null) {
+      convs = convs.where((c) => c.latest.category == category);
     }
     if (showUnreadOnly) {
       convs = convs.where((c) => c.unreadCount > 0);
