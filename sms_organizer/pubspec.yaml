@@ -21,6 +21,7 @@ dependencies:
   flutter_slidable: ^3.1.1
   file_selector: ^1.0.3
   scrollable_positioned_list: ^0.3.8
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:

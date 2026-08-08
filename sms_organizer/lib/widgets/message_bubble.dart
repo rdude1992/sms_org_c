@@ -4,6 +4,7 @@ import '../models/category.dart';
 import '../models/sms_message.dart';
 import '../utils/formatters.dart';
 import '../utils/sms_extractors.dart';
+import 'ui/linkified_text.dart';
 
 class MessageBubble extends StatelessWidget {
   final SmsMessage message;
@@ -75,7 +76,14 @@ class MessageBubble extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(message.body, style: TextStyle(color: textColor, fontSize: 14)),
+                    LinkifiedText(
+                      text: message.body,
+                      style: TextStyle(color: textColor, fontSize: 14),
+                      // Outgoing bubbles are already primary-coloured, so a
+                      // primary link colour would vanish against it —
+                      // underline is the only differentiator there instead.
+                      linkColor: isOutgoing ? textColor : scheme.primary,
+                    ),
                     if (otpCode != null) ...[
                       const SizedBox(height: 8),
                       _CopyOtpButton(code: otpCode, outgoingTint: isOutgoing, textColor: textColor),
