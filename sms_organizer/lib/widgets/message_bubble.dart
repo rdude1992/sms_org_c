@@ -17,6 +17,10 @@ class MessageBubble extends StatelessWidget {
   /// lands.
   final bool highlighted;
 
+  /// Whether this message has been starred — see SmsProvider.starredMessages
+  /// / the Starred screen for where it's collected across all threads.
+  final bool starred;
+
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -28,6 +32,7 @@ class MessageBubble extends StatelessWidget {
     required this.onTap,
     required this.onLongPress,
     this.highlighted = false,
+    this.starred = false,
   });
 
   @override
@@ -111,6 +116,10 @@ class MessageBubble extends StatelessWidget {
                               fontWeight: FontWeight.w600,
                             ),
                           ),
+                        ],
+                        if (starred) ...[
+                          const SizedBox(width: 6),
+                          Icon(Icons.star, size: 11, color: Colors.amber.shade600),
                         ],
                       ],
                     ),

@@ -13,7 +13,11 @@ import '../widgets/multi_select_bar.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/filter_chip_bar.dart';
 import '../widgets/ui/skeleton.dart';
+import 'drafts_screen.dart';
+import 'starred_screen.dart';
 import 'thread_screen.dart';
+
+enum _InboxMenuAction { starred, drafts }
 
 /// Bottom-nav "Inbox" tab — merges what used to be two separate tabs
 /// (Chats, All) into one screen with a toggle between them, so the app
@@ -132,6 +136,38 @@ class _InboxScreenState extends State<InboxScreen> {
                         icon: const Icon(Icons.refresh),
                         onPressed: provider.refresh,
                       ),
+                      PopupMenuButton<_InboxMenuAction>(
+                        icon: const Icon(Icons.more_vert),
+                        onSelected: (action) {
+                          final screen = switch (action) {
+                            _InboxMenuAction.starred => const StarredScreen(),
+                            _InboxMenuAction.drafts => const DraftsScreen(),
+                          };
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(
+                            value: _InboxMenuAction.starred,
+                            child: Row(
+                              children: [
+                                Icon(Icons.star_outline),
+                                SizedBox(width: 12),
+                                Text('Starred messages'),
+                              ],
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: _InboxMenuAction.drafts,
+                            child: Row(
+                              children: [
+                                Icon(Icons.drafts_outlined),
+                                SizedBox(width: 12),
+                                Text('Drafts'),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ],
                 ),
@@ -151,88 +187,107 @@ class _ChatsBody extends StatelessWidget {
     final conversations = provider.filteredConversations;
     final searching = provider.chatSearchQuery.trim().isNotEmpty;
 
+    Widget body;
     if (provider.state == LoadState.loading && conversations.isEmpty) {
-      return const SkeletonList();
-    }
-    if (provider.state == LoadState.error) {
-      return Center(child: Text('Could not load messages: ${provider.error}'));
-    }
-    if (conversations.isEmpty) {
-      return EmptyState(
+      body = const SkeletonList();
+    } else if (provider.state == LoadState.error) {
+      body = Center(child: Text('Could not load messages: ${provider.error}'));
+    } else if (conversations.isEmpty) {
+      body = EmptyState(
         icon: searching ? Icons.search_off_outlined : Icons.chat_bubble_outline,
         title: searching
             ? 'No chats match "${provider.chatSearchQuery.trim()}"'
             : provider.showUnreadOnly
                 ? 'No unread chats'
-                : 'No conversations yet',
+                : provider.activeCategoryFilter != null
+                    ? 'No conversations in this category'
+                    : 'No conversations yet',
+      );
+    } else {
+      body = RefreshIndicator(
+        onRefresh: provider.refresh,
+        child: ListView.separated(
+          itemCount: conversations.length,
+          separatorBuilder: (_, __) => const Divider(height: 1, indent: 78),
+          itemBuilder: (context, index) {
+            final conversation = conversations[index];
+            final selected = provider.selectedIds.contains(conversation.latest.id);
+            final scheme = Theme.of(context).colorScheme;
+            final unread = conversation.unreadCount > 0;
+            final pinned = provider.isPinned(conversation.threadId);
+            return Slidable(
+              key: ValueKey(conversation.threadId),
+              enabled: !provider.isSelecting,
+              startActionPane: ActionPane(
+                motion: const DrawerMotion(),
+                extentRatio: 0.5,
+                children: [
+                  SlidableAction(
+                    onPressed: (_) => provider.togglePinned(conversation.threadId),
+                    backgroundColor: scheme.secondary,
+                    foregroundColor: scheme.onSecondary,
+                    icon: pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                    label: pinned ? 'Unpin' : 'Pin',
+                  ),
+                  SlidableAction(
+                    onPressed: (_) => provider.setConversationRead(conversation, unread),
+                    backgroundColor: scheme.primary,
+                    foregroundColor: scheme.onPrimary,
+                    icon: unread ? Icons.mark_email_read_outlined : Icons.mark_email_unread_outlined,
+                    label: unread ? 'Read' : 'Unread',
+                  ),
+                ],
+              ),
+              endActionPane: ActionPane(
+                motion: const DrawerMotion(),
+                extentRatio: 0.28,
+                children: [
+                  SlidableAction(
+                    onPressed: (_) => provider.deleteConversation(conversation),
+                    backgroundColor: scheme.error,
+                    foregroundColor: Colors.white,
+                    icon: Icons.delete_outline,
+                    label: 'Delete',
+                  ),
+                ],
+              ),
+              child: ConversationTile(
+                conversation: conversation,
+                displayName: provider.displayNameFor(conversation.address),
+                selected: selected,
+                selectionMode: provider.isSelecting,
+                pinned: pinned,
+                searchQuery: provider.chatSearchQuery,
+                onTap: () {
+                  if (provider.isSelecting) {
+                    provider.toggleSelected(conversation.latest.id);
+                  } else {
+                    final preview = conversation.previewFor(provider.chatSearchQuery);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ThreadScreen(
+                          threadId: conversation.threadId,
+                          highlightMessageId: provider.chatSearchQuery.trim().isEmpty ? null : preview.id,
+                        ),
+                      ),
+                    );
+                  }
+                },
+                onLongPress: () => provider.toggleSelected(conversation.latest.id),
+              ),
+            );
+          },
+        ),
       );
     }
-    return RefreshIndicator(
-      onRefresh: provider.refresh,
-      child: ListView.separated(
-        itemCount: conversations.length,
-        separatorBuilder: (_, __) => const Divider(height: 1, indent: 78),
-        itemBuilder: (context, index) {
-          final conversation = conversations[index];
-          final selected = provider.selectedIds.contains(conversation.latest.id);
-          final scheme = Theme.of(context).colorScheme;
-          final unread = conversation.unreadCount > 0;
-          return Slidable(
-            key: ValueKey(conversation.threadId),
-            enabled: !provider.isSelecting,
-            startActionPane: ActionPane(
-              motion: const DrawerMotion(),
-              extentRatio: 0.28,
-              children: [
-                SlidableAction(
-                  onPressed: (_) => provider.setConversationRead(conversation, unread),
-                  backgroundColor: scheme.primary,
-                  foregroundColor: scheme.onPrimary,
-                  icon: unread ? Icons.mark_email_read_outlined : Icons.mark_email_unread_outlined,
-                  label: unread ? 'Read' : 'Unread',
-                ),
-              ],
-            ),
-            endActionPane: ActionPane(
-              motion: const DrawerMotion(),
-              extentRatio: 0.28,
-              children: [
-                SlidableAction(
-                  onPressed: (_) => provider.deleteConversation(conversation),
-                  backgroundColor: scheme.error,
-                  foregroundColor: Colors.white,
-                  icon: Icons.delete_outline,
-                  label: 'Delete',
-                ),
-              ],
-            ),
-            child: ConversationTile(
-              conversation: conversation,
-              displayName: provider.displayNameFor(conversation.address),
-              selected: selected,
-              selectionMode: provider.isSelecting,
-              searchQuery: provider.chatSearchQuery,
-              onTap: () {
-                if (provider.isSelecting) {
-                  provider.toggleSelected(conversation.latest.id);
-                } else {
-                  final preview = conversation.previewFor(provider.chatSearchQuery);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ThreadScreen(
-                        threadId: conversation.threadId,
-                        highlightMessageId: provider.chatSearchQuery.trim().isEmpty ? null : preview.id,
-                      ),
-                    ),
-                  );
-                }
-              },
-              onLongPress: () => provider.toggleSelected(conversation.latest.id),
-            ),
-          );
-        },
-      ),
+
+    return Column(
+      children: [
+        _CategoryFilterBar(provider: provider),
+        const Divider(height: 1),
+        Expanded(child: body),
+      ],
     );
   }
 }

@@ -36,7 +36,7 @@ class ContactService {
         final number = c['number'];
         if (name == null || number == null || name.isEmpty || number.isEmpty) continue;
         entries.add(ContactEntry(name: name, number: number));
-        final normalized = _normalize(number);
+        final normalized = normalize(number);
         if (normalized.isNotEmpty) {
           map[normalized] = name;
         }
@@ -57,17 +57,20 @@ class ContactService {
   /// Returns the saved contact name for [address], or [address] unchanged
   /// if no match is found (e.g. bank/service sender IDs, unsaved numbers).
   String displayNameFor(String address) {
-    final normalized = _normalize(address);
+    final normalized = normalize(address);
     if (normalized.isEmpty) return address;
     return _numberToName[normalized] ?? address;
   }
 
   /// Normalises to the last 10 digits so "+91 98765 43210", "098765-43210",
-  /// and "9876543210" all match the same contact. Short alphanumeric sender
-  /// IDs (e.g. "AX-HDFCBK") have no digit run this long and normalize to a
-  /// string that won't collide with real numbers, which is what we want —
-  /// they're never in the contacts list anyway.
-  String _normalize(String raw) {
+  /// and "9876543210" all match the same contact/conversation. Short
+  /// alphanumeric sender IDs (e.g. "AX-HDFCBK") have no digit run this long
+  /// and normalize to a string that won't collide with real numbers, which
+  /// is what we want — they're never in the contacts list anyway. Static
+  /// (and public) so callers matching an address against an existing
+  /// conversation — e.g. the compose screen — can reuse the exact same
+  /// rule instead of re-deriving it.
+  static String normalize(String raw) {
     final digits = raw.replaceAll(RegExp(r'\D'), '');
     if (digits.isEmpty) return '';
     if (digits.length <= 10) return digits;

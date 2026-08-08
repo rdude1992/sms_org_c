@@ -45,7 +45,9 @@ class SmsProvider extends ChangeNotifier {
   final Set<int> selectedIds = {};
   bool get isSelecting => selectedIds.isNotEmpty;
 
-  // Category filter for the "all messages" list view.
+  // Category filter shared by both Inbox layouts: the "all messages" flat
+  // list and the "chats" conversation list (filters by each conversation's
+  // latest message).
   SmsCategory? activeCategoryFilter;
 
   // Free-text search over the "all messages" list view — matches message
@@ -72,14 +74,46 @@ class SmsProvider extends ChangeNotifier {
   InboxView inboxView = InboxView.chats;
   static const _inboxViewPrefKey = 'inbox_view';
 
+  // Pinned conversations and starred messages — the OS's SMS provider has
+  // no columns for either, so both live purely in this app's own
+  // SharedPreferences, loaded once in [initialize] and pruned of stale ids
+  // (deleted messages/threads) on every [refresh].
+  final Set<int> pinnedThreadIds = {};
+  final Set<int> starredMessageIds = {};
+  static const _pinnedPrefKey = 'pinned_thread_ids';
+  static const _starredPrefKey = 'starred_message_ids';
+
   List<SmsMessage> get allMessages => _allMessages;
+
+  /// [_allMessages] minus drafts — drafts aren't messages that were ever
+  /// sent or received, so they're excluded from every regular list
+  /// (conversations, All Messages, thread bubbles) and only surfaced
+  /// through [drafts] itself.
+  List<SmsMessage> get _sentOrReceived => _allMessages.where((m) => m.box != SmsBoxType.draft).toList();
+
+  /// Every saved draft, newest first — see the Drafts screen.
+  List<SmsMessage> get drafts {
+    final list = _allMessages.where((m) => m.box == SmsBoxType.draft).toList();
+    list.sort((a, b) => b.date.compareTo(a.date));
+    return list;
+  }
+
+  /// Every starred message, newest first — see the Starred screen.
+  List<SmsMessage> get starredMessages {
+    final list = _sentOrReceived.where((m) => starredMessageIds.contains(m.id)).toList();
+    list.sort((a, b) => b.date.compareTo(a.date));
+    return list;
+  }
+
+  bool isPinned(int threadId) => pinnedThreadIds.contains(threadId);
+  bool isStarred(int messageId) => starredMessageIds.contains(messageId);
   List<Transaction> get transactions => _transactions;
   List<InvestmentEvent> get investments => _investments;
   List<SimInfo> get activeSims => _activeSims;
   bool get hasMultipleSims => _activeSims.length > 1;
 
   List<SmsMessage> get filteredMessages {
-    Iterable<SmsMessage> msgs = _allMessages;
+    Iterable<SmsMessage> msgs = _sentOrReceived;
     if (activeCategoryFilter != null) {
       msgs = msgs.where((m) => m.category == activeCategoryFilter);
     }
@@ -98,19 +132,29 @@ class SmsProvider extends ChangeNotifier {
 
   List<SmsConversation> get conversations {
     final Map<int, List<SmsMessage>> grouped = {};
-    for (final m in _allMessages) {
+    for (final m in _sentOrReceived) {
       grouped.putIfAbsent(m.threadId, () => []).add(m);
     }
     final result = grouped.entries.map((entry) {
       final msgs = entry.value..sort((a, b) => b.date.compareTo(a.date));
       return SmsConversation(threadId: entry.key, address: msgs.first.address, messages: msgs);
     }).toList();
-    result.sort((a, b) => b.latest.date.compareTo(a.latest.date));
+    // Pinned conversations float to the top as a block, newest first within
+    // each of the pinned/unpinned groups.
+    result.sort((a, b) {
+      final aPinned = pinnedThreadIds.contains(a.threadId);
+      final bPinned = pinnedThreadIds.contains(b.threadId);
+      if (aPinned != bPinned) return aPinned ? -1 : 1;
+      return b.latest.date.compareTo(a.latest.date);
+    });
     return result;
   }
 
   List<SmsConversation> get filteredConversations {
     Iterable<SmsConversation> convs = conversations;
+    if (activeCategoryFilter != null) {
+      convs = convs.where((c) => c.latest.category == activeCategoryFilter);
+    }
     if (showUnreadOnly) {
       convs = convs.where((c) => c.unreadCount > 0);
     }
@@ -162,6 +206,7 @@ class SmsProvider extends ChangeNotifier {
     isDefaultSmsApp = await _platform.isDefaultSmsApp();
     notifyListeners();
     await _loadInboxView();
+    await _loadPinnedAndStarred();
     await contactService.load(_platform);
     await _loadActiveSims();
     await _ensureCacheMatchesCurrentLogic();
@@ -196,6 +241,58 @@ class SmsProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_inboxViewPrefKey, view.name);
+  }
+
+  Future<void> _loadPinnedAndStarred() async {
+    final prefs = await SharedPreferences.getInstance();
+    pinnedThreadIds
+      ..clear()
+      ..addAll((prefs.getStringList(_pinnedPrefKey) ?? const []).map(int.parse));
+    starredMessageIds
+      ..clear()
+      ..addAll((prefs.getStringList(_starredPrefKey) ?? const []).map(int.parse));
+    notifyListeners();
+  }
+
+  Future<void> _savePinned() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_pinnedPrefKey, pinnedThreadIds.map((id) => id.toString()).toList());
+  }
+
+  Future<void> _saveStarred() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_starredPrefKey, starredMessageIds.map((id) => id.toString()).toList());
+  }
+
+  /// Drops pinned/starred ids that no longer correspond to anything on
+  /// device (message or whole thread deleted since the last sync) — same
+  /// idea as the cached-category pruning above, just for these two sets.
+  Future<void> _prunePinnedAndStarred(Set<int> rawMessageIds) async {
+    final liveThreadIds = _allMessages.map((m) => m.threadId).toSet();
+
+    final staleStarred = starredMessageIds.where((id) => !rawMessageIds.contains(id)).toList();
+    if (staleStarred.isNotEmpty) {
+      starredMessageIds.removeAll(staleStarred);
+      await _saveStarred();
+    }
+
+    final stalePinned = pinnedThreadIds.where((id) => !liveThreadIds.contains(id)).toList();
+    if (stalePinned.isNotEmpty) {
+      pinnedThreadIds.removeAll(stalePinned);
+      await _savePinned();
+    }
+  }
+
+  Future<void> togglePinned(int threadId) async {
+    if (!pinnedThreadIds.remove(threadId)) pinnedThreadIds.add(threadId);
+    notifyListeners();
+    await _savePinned();
+  }
+
+  Future<void> toggleStarred(int messageId) async {
+    if (!starredMessageIds.remove(messageId)) starredMessageIds.add(messageId);
+    notifyListeners();
+    await _saveStarred();
   }
 
   /// Incremental sync deliberately never re-evaluates a cached category
@@ -302,6 +399,7 @@ class SmsProvider extends ChangeNotifier {
         ...cachedInvestments.where((i) => rawIds.contains(i.smsId)),
         ...newInvestments,
       ];
+      await _prunePinnedAndStarred(rawIds);
       state = LoadState.ready;
       error = null;
     } catch (e) {
