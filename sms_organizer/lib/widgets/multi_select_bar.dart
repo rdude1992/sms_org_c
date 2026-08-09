@@ -7,6 +7,19 @@ class MultiSelectAppBar extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback onMarkUnread;
   final VoidCallback onDelete;
 
+  /// Bulk "Set category" action — only offered where selection ids are
+  /// individual messages (the Inbox's flat Messages list), not the Chats
+  /// list, where a selected id stands in for a whole conversation and
+  /// bulk-recategorising just its latest message would be misleading.
+  final VoidCallback? onSetCategory;
+
+  /// Select-all/none toggle — [allSelected] reflects whether everything
+  /// currently visible (respecting the active tab/search/unread filter,
+  /// computed by the caller) is already in the selection, which decides
+  /// both the icon shown and what tapping it does next.
+  final bool allSelected;
+  final VoidCallback? onToggleSelectAll;
+
   const MultiSelectAppBar({
     super.key,
     required this.selectedCount,
@@ -14,6 +27,9 @@ class MultiSelectAppBar extends StatelessWidget implements PreferredSizeWidget {
     required this.onMarkRead,
     required this.onMarkUnread,
     required this.onDelete,
+    this.onSetCategory,
+    this.allSelected = false,
+    this.onToggleSelectAll,
   });
 
   @override
@@ -25,6 +41,18 @@ class MultiSelectAppBar extends StatelessWidget implements PreferredSizeWidget {
       leading: IconButton(icon: const Icon(Icons.close), onPressed: onClear),
       title: Text('$selectedCount selected'),
       actions: [
+        if (onToggleSelectAll != null)
+          IconButton(
+            icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
+            tooltip: allSelected ? 'Select none' : 'Select all',
+            onPressed: onToggleSelectAll,
+          ),
+        if (onSetCategory != null)
+          IconButton(
+            icon: const Icon(Icons.label_outline),
+            tooltip: 'Set category',
+            onPressed: onSetCategory,
+          ),
         IconButton(
           icon: const Icon(Icons.mark_email_read_outlined),
           tooltip: 'Mark read',

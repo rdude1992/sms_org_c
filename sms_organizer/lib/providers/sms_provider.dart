@@ -11,6 +11,7 @@ import '../services/contact_service.dart';
 import '../services/database_service.dart';
 import '../services/insights_service.dart';
 import '../services/sms_platform_service.dart';
+import '../services/spend_category_detector.dart';
 import '../services/transaction_parser_service.dart';
 
 enum LoadState { idle, loading, ready, error }
@@ -84,6 +85,17 @@ class SmsProvider extends ChangeNotifier {
   static const _starredPrefKey = 'starred_message_ids';
 
   List<SmsMessage> get allMessages => _allMessages;
+
+  /// Looks up the SMS a parsed [Transaction] came from — e.g. so an "this
+  /// isn't a transaction" action can reach the message's category to
+  /// correct it (see setMessageCategory). Null if the message has since
+  /// been deleted from the device.
+  SmsMessage? messageById(int id) {
+    for (final m in _allMessages) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
 
   /// [_allMessages] minus drafts — drafts aren't messages that were ever
   /// sent or received, so they're excluded from every regular list
@@ -216,6 +228,11 @@ class SmsProvider extends ChangeNotifier {
     return isDefaultSmsApp;
   }
 
+  /// Opens the system Contacts app's detail page for whichever saved
+  /// contact matches [address] — see ThreadScreen's tap-to-open-contact
+  /// action on the phone number line under the conversation title.
+  Future<bool> openContact(String address) => _platform.openContact(address);
+
   /// The real, current importance of [category]'s notification channel as
   /// configured in Android system settings — see
   /// [SmsPlatformService.getChannelImportance] for why this can disagree
@@ -238,6 +255,7 @@ class SmsProvider extends ChangeNotifier {
     await _loadActiveSims();
     await _ensureCacheMatchesCurrentLogic();
     await refresh();
+    await _backfillSpendCategories();
     _listenForIncoming();
   }
 
@@ -338,6 +356,42 @@ class SmsProvider extends ChangeNotifier {
     await _db.setMeta('categorizer_version', currentVersion);
   }
 
+  /// One-time pass tagging already-cached transactions with a
+  /// [SpendCategory] that [SpendCategoryDetector] can confidently infer
+  /// from their merchant/body. Without this, only transactions parsed
+  /// *after* SpendCategoryDetector's rules existed would ever get an
+  /// automatic category — anything synced earlier (the bulk of a real
+  /// user's ~2000-message history) would stay "Uncategorised" forever,
+  /// since refresh() never re-processes a transaction once it's cached.
+  ///
+  /// Runs once per [SpendCategoryDetector.version] bump, then no-ops until
+  /// the rules next change (tracked the same way as
+  /// [_ensureCacheMatchesCurrentLogic]'s categorizer-version gate, just
+  /// without wiping anything — this only ever fills in a blank
+  /// [Transaction.spendCategory], never overwrites one the user set or a
+  /// transaction they've otherwise corrected).
+  Future<void> _backfillSpendCategories() async {
+    final storedVersion = await _db.getMeta('spend_category_version');
+    final currentVersion = SpendCategoryDetector.version.toString();
+    if (storedVersion != currentVersion) {
+      final updated = <Transaction>[];
+      for (var i = 0; i < _transactions.length; i++) {
+        final t = _transactions[i];
+        if (t.spendCategory != null || t.isOverridden) continue;
+        final detected = SpendCategoryDetector.detect(t);
+        if (detected == null) continue;
+        final withCategory = t.copyWith(spendCategory: detected);
+        _transactions[i] = withCategory;
+        updated.add(withCategory);
+      }
+      if (updated.isNotEmpty) {
+        await _db.saveTransactionsBulk(updated);
+        notifyListeners();
+      }
+      await _db.setMeta('spend_category_version', currentVersion);
+    }
+  }
+
   Future<bool> requestDefaultSmsRole() async {
     await _platform.requestDefaultSmsApp();
     isDefaultSmsApp = await _platform.isDefaultSmsApp();
@@ -365,8 +419,11 @@ class SmsProvider extends ChangeNotifier {
       // maps (i.e. arrived since the last sync) get run through the
       // classifier/parser below.
       final cachedCategories = await _db.loadCategories();
+      final overriddenIds = await _db.loadOverriddenCategoryIds();
       final cachedTransactions = await _db.loadTransactions();
       final cachedInvestments = await _db.loadInvestments();
+      final cachedTxnIds = cachedTransactions.map((t) => t.smsId).toSet();
+      final cachedInvIds = cachedInvestments.map((i) => i.smsId).toSet();
 
       final newCategories = <int, SmsCategory>{};
       final newTransactions = <Transaction>[];
@@ -376,6 +433,24 @@ class SmsProvider extends ChangeNotifier {
         final cached = cachedCategories[m.id];
         if (cached != null) {
           m.category = cached;
+          m.isCategoryOverridden = overriddenIds.contains(m.id);
+          // A cached transactional category can end up without any parsed
+          // transaction/investment row — e.g. a manual override just made it
+          // transactional (see setMessageCategory), or it survived a
+          // classifier-version-bump wipe that cleared parsed data but kept
+          // overridden categories (see DatabaseService.clearAll). Parse it
+          // now rather than leaving it silently missing from Insights forever.
+          if (cached == SmsCategory.transactional &&
+              !cachedTxnIds.contains(m.id) &&
+              !cachedInvIds.contains(m.id)) {
+            final inv = _txnParser.parseInvestment(m);
+            if (inv != null) {
+              newInvestments.add(inv);
+            } else {
+              final txn = _txnParser.parseTransaction(m);
+              if (txn != null) newTransactions.add(txn);
+            }
+          }
           continue; // already processed in a previous sync
         }
 
@@ -476,6 +551,18 @@ class SmsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The "select all" side of the Inbox multi-select bar's select-all/none
+  /// toggle — replaces the current selection outright with [ids], which the
+  /// caller has already narrowed to whatever's actually visible (the active
+  /// category tab, search query, and unread-only filter), not literally
+  /// every message on device.
+  void selectIds(Iterable<int> ids) {
+    selectedIds
+      ..clear()
+      ..addAll(ids);
+    notifyListeners();
+  }
+
   Future<void> deleteSelected() async {
     await _platform.deleteMessages(selectedIds.toList());
     clearSelection();
@@ -486,6 +573,39 @@ class SmsProvider extends ChangeNotifier {
     await _platform.markRead(selectedIds.toList(), read);
     clearSelection();
     await refresh();
+  }
+
+  /// Bulk equivalent of [setMessageCategory] for the current multi-select
+  /// — see MultiSelectAppBar's "Set category" action on the Inbox's flat
+  /// Messages list. Exists because manually categorising a couple thousand
+  /// pre-existing SMS one at a time isn't realistic; this lets a batch of
+  /// mis-filed messages (e.g. every promo SMS a particular sender ever
+  /// sent) get corrected in one pass instead. Routes through
+  /// setMessageCategory per message so each one gets the same
+  /// override-persistence and transaction/investment re-parse it would from
+  /// a single manual correction.
+  Future<void> setSelectedCategory(SmsCategory category) async {
+    final ids = selectedIds.toList();
+    clearSelection();
+    for (final id in ids) {
+      final message = messageById(id);
+      if (message != null) await setMessageCategory(message, category);
+    }
+  }
+
+  /// Bulk equivalent of the spend-category field in [updateTransaction] —
+  /// see TransactionListScreen's multi-select "Set category" action, for
+  /// tagging a batch of transactions SpendCategoryDetector left
+  /// "Uncategorised" (or got wrong) in one pass instead of one at a time.
+  Future<void> setSpendCategoryForTransactions(List<int> smsIds, SpendCategory? category) async {
+    for (final id in smsIds) {
+      final index = _transactions.indexWhere((t) => t.smsId == id);
+      if (index == -1) continue;
+      final updated = _transactions[index].copyWith(spendCategory: category, isOverridden: true);
+      _transactions[index] = updated;
+      await _db.saveTransaction(updated, isOverride: true);
+    }
+    notifyListeners();
   }
 
   // ---- Single-item actions (swipe actions, long-press context menu) ----
@@ -553,6 +673,264 @@ class SmsProvider extends ChangeNotifier {
     await refresh();
   }
 
+  /// User-driven correction for when CategorizationService got a message's
+  /// category wrong. Persists immediately as an override (see
+  /// DatabaseService.saveCategory) so it's never silently re-classified or
+  /// discarded by a later cache wipe — unlike an auto-assigned category,
+  /// this one is treated as the source of truth going forward.
+  ///
+  /// Also keeps derived Insights data in sync with the correction: moving a
+  /// message out of Transactions drops its parsed transaction/investment,
+  /// and moving one in attempts to parse it fresh.
+  Future<void> setMessageCategory(SmsMessage message, SmsCategory category) async {
+    final previousCategory = message.category;
+    if (previousCategory == category && message.isCategoryOverridden) return;
+
+    message.category = category;
+    message.isCategoryOverridden = true;
+    notifyListeners();
+    await _db.saveCategory(message.id, category, isOverride: true);
+
+    final wasTransactional = previousCategory == SmsCategory.transactional;
+    final isTransactional = category == SmsCategory.transactional;
+    if (wasTransactional && !isTransactional) {
+      await _db.deleteTransactionAndInvestment(message.id);
+      _transactions.removeWhere((t) => t.smsId == message.id);
+      _investments.removeWhere((i) => i.smsId == message.id);
+      notifyListeners();
+    } else if (!wasTransactional && isTransactional) {
+      final inv = _txnParser.parseInvestment(message);
+      if (inv != null) {
+        await _db.saveInvestmentsBulk([inv]);
+        _investments.add(inv);
+      } else {
+        final txn = _txnParser.parseTransaction(message);
+        if (txn != null) {
+          await _db.saveTransactionsBulk([txn]);
+          _transactions.add(txn);
+        }
+      }
+      notifyListeners();
+    }
+  }
+
+  /// User-driven correction for when TransactionParserService mis-detected
+  /// [transaction]'s type, instrument, merchant, or wallet — the case where
+  /// the message genuinely is a transaction, but it's filed under the wrong
+  /// Credited/Debited tab, the wrong Cards & Accounts bucket, or the wrong
+  /// merchant. Also where [spendCategory] gets set from the edit form, and
+  /// (see [assignInstrumentToTransactions]) where [issuer]/[instrumentRef]
+  /// get manually pinned to a specific detected account when the SMS never
+  /// named one explicitly. (If it isn't a transaction at all, use
+  /// setMessageCategory instead — see messageById.)
+  ///
+  /// Persists as an override (see DatabaseService.saveTransaction) so it's
+  /// never silently re-parsed or discarded by a later cache wipe. Also pins
+  /// the parent message's category as an override — even though the
+  /// category value itself isn't changing — so a wipe doesn't delete the
+  /// category row, fall through to re-classifying the message from
+  /// scratch, and re-derive a fresh (uncorrected) transaction on top of
+  /// this one.
+  Future<void> updateTransaction(
+    Transaction transaction, {
+    required TxnDirection direction,
+    required InstrumentType instrument,
+    String? merchant,
+    String? walletType,
+    SpendCategory? spendCategory,
+    String? issuer,
+    String? instrumentRef,
+  }) async {
+    final cleanedMerchant = merchant?.trim();
+    final cleanedWallet = walletType?.trim();
+    final updated = Transaction(
+      smsId: transaction.smsId,
+      date: transaction.date,
+      amount: transaction.amount,
+      direction: direction,
+      instrument: instrument,
+      instrumentRef: instrumentRef ?? transaction.instrumentRef,
+      issuer: issuer ?? transaction.issuer,
+      merchant: (cleanedMerchant == null || cleanedMerchant.isEmpty) ? null : cleanedMerchant,
+      balanceAfter: transaction.balanceAfter,
+      entityType: transaction.entityType,
+      walletType: (cleanedWallet == null || cleanedWallet.isEmpty) ? null : cleanedWallet,
+      billDueDate: transaction.billDueDate,
+      fastagWalletId: transaction.fastagWalletId,
+      vehicleNumber: transaction.vehicleNumber,
+      rawBody: transaction.rawBody,
+      isOverridden: true,
+      spendCategory: spendCategory,
+    );
+
+    final index = _transactions.indexWhere((t) => t.smsId == transaction.smsId);
+    if (index != -1) {
+      _transactions[index] = updated;
+    } else {
+      _transactions.add(updated);
+    }
+    notifyListeners();
+
+    await _db.saveTransaction(updated, isOverride: true);
+    await _db.saveCategory(transaction.smsId, SmsCategory.transactional, isOverride: true);
+
+    final message = messageById(transaction.smsId);
+    if (message != null) {
+      message.category = SmsCategory.transactional;
+      message.isCategoryOverridden = true;
+      notifyListeners();
+    }
+  }
+
+  /// Detected bank/card accounts a transaction can be manually pinned to —
+  /// the pick-list for [assignInstrumentToTransactions]. Only instruments
+  /// with a known last-4 [InstrumentSummary.ref] qualify: assigning a
+  /// transaction to another ref-less "account" wouldn't actually link it
+  /// to anything more specific than it already is.
+  List<InstrumentSummary> get assignableInstruments => groupByInstrument(_transactions)
+      .where((s) => s.ref != null && (s.isBankAccount || s.isDebitCard || s.isCreditCard))
+      .toList();
+
+  /// Other transactions likely from the same real-world account as
+  /// [source] but which TransactionParserService couldn't pin down (e.g.
+  /// an NEFT debit that only names the recipient, never the user's own
+  /// account) — still no instrumentRef of their own, and not already
+  /// manually corrected. This is the "and similar messages" candidate set
+  /// offered after assigning [source] to a detected account — see
+  /// [assignInstrumentToTransactions] and AssignInstrumentSheet, which is
+  /// expected to get the user's explicit acceptance before more than
+  /// [source] itself is ever passed there — that review step is what makes
+  /// it safe to cast a reasonably wide net here rather than requiring an
+  /// exact match.
+  ///
+  /// Three signals, checked in order of how much they're trusted:
+  /// 1. Same SMS sender address — the strongest signal, but banks route
+  ///    the same alerts through several different DLT sender codes (e.g.
+  ///    HDFC's own alerts can arrive as "VM-HDFCBK", "AD-HDFCBK-S", etc.
+  ///    depending on operator/circle), so this alone misses a lot.
+  /// 2. Same detected [Transaction.issuer] — the bank name
+  ///    TransactionParserService already normalised out of the sender/body,
+  ///    so it stays the same across those sender-code variants even when
+  ///    the raw address doesn't match.
+  /// 3. Only when *neither* transaction has a detected issuer: the same
+  ///    normalised body template (see [_normalizedSmsTemplate]) — banks'
+  ///    alert SMS are near-identical apart from the amount/date/reference,
+  ///    so two bodies that collapse to the same template are still decent
+  ///    evidence of a shared sender. Gated on both issuers being null so a
+  ///    generic "Rs # debited ... Avl Bal Rs #"-style template two
+  ///    *different* banks happen to share can't override a real,
+  ///    already-known issuer mismatch.
+  List<Transaction> findSimilarUnassignedTransactions(Transaction source) {
+    final sourceAddress = messageById(source.smsId)?.address;
+    final sourceIssuer = source.issuer;
+    final sourceTemplate = _normalizedSmsTemplate(source.rawBody);
+
+    return _transactions.where((t) {
+      if (t.smsId == source.smsId) return false;
+      if (t.instrumentRef != null) return false;
+      if (t.isOverridden) return false;
+
+      if (sourceAddress != null && messageById(t.smsId)?.address == sourceAddress) return true;
+      if (sourceIssuer != null && t.issuer == sourceIssuer) return true;
+      if (sourceIssuer == null && t.issuer == null) {
+        return sourceTemplate.isNotEmpty && _normalizedSmsTemplate(t.rawBody) == sourceTemplate;
+      }
+      return false;
+    }).toList();
+  }
+
+  /// Collapses an SMS body to its underlying template for
+  /// [findSimilarUnassignedTransactions]'s text-similarity fallback —
+  /// strips every digit run (amounts, account/reference numbers, dates,
+  /// balances — everything that's actually supposed to differ
+  /// message-to-message) and normalises whitespace/case, so two alerts
+  /// generated from the same bank template collapse to an identical
+  /// string even though none of their numbers match.
+  static String _normalizedSmsTemplate(String body) {
+    return body.toLowerCase().replaceAll(RegExp(r'\d+'), '#').replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  /// Manually pins every transaction in [transactions] to one specific
+  /// detected account/card (an [assignableInstruments] entry) — for a
+  /// transaction whose SMS never included an explicit account number, so
+  /// TransactionParserService could tell it moved money but not through
+  /// which of the user's own accounts. Marks each as overridden, same as
+  /// [updateTransaction], so a later cache wipe or re-sync never silently
+  /// un-links it again.
+  Future<void> assignInstrumentToTransactions(
+    List<Transaction> transactions, {
+    required InstrumentType instrument,
+    required String? issuer,
+    required String? instrumentRef,
+  }) async {
+    for (final t in transactions) {
+      final updated = t.copyWith(
+        instrument: instrument,
+        issuer: issuer,
+        instrumentRef: instrumentRef,
+        isOverridden: true,
+      );
+      final index = _transactions.indexWhere((x) => x.smsId == t.smsId);
+      if (index != -1) _transactions[index] = updated;
+      await _db.saveTransaction(updated, isOverride: true);
+    }
+    notifyListeners();
+  }
+
+  /// User-driven correction for when TransactionParserService mis-detected
+  /// [investment]'s kind, fund/scheme, AMC, or folio — the case where the
+  /// message genuinely is a SIP/mutual-fund/trade confirmation, but it's
+  /// filed under the wrong Invested/Redeemed tab or the wrong AMC/provider
+  /// bucket. (If it isn't an investment at all, use setMessageCategory
+  /// instead — see messageById.)
+  ///
+  /// Persists as an override (see DatabaseService.saveInvestment) so it's
+  /// never silently re-parsed or discarded by a later cache wipe. Also pins
+  /// the parent message's category as an override for the same reason
+  /// updateTransaction does — see there.
+  Future<void> updateInvestment(
+    InvestmentEvent investment, {
+    required InvestmentKind kind,
+    String? fundOrScheme,
+    String? amc,
+    String? folioOrAccount,
+  }) async {
+    final cleanedFund = fundOrScheme?.trim();
+    final cleanedAmc = amc?.trim();
+    final cleanedFolio = folioOrAccount?.trim();
+    final updated = InvestmentEvent(
+      smsId: investment.smsId,
+      date: investment.date,
+      amount: investment.amount,
+      kind: kind,
+      rawBody: investment.rawBody,
+      fundOrScheme: (cleanedFund == null || cleanedFund.isEmpty) ? null : cleanedFund,
+      folioOrAccount: (cleanedFolio == null || cleanedFolio.isEmpty) ? null : cleanedFolio,
+      units: investment.units,
+      nav: investment.nav,
+      amc: (cleanedAmc == null || cleanedAmc.isEmpty) ? null : cleanedAmc,
+      isOverridden: true,
+    );
+
+    final index = _investments.indexWhere((i) => i.smsId == investment.smsId);
+    if (index != -1) {
+      _investments[index] = updated;
+    } else {
+      _investments.add(updated);
+    }
+    notifyListeners();
+
+    await _db.saveInvestment(updated, isOverride: true);
+    await _db.saveCategory(investment.smsId, SmsCategory.transactional, isOverride: true);
+
+    final message = messageById(investment.smsId);
+    if (message != null) {
+      message.category = SmsCategory.transactional;
+      message.isCategoryOverridden = true;
+      notifyListeners();
+    }
+  }
+
   void setCategoryFilter(SmsCategory? category) {
     activeCategoryFilter = category;
     notifyListeners();
@@ -577,9 +955,40 @@ class SmsProvider extends ChangeNotifier {
     _allMessages = bundle.messages;
     _transactions = bundle.transactions;
     _investments = bundle.investments;
-    await _db.saveCategoriesBulk({for (final m in bundle.messages) m.id: m.category});
-    await _db.saveTransactionsBulk(bundle.transactions);
-    await _db.saveInvestmentsBulk(bundle.investments);
+    // Manually-corrected categories are restored as overrides too, so a
+    // backup/restore round-trip doesn't quietly forget a correction the user
+    // made before exporting — see setMessageCategory.
+    final autoCategories = <int, SmsCategory>{};
+    for (final m in bundle.messages) {
+      if (m.isCategoryOverridden) {
+        await _db.saveCategory(m.id, m.category, isOverride: true);
+      } else {
+        autoCategories[m.id] = m.category;
+      }
+    }
+    if (autoCategories.isNotEmpty) await _db.saveCategoriesBulk(autoCategories);
+
+    // Same idea for manually-corrected transactions — see updateTransaction.
+    final autoTransactions = <Transaction>[];
+    for (final t in bundle.transactions) {
+      if (t.isOverridden) {
+        await _db.saveTransaction(t, isOverride: true);
+      } else {
+        autoTransactions.add(t);
+      }
+    }
+    if (autoTransactions.isNotEmpty) await _db.saveTransactionsBulk(autoTransactions);
+
+    // Same idea for manually-corrected investments — see updateInvestment.
+    final autoInvestments = <InvestmentEvent>[];
+    for (final i in bundle.investments) {
+      if (i.isOverridden) {
+        await _db.saveInvestment(i, isOverride: true);
+      } else {
+        autoInvestments.add(i);
+      }
+    }
+    if (autoInvestments.isNotEmpty) await _db.saveInvestmentsBulk(autoInvestments);
     notifyListeners();
   }
 

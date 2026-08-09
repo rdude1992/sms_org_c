@@ -13,12 +13,18 @@ class BreakdownDonut extends StatelessWidget {
   final List<double> values;
   final ValueChanged<String> onTapKey;
 
+  /// Word shown under the total in the donut's center — e.g. "total" for a
+  /// blended invested+redeemed figure, or "spend" when [values] represents
+  /// debit-only amounts, so the number's meaning isn't ambiguous at a glance.
+  final String centerLabel;
+
   const BreakdownDonut({
     super.key,
     required this.labels,
     required this.keys,
     required this.values,
     required this.onTapKey,
+    this.centerLabel = 'total',
   });
 
   static const _palette = [
@@ -81,7 +87,7 @@ class BreakdownDonut extends StatelessWidget {
                     Formatters.currency(grandTotal),
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: scheme.onSurface),
                   ),
-                  Text('total', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+                  Text(centerLabel, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
                 ],
               ),
             ],

@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 /// `reversal` is new (ported from getTransactionType in the source regex
 /// file): covers "reversed"/"declined"/"failed" transactions, which
 /// shouldn't count toward either credit or debit totals.
@@ -10,6 +12,159 @@ enum InstrumentType { debitCard, creditCard, bankAccount, upi, unknown }
 /// wallet provider (Paytm/PhonePe/Pluxee/FASTag/...), an investment
 /// platform, or a dedicated card-network service (Visa/Amex/...)?
 enum EntityType { bank, wallet, investment, cardService, unknown }
+
+/// What a transaction was actually *for* — Food, Transport, Bills, etc.
+/// [Transaction.spendCategory] starts null ("Uncategorised") until tagged —
+/// either by the user via SmsProvider.updateTransaction, or by a confident
+/// merchant/keyword match from SpendCategoryDetector. The detector is
+/// deliberately conservative and never overwrites a value the user chose
+/// (see there): "spend category" is a judgment call about a purchase's
+/// purpose that varies by transaction even for the same merchant (e.g. a
+/// supermarket run can be groceries or household goods), so anything it
+/// can't confidently infer from the merchant/body is left for the user
+/// rather than guessed.
+enum SpendCategory {
+  foodDining,
+  groceries,
+  transport,
+  shopping,
+  billsUtilities,
+  creditCardPayment,
+  entertainment,
+  health,
+  travel,
+  housing,
+  education,
+  investment,
+  transfer,
+  income,
+  other,
+}
+
+extension SpendCategoryX on SpendCategory {
+  String get label {
+    switch (this) {
+      case SpendCategory.foodDining:
+        return 'Food & Dining';
+      case SpendCategory.groceries:
+        return 'Groceries';
+      case SpendCategory.transport:
+        return 'Transport';
+      case SpendCategory.shopping:
+        return 'Shopping';
+      case SpendCategory.billsUtilities:
+        return 'Bills & Utilities';
+      case SpendCategory.creditCardPayment:
+        return 'Credit Card Payment';
+      case SpendCategory.entertainment:
+        return 'Entertainment';
+      case SpendCategory.health:
+        return 'Health';
+      case SpendCategory.travel:
+        return 'Travel';
+      case SpendCategory.housing:
+        return 'Housing & Rent';
+      case SpendCategory.education:
+        return 'Education';
+      case SpendCategory.investment:
+        return 'Investment';
+      case SpendCategory.transfer:
+        return 'Transfer';
+      case SpendCategory.income:
+        return 'Income';
+      case SpendCategory.other:
+        return 'Other';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case SpendCategory.foodDining:
+        return Icons.restaurant_outlined;
+      case SpendCategory.groceries:
+        return Icons.local_grocery_store_outlined;
+      case SpendCategory.transport:
+        return Icons.directions_car_outlined;
+      case SpendCategory.shopping:
+        return Icons.shopping_bag_outlined;
+      case SpendCategory.billsUtilities:
+        return Icons.receipt_long_outlined;
+      case SpendCategory.creditCardPayment:
+        return Icons.credit_card;
+      case SpendCategory.entertainment:
+        return Icons.movie_outlined;
+      case SpendCategory.health:
+        return Icons.local_hospital_outlined;
+      case SpendCategory.travel:
+        return Icons.flight_outlined;
+      case SpendCategory.housing:
+        return Icons.home_outlined;
+      case SpendCategory.education:
+        return Icons.school_outlined;
+      case SpendCategory.investment:
+        return Icons.trending_up;
+      case SpendCategory.transfer:
+        return Icons.swap_horiz;
+      case SpendCategory.income:
+        return Icons.payments_outlined;
+      case SpendCategory.other:
+        return Icons.category_outlined;
+    }
+  }
+
+  Color get color {
+    switch (this) {
+      case SpendCategory.foodDining:
+        return const Color(0xFFF59E0B);
+      case SpendCategory.groceries:
+        return const Color(0xFF10B981);
+      case SpendCategory.transport:
+        return const Color(0xFF3B82F6);
+      case SpendCategory.shopping:
+        return const Color(0xFFEC4899);
+      case SpendCategory.billsUtilities:
+        return const Color(0xFFEF4444);
+      case SpendCategory.creditCardPayment:
+        return const Color(0xFF0F766E);
+      case SpendCategory.entertainment:
+        return const Color(0xFF8B5CF6);
+      case SpendCategory.health:
+        return const Color(0xFF06B6D4);
+      case SpendCategory.travel:
+        return const Color(0xFFC96442);
+      case SpendCategory.housing:
+        return const Color(0xFF64748B);
+      case SpendCategory.education:
+        return const Color(0xFF0EA5E9);
+      case SpendCategory.investment:
+        return const Color(0xFF6366F1);
+      case SpendCategory.transfer:
+        return const Color(0xFF9CA3AF);
+      case SpendCategory.income:
+        return const Color(0xFF22C55E);
+      case SpendCategory.other:
+        return const Color(0xFF6B7280);
+    }
+  }
+}
+
+/// Parses a stored/backed-up [SpendCategory] name back into its enum value —
+/// a plain loop (rather than `SpendCategory.values.firstWhere`) because the
+/// null case (no category assigned, or an unrecognised name from an older
+/// backup) needs to stay null rather than falling back to some default
+/// category that wasn't actually chosen.
+SpendCategory? parseSpendCategory(String? name) {
+  if (name == null) return null;
+  for (final c in SpendCategory.values) {
+    if (c.name == name) return c;
+  }
+  return null;
+}
+
+/// Sentinel default for [Transaction.copyWith]'s nullable-field params, so
+/// "not passed" (keep existing value) is distinguishable from "passed
+/// null" (clear the field).
+const _unset = Object();
 
 class Transaction {
   final int smsId;
@@ -53,6 +208,18 @@ class Transaction {
 
   final String rawBody;
 
+  /// True once the user has manually corrected [direction]/[instrument]/
+  /// [merchant]/[walletType] via SmsProvider.updateTransaction — see that
+  /// method for why TransactionParserService never re-derives and
+  /// overwrites this row after that.
+  final bool isOverridden;
+
+  /// What this transaction was actually for — null ("Uncategorised") until
+  /// tagged, either by the user or by a confident SpendCategoryDetector
+  /// merchant/keyword match (see there — never [isOverridden], so it's
+  /// always a starting point rather than a claim about user intent).
+  final SpendCategory? spendCategory;
+
   Transaction({
     required this.smsId,
     required this.date,
@@ -69,7 +236,47 @@ class Transaction {
     this.billDueDate,
     this.fastagWalletId,
     this.vehicleNumber,
+    this.isOverridden = false,
+    this.spendCategory,
   });
+
+  /// Field-level overrides on top of this transaction's existing values —
+  /// e.g. the spend-category backfill only ever needs to change one field,
+  /// and rebuilding the other dozen unchanged would just be noise at every
+  /// call site. `Object?`-sentinel params ([instrumentRef]/[issuer]) let a
+  /// caller explicitly clear a field to null (distinct from "leave it
+  /// alone") the same way the rest of this codebase's edit flows do.
+  Transaction copyWith({
+    TxnDirection? direction,
+    InstrumentType? instrument,
+    Object? instrumentRef = _unset,
+    Object? issuer = _unset,
+    Object? merchant = _unset,
+    Object? walletType = _unset,
+    bool? isOverridden,
+    Object? spendCategory = _unset,
+  }) {
+    return Transaction(
+      smsId: smsId,
+      date: date,
+      amount: amount,
+      direction: direction ?? this.direction,
+      instrument: instrument ?? this.instrument,
+      rawBody: rawBody,
+      instrumentRef: identical(instrumentRef, _unset) ? this.instrumentRef : instrumentRef as String?,
+      issuer: identical(issuer, _unset) ? this.issuer : issuer as String?,
+      merchant: identical(merchant, _unset) ? this.merchant : merchant as String?,
+      balanceAfter: balanceAfter,
+      entityType: entityType,
+      walletType: identical(walletType, _unset) ? this.walletType : walletType as String?,
+      billDueDate: billDueDate,
+      fastagWalletId: fastagWalletId,
+      vehicleNumber: vehicleNumber,
+      isOverridden: isOverridden ?? this.isOverridden,
+      spendCategory:
+          identical(spendCategory, _unset) ? this.spendCategory : spendCategory as SpendCategory?,
+    );
+  }
 
   /// Groups transactions the same way Insights buckets "by card / account" —
   /// a specific wallet name if there is one, else instrument+issuer+ref.
@@ -125,6 +332,8 @@ class Transaction {
         'fastagWalletId': fastagWalletId,
         'vehicleNumber': vehicleNumber,
         'rawBody': rawBody,
+        'isOverridden': isOverridden,
+        'spendCategory': spendCategory?.name,
       };
 
   factory Transaction.fromJson(Map<String, dynamic> json) => Transaction(
@@ -150,6 +359,8 @@ class Transaction {
             : null,
         fastagWalletId: json['fastagWalletId'] as String?,
         vehicleNumber: json['vehicleNumber'] as String?,
+        isOverridden: json['isOverridden'] as bool? ?? false,
+        spendCategory: parseSpendCategory(json['spendCategory'] as String?),
       );
 }
 
@@ -194,6 +405,12 @@ class InvestmentEvent {
 
   final String rawBody;
 
+  /// True once the user has manually corrected [kind]/[fundOrScheme]/[amc]/
+  /// [folioOrAccount] via SmsProvider.updateInvestment — see that method for
+  /// why TransactionParserService never re-derives and overwrites this row
+  /// after that.
+  final bool isOverridden;
+
   InvestmentEvent({
     required this.smsId,
     required this.date,
@@ -205,6 +422,7 @@ class InvestmentEvent {
     this.units,
     this.nav,
     this.amc,
+    this.isOverridden = false,
   });
 
   /// Groups investment events by AMC/broker (e.g. "Axis MF", "Zerodha") for
@@ -232,6 +450,7 @@ class InvestmentEvent {
         'nav': nav,
         'amc': amc,
         'rawBody': rawBody,
+        'isOverridden': isOverridden,
       };
 
   factory InvestmentEvent.fromJson(Map<String, dynamic> json) => InvestmentEvent(
@@ -246,5 +465,6 @@ class InvestmentEvent {
         units: (json['units'] as num?)?.toDouble(),
         nav: (json['nav'] as num?)?.toDouble(),
         amc: json['amc'] as String?,
+        isOverridden: json['isOverridden'] as bool? ?? false,
       );
 }

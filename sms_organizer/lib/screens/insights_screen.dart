@@ -14,7 +14,17 @@ import 'investment_list_screen.dart';
 import 'merchant_list_screen.dart';
 import 'transaction_list_screen.dart';
 
-enum InsightsRange { allTime, thisMonth, last3Months, thisYear }
+/// `custom` covers a user-picked (via showDateRangePicker) arbitrary span —
+/// unlike the other four, it has no fixed formula for its bounds/label/
+/// trend granularity/previous-period comparison, so every method below
+/// falls back to a placeholder for it and _InsightsScreenState computes the
+/// real values itself from the picked DateTimeRange (see its
+/// _effectiveBounds/_effectiveLabel/etc. getters). Every read of this enum's
+/// extension members in this file goes through those getters instead of
+/// calling straight through to here, specifically so `custom` is handled
+/// correctly everywhere rather than just wherever someone remembered to
+/// special-case it.
+enum InsightsRange { allTime, thisMonth, last3Months, thisYear, custom }
 
 extension on InsightsRange {
   String get label {
@@ -27,14 +37,19 @@ extension on InsightsRange {
         return 'Last 3 months';
       case InsightsRange.thisYear:
         return 'This year';
+      case InsightsRange.custom:
+        return 'Custom';
     }
   }
 
   /// The (from, to) window this range covers, as of [now]. `allTime` has no
-  /// bound on either end.
+  /// bound on either end. `custom`'s real bounds live in
+  /// _InsightsScreenState's picked DateTimeRange, not here — this returns
+  /// an all-time fallback purely so the method stays total.
   (DateTime?, DateTime?) boundsFrom(DateTime now) {
     switch (this) {
       case InsightsRange.allTime:
+      case InsightsRange.custom:
         return (null, null);
       case InsightsRange.thisMonth:
         return (DateTime(now.year, now.month, 1), now);
@@ -48,7 +63,8 @@ extension on InsightsRange {
   /// How finely the trend chart should bucket this range — day-by-day for
   /// a single month is readable, but the same granularity across a whole
   /// year (or all time) would be hundreds of unreadable bars, so wider
-  /// ranges bucket coarser.
+  /// ranges bucket coarser. `custom`'s real granularity is computed from
+  /// the picked span's length (see _InsightsScreenState._effectiveTrendGranularity).
   TrendGranularity get trendGranularity {
     switch (this) {
       case InsightsRange.thisMonth:
@@ -57,12 +73,36 @@ extension on InsightsRange {
         return TrendGranularity.week;
       case InsightsRange.thisYear:
       case InsightsRange.allTime:
+      case InsightsRange.custom:
         return TrendGranularity.month;
     }
   }
 
-  String get trendTitle {
-    switch (trendGranularity) {
+  /// How many calendar months back the "vs prev." comparison window should
+  /// be shifted — null for `allTime`, which has no meaningful prior period.
+  /// `thisYear` shifts a full 12 months rather than "however many months
+  /// have elapsed so far this year", so it reads as a year-over-year
+  /// comparison (same Jan 1–to-date window, one year earlier) rather than
+  /// an odd partial-year lookback. Also null for `custom` — an arbitrary
+  /// picked span has no calendar-period equivalent to shift by, so its
+  /// previous-period comparison falls back to a plain duration shift
+  /// instead (see _InsightsScreenState's previousSummary computation).
+  int? get comparisonMonthsBack {
+    switch (this) {
+      case InsightsRange.allTime:
+      case InsightsRange.custom:
+        return null;
+      case InsightsRange.thisMonth:
+        return 1;
+      case InsightsRange.last3Months:
+        return 3;
+      case InsightsRange.thisYear:
+        return 12;
+    }
+  }
+
+  String trendTitleFor(TrendGranularity granularity) {
+    switch (granularity) {
       case TrendGranularity.day:
         return 'Daily trend';
       case TrendGranularity.week:
@@ -71,6 +111,29 @@ extension on InsightsRange {
         return 'Monthly trend';
     }
   }
+}
+
+/// [date] shifted back by [months] calendar months, clamping the day of
+/// month to the target month's actual length (e.g. Aug 31 minus one month
+/// lands on Jul 31, not an overflowed Aug 1 via naive DateTime normalisation)
+/// so a previous-period comparison never silently rolls into the wrong
+/// month. Time-of-day is preserved so a same-time-of-day `to` bound (e.g.
+/// "now") shifts cleanly too.
+DateTime _shiftMonths(DateTime date, int months) {
+  final targetYear = date.year;
+  final targetMonth = date.month - months;
+  final normalized = DateTime(targetYear, targetMonth, 1);
+  final daysInTargetMonth = DateTime(normalized.year, normalized.month + 1, 0).day;
+  final day = date.day > daysInTargetMonth ? daysInTargetMonth : date.day;
+  return DateTime(
+    normalized.year,
+    normalized.month,
+    day,
+    date.hour,
+    date.minute,
+    date.second,
+    date.millisecond,
+  );
 }
 
 class InsightsScreen extends StatefulWidget {
@@ -83,24 +146,112 @@ class InsightsScreen extends StatefulWidget {
 class _InsightsScreenState extends State<InsightsScreen> {
   InsightsRange _range = InsightsRange.allTime;
 
+  /// The user-picked span backing [InsightsRange.custom] — null until
+  /// they've actually picked one via the date-range dialog (see
+  /// [_selectRange]), even if `_range == InsightsRange.custom` was somehow
+  /// reached without it (shouldn't happen, but every getter below treats a
+  /// null [_customRange] as "fall back to all-time" rather than crashing).
+  DateTimeRange? _customRange;
+
+  /// Every other read of [_range]'s bounds/label/granularity in this file
+  /// goes through these three getters/method instead of straight through to
+  /// the enum extension, so `custom` is handled correctly everywhere rather
+  /// than wherever someone remembered to special-case it — see
+  /// [InsightsRange]'s doc comment.
+  (DateTime?, DateTime?) _boundsFor(DateTime now) {
+    final custom = _customRange;
+    if (_range == InsightsRange.custom && custom != null) {
+      final end = DateTime(custom.end.year, custom.end.month, custom.end.day, 23, 59, 59);
+      return (custom.start, end);
+    }
+    return _range.boundsFrom(now);
+  }
+
+  String get _effectiveLabel {
+    final custom = _customRange;
+    if (_range == InsightsRange.custom && custom != null) {
+      return '${Formatters.dayMonth(custom.start)} – ${Formatters.dayMonthYear(custom.end)}';
+    }
+    return _range.label;
+  }
+
+  /// Bucketed by the picked span's own length for `custom`, the same
+  /// principle [InsightsRange.trendGranularity] applies to the fixed
+  /// presets — day-by-day is readable for a couple of weeks, unreadable
+  /// for a year.
+  TrendGranularity get _effectiveTrendGranularity {
+    final custom = _customRange;
+    if (_range == InsightsRange.custom && custom != null) {
+      final days = custom.end.difference(custom.start).inDays;
+      if (days <= 31) return TrendGranularity.day;
+      if (days <= 120) return TrendGranularity.week;
+      return TrendGranularity.month;
+    }
+    return _range.trendGranularity;
+  }
+
+  /// Opens the date-range dialog for [InsightsRange.custom]; every other
+  /// value just selects immediately. Cancelling the dialog leaves whatever
+  /// range was already active untouched, rather than switching to an empty
+  /// "custom, but nothing picked" state.
+  Future<void> _selectRange(InsightsRange r) async {
+    if (r != InsightsRange.custom) {
+      setState(() => _range = r);
+      return;
+    }
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: now,
+      initialDateRange: _customRange ?? DateTimeRange(start: now.subtract(const Duration(days: 7)), end: now),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _customRange = picked;
+      _range = InsightsRange.custom;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<SmsProvider>(
       builder: (context, provider, _) {
         final now = DateTime.now();
-        final (from, to) = _range.boundsFrom(now);
+        final (from, to) = _boundsFor(now);
         final summary =
-            provider.insightsSummary(from: from, to: to, granularity: _range.trendGranularity);
+            provider.insightsSummary(from: from, to: to, granularity: _effectiveTrendGranularity);
 
-        // Previous period of equal length, for the trend deltas — undefined
-        // (and hidden) for "All time" since there's no prior window to
-        // compare against.
+        // Previous comparable period for the trend deltas — a true
+        // calendar-month shift (see InsightsRange.comparisonMonthsBack), not
+        // a raw duration subtraction. The old approach anchored the window
+        // at `from` and walked back by however many days had elapsed since
+        // it, which degenerates badly early in a period — e.g. on the 2nd of
+        // the month it compared a single day against a single day from the
+        // month before, and the compared dates weren't even the same
+        // calendar days. Shifting both bounds back by whole months instead
+        // gives "day 1–9 of this month" vs "day 1–9 of last month" and
+        // "Jan 1–Aug 9 this year" vs "Jan 1–Aug 9 last year" — genuinely
+        // comparable windows regardless of where in the period "now" falls.
+        // Undefined (and hidden) for "All time" since there's no prior
+        // window to compare against.
         InsightsSummary? previousSummary;
         if (from != null) {
-          final length = (to ?? now).difference(from);
-          final prevTo = from;
-          final prevFrom = from.subtract(length);
-          previousSummary = provider.insightsSummary(from: prevFrom, to: prevTo);
+          final monthsBack = _range.comparisonMonthsBack;
+          if (monthsBack != null) {
+            final prevFrom = _shiftMonths(from, monthsBack);
+            final prevTo = _shiftMonths(to ?? now, monthsBack);
+            previousSummary = provider.insightsSummary(from: prevFrom, to: prevTo);
+          } else if (_range == InsightsRange.custom) {
+            // A picked span has no calendar-period equivalent to shift by —
+            // fall back to "the same-length window immediately before this
+            // one". Unlike the presets this raw-duration approach used to
+            // (badly) serve, a custom range has both ends fixed by the user
+            // rather than one end trailing "now" mid-period, so there's no
+            // partial-period ambiguity here to distort the comparison.
+            final length = (to ?? now).difference(from);
+            previousSummary = provider.insightsSummary(from: from.subtract(length), to: from);
+          }
         }
 
         final filteredTransactions = provider.transactions.where((t) {
@@ -126,13 +277,31 @@ class _InsightsScreenState extends State<InsightsScreen> {
             if (s.lastBalance != null) s.key: s.lastBalance!,
         };
 
+        // Upcoming bills are forward-looking (due today or later), so they
+        // deliberately ignore the selected range filter — every one of this
+        // screen's ranges has `to` capped at "now", which would otherwise
+        // hide every future due date under every single range option.
+        final today = DateTime(now.year, now.month, now.day);
+        final upcomingBills = provider.transactions
+            .where((t) => t.billDueDate != null && !t.billDueDate!.isBefore(today))
+            .toList()
+          ..sort((a, b) => a.billDueDate!.compareTo(b.billDueDate!));
+
         return Scaffold(
-          appBar: AppBar(title: const Text('Insights')),
+          appBar: AppBar(
+            title: const Text('Insights'),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: provider.refresh,
+              ),
+            ],
+          ),
           body: Column(
             children: [
               _RangeFilterBar(
                 selected: _range,
-                onSelected: (r) => setState(() => _range = r),
+                onSelected: _selectRange,
               ),
               Expanded(
                 child: provider.transactions.isEmpty
@@ -147,7 +316,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
                             icon: Icons.filter_alt_off_outlined,
                             title: 'No transactions in this range',
                           )
-                        : ListView(
+                        : RefreshIndicator(
+                            onRefresh: provider.refresh,
+                            child: ListView(
                             padding: const EdgeInsets.all(16),
                             children: [
                               _TotalsRow(
@@ -156,14 +327,19 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 onTapDirection: (direction) => _openDrilldown(
                                   context,
                                   title: direction == TxnDirection.credit ? 'Credited' : 'Debited',
-                                  subtitle: _range.label,
+                                  subtitle: _effectiveLabel,
                                   transactions: filteredTransactions
                                       .where((t) => t.direction == direction)
                                       .toList(),
                                 ),
                               ),
+                              if (upcomingBills.isNotEmpty) ...[
+                                const SizedBox(height: 16),
+                                _UpcomingBillsCard(bills: upcomingBills),
+                              ],
                               const SizedBox(height: 20),
-                              Text(_range.trendTitle, style: Theme.of(context).textTheme.titleMedium),
+                              Text(_range.trendTitleFor(_effectiveTrendGranularity),
+                                  style: Theme.of(context).textTheme.titleMedium),
                               const SizedBox(height: 12),
                               _TrendChart(
                                 summary: summary,
@@ -186,9 +362,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                         context,
                                         MaterialPageRoute(
                                           builder: (_) => InstrumentListScreen(
-                                            instruments: summary.byInstrument,
                                             transactions: filteredTransactions,
-                                            subtitle: _range.label,
+                                            subtitle: _effectiveLabel,
                                           ),
                                         ),
                                       ),
@@ -201,7 +376,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 _InstrumentDonut(
                                   instruments: summary.byInstrument,
                                   filteredTransactions: filteredTransactions,
-                                  rangeLabel: _range.label,
+                                  rangeLabel: _effectiveLabel,
                                 ),
                                 const SizedBox(height: 16),
                               ],
@@ -221,10 +396,11 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                         onTap: () => _openDrilldown(
                                           context,
                                           title: s.displayName,
-                                          subtitle: _range.label,
+                                          subtitle: _effectiveLabel,
                                           transactions: filteredTransactions
                                               .where((t) => t.instrumentGroupKey == s.key)
                                               .toList(),
+                                          matches: (t) => t.instrumentGroupKey == s.key,
                                         ),
                                       ),
                                     ),
@@ -239,9 +415,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                         context,
                                         MaterialPageRoute(
                                           builder: (_) => MerchantListScreen(
-                                            merchants: summary.byMerchant,
                                             transactions: filteredTransactions,
-                                            subtitle: _range.label,
+                                            subtitle: _effectiveLabel,
                                           ),
                                         ),
                                       ),
@@ -254,7 +429,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 _MerchantDonut(
                                   merchants: summary.byMerchant,
                                   filteredTransactions: filteredTransactions,
-                                  rangeLabel: _range.label,
+                                  rangeLabel: _effectiveLabel,
                                 ),
                                 const SizedBox(height: 16),
                               ],
@@ -273,13 +448,52 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                         onTap: () => _openDrilldown(
                                           context,
                                           title: s.displayName,
-                                          subtitle: _range.label,
+                                          subtitle: _effectiveLabel,
                                           transactions: filteredTransactions
                                               .where((t) => t.merchantGroupKey == s.key)
                                               .toList(),
+                                          matches: (t) => t.merchantGroupKey == s.key,
                                         ),
                                       ),
                                     ),
+                              const SizedBox(height: 24),
+                              Text('By spend category', style: Theme.of(context).textTheme.titleMedium),
+                              const SizedBox(height: 8),
+                              if (summary.byCategory.isNotEmpty) ...[
+                                _SpendCategoryDonut(
+                                  categories: summary.byCategory,
+                                  filteredTransactions: filteredTransactions,
+                                  rangeLabel: _effectiveLabel,
+                                ),
+                                const SizedBox(height: 16),
+                              ],
+                              if (summary.byCategory.isEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  child: Text(
+                                    'No spend in this range.',
+                                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                  ),
+                                )
+                              else
+                                // No 6-item cap/"See all" here unlike By card / By
+                                // merchant — there are at most 13 spend categories
+                                // total (see SpendCategory), so the full list is
+                                // always short enough to show inline.
+                                ...summary.byCategory.map(
+                                  (c) => _SpendCategoryRow(
+                                    summary: c,
+                                    onTap: () => _openDrilldown(
+                                      context,
+                                      title: c.displayName,
+                                      subtitle: _effectiveLabel,
+                                      transactions: filteredTransactions
+                                          .where((t) => t.spendCategory == c.category)
+                                          .toList(),
+                                      matches: (t) => t.spendCategory == c.category,
+                                    ),
+                                  ),
+                                ),
                               const SizedBox(height: 24),
                               _InvestmentCard(
                                 summary: summary,
@@ -290,7 +504,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                           MaterialPageRoute(
                                             builder: (_) => InvestmentListScreen(
                                               investments: filteredInvestments,
-                                              subtitle: _range.label,
+                                              allInvestments: provider.investments,
+                                              subtitle: _effectiveLabel,
                                             ),
                                           ),
                                         ),
@@ -305,16 +520,17 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                     onPressed: () => _openDrilldown(
                                       context,
                                       title: 'All transactions',
-                                      subtitle: _range.label,
+                                      subtitle: _effectiveLabel,
                                       transactions: filteredTransactions,
                                     ),
-                                    child: Text('${filteredTransactions.length} total · See all'),
+                                    child: Text('${summary.transactionCount} total · See all'),
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 4),
                               ...filteredTransactions.take(15).map((t) => TransactionTile(transaction: t)),
                             ],
+                            ),
                           ),
               ),
             ],
@@ -329,11 +545,17 @@ class _InsightsScreenState extends State<InsightsScreen> {
     required String title,
     required List<Transaction> transactions,
     String? subtitle,
+    bool Function(Transaction)? matches,
   }) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => TransactionListScreen(title: title, subtitle: subtitle, transactions: transactions),
+        builder: (_) => TransactionListScreen(
+          title: title,
+          subtitle: subtitle,
+          transactions: transactions,
+          matches: matches,
+        ),
       ),
     );
   }
@@ -368,7 +590,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
     _openDrilldown(
       context,
       title: title,
-      subtitle: _range.label,
+      subtitle: _effectiveLabel,
       transactions: transactions.where(matchesBucket).toList(),
     );
   }
@@ -558,9 +780,77 @@ class _TrendChart extends StatelessWidget {
   }
 }
 
-/// The top 6 instruments each get their own [BreakdownDonut] slice, with
-/// anything past that folded into a single "Other" slice so the chart
-/// doesn't fragment into slivers once someone has a dozen linked cards.
+/// Surfaces [Transaction.billDueDate] — due today or later, soonest first.
+/// Deliberately ignores the selected range filter (see where [bills] is
+/// built in InsightsScreen.build) since a future due date would otherwise
+/// never fall inside any range whose `to` bound is capped at "now".
+///
+/// Scope note: this only catches a due date mentioned *alongside* an
+/// already-completed transaction in the same SMS (TransactionParserService
+/// only runs on messages already confirmed transactional) — a standalone
+/// "your bill is due" reminder with no completed-transaction language of
+/// its own categorises as Updates and never reaches this list at all.
+class _UpcomingBillsCard extends StatelessWidget {
+  final List<Transaction> bills;
+  const _UpcomingBillsCard({required this.bills});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.event_outlined, color: scheme.primary),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('Upcoming bills', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+            for (final t in bills)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Text(
+                        'Due ${Formatters.dayMonthYear(t.billDueDate!)}',
+                        style:
+                            TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: scheme.primary),
+                      ),
+                    ),
+                    TransactionTile(transaction: t),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The top 6 instruments by *spend* (debit only) each get their own
+/// [BreakdownDonut] slice, with anything past that folded into a single
+/// "Other" slice so the chart doesn't fragment into slivers once someone
+/// has a dozen linked cards.
+///
+/// Deliberately ranks and sizes slices by [InstrumentSummary.totalDebit]
+/// alone, not totalCredit+totalDebit — a primarily-income account (e.g. a
+/// salary account) would otherwise dominate a chart that reads as "where
+/// does my money go", inflated by money arriving rather than being spent.
+/// An instrument with no debit activity in range doesn't get a slice at
+/// all; it still shows up in the row list below with both its credit and
+/// debit totals, so nothing is hidden — just not folded into a spend pie
+/// it isn't part of.
 class _InstrumentDonut extends StatelessWidget {
   final List<InstrumentSummary> instruments;
   final List<Transaction> filteredTransactions;
@@ -574,14 +864,16 @@ class _InstrumentDonut extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final top = instruments.take(6).toList();
-    final otherTotal =
-        instruments.skip(6).fold<double>(0, (a, s) => a + s.totalCredit + s.totalDebit);
+    final bySpend = instruments.where((s) => s.totalDebit > 0).toList()
+      ..sort((a, b) => b.totalDebit.compareTo(a.totalDebit));
+    final top = bySpend.take(6).toList();
+    final otherTotal = bySpend.skip(6).fold<double>(0, (a, s) => a + s.totalDebit);
 
     return BreakdownDonut(
       labels: [for (final s in top) s.displayName, if (otherTotal > 0) 'Other'],
       keys: [for (final s in top) s.key, if (otherTotal > 0) null],
-      values: [for (final s in top) s.totalCredit + s.totalDebit, if (otherTotal > 0) otherTotal],
+      values: [for (final s in top) s.totalDebit, if (otherTotal > 0) otherTotal],
+      centerLabel: 'spend',
       onTapKey: (key) {
         final match = instruments.firstWhere((s) => s.key == key);
         Navigator.push(
@@ -591,6 +883,7 @@ class _InstrumentDonut extends StatelessWidget {
               title: match.displayName,
               subtitle: rangeLabel,
               transactions: filteredTransactions.where((t) => t.instrumentGroupKey == key).toList(),
+              matches: (t) => t.instrumentGroupKey == key,
             ),
           ),
         );
@@ -599,8 +892,10 @@ class _InstrumentDonut extends StatelessWidget {
   }
 }
 
-/// Same idea as [_InstrumentDonut], grouped by [Transaction.merchantGroupKey]
-/// instead of by instrument.
+/// Same idea as [_InstrumentDonut] — ranked and sized by
+/// [MerchantSummary.totalDebit] alone, not totalCredit+totalDebit, for the
+/// same "this is a spend chart, not an activity chart" reason — grouped by
+/// [Transaction.merchantGroupKey] instead of by instrument.
 class _MerchantDonut extends StatelessWidget {
   final List<MerchantSummary> merchants;
   final List<Transaction> filteredTransactions;
@@ -614,13 +909,16 @@ class _MerchantDonut extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final top = merchants.take(6).toList();
-    final otherTotal = merchants.skip(6).fold<double>(0, (a, s) => a + s.totalCredit + s.totalDebit);
+    final bySpend = merchants.where((s) => s.totalDebit > 0).toList()
+      ..sort((a, b) => b.totalDebit.compareTo(a.totalDebit));
+    final top = bySpend.take(6).toList();
+    final otherTotal = bySpend.skip(6).fold<double>(0, (a, s) => a + s.totalDebit);
 
     return BreakdownDonut(
       labels: [for (final s in top) s.displayName, if (otherTotal > 0) 'Other'],
       keys: [for (final s in top) s.key, if (otherTotal > 0) null],
-      values: [for (final s in top) s.totalCredit + s.totalDebit, if (otherTotal > 0) otherTotal],
+      values: [for (final s in top) s.totalDebit, if (otherTotal > 0) otherTotal],
+      centerLabel: 'spend',
       onTapKey: (key) {
         final match = merchants.firstWhere((s) => s.key == key);
         Navigator.push(
@@ -630,6 +928,7 @@ class _MerchantDonut extends StatelessWidget {
               title: match.displayName,
               subtitle: rangeLabel,
               transactions: filteredTransactions.where((t) => t.merchantGroupKey == key).toList(),
+              matches: (t) => t.merchantGroupKey == key,
             ),
           ),
         );
@@ -670,6 +969,7 @@ class _InstrumentRow extends StatelessWidget {
           '${summary.count} transactions',
           if (lastBalance != null) 'Bal ${Formatters.currency(lastBalance!)}',
         ].join(' · '),
+        style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
       ),
       trailing: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -698,7 +998,10 @@ class _MerchantRow extends StatelessWidget {
       minVerticalPadding: 10,
       leading: const Icon(Icons.storefront_outlined),
       title: Text(summary.displayName),
-      subtitle: Text('${summary.count} transactions'),
+      subtitle: Text(
+        '${summary.count} transactions',
+        style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+      ),
       trailing: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,
@@ -710,6 +1013,77 @@ class _MerchantRow extends StatelessWidget {
             Text('-${Formatters.currency(summary.totalDebit)}',
                 style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
         ],
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
+/// Same idea as [_InstrumentDonut]/[_MerchantDonut] — top 6 + "Other" — but
+/// [categories] is already debit-only from [groupBySpendCategory], so there's
+/// no separate spend-only filter/re-sort needed here the way the other two
+/// donuts have to do for themselves.
+class _SpendCategoryDonut extends StatelessWidget {
+  final List<SpendCategorySummary> categories;
+  final List<Transaction> filteredTransactions;
+  final String rangeLabel;
+
+  const _SpendCategoryDonut({
+    required this.categories,
+    required this.filteredTransactions,
+    required this.rangeLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final top = categories.take(6).toList();
+    final otherTotal = categories.skip(6).fold<double>(0, (a, c) => a + c.totalDebit);
+
+    return BreakdownDonut(
+      labels: [for (final c in top) c.displayName, if (otherTotal > 0) 'Other'],
+      keys: [for (final c in top) c.key, if (otherTotal > 0) null],
+      values: [for (final c in top) c.totalDebit, if (otherTotal > 0) otherTotal],
+      centerLabel: 'spend',
+      onTapKey: (key) {
+        final match = categories.firstWhere((c) => c.key == key);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TransactionListScreen(
+              title: match.displayName,
+              subtitle: rangeLabel,
+              transactions:
+                  filteredTransactions.where((t) => t.spendCategory == match.category).toList(),
+              matches: (t) => t.spendCategory == match.category,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SpendCategoryRow extends StatelessWidget {
+  final SpendCategorySummary summary;
+  final VoidCallback onTap;
+  const _SpendCategoryRow({required this.summary, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = summary.category?.color ?? Theme.of(context).colorScheme.outline;
+    final icon = summary.category?.icon ?? Icons.label_off_outlined;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      minVerticalPadding: 10,
+      leading: Icon(icon, color: color),
+      title: Text(summary.displayName),
+      subtitle: Text(
+        '${summary.count} transaction${summary.count == 1 ? '' : 's'}',
+        style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+      ),
+      trailing: Text(
+        '-${Formatters.currency(summary.totalDebit)}',
+        style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12, fontWeight: FontWeight.w600),
       ),
       onTap: onTap,
     );

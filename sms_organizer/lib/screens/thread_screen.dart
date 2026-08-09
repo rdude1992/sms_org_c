@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../models/category.dart';
 import '../models/sim_info.dart';
 import '../models/sms_message.dart';
 import '../providers/sms_provider.dart';
+import '../utils/address_utils.dart';
 import '../utils/formatters.dart';
+import '../widgets/category_picker_sheet.dart';
 import '../widgets/date_separator.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/multi_select_bar.dart';
@@ -153,6 +157,12 @@ class _ThreadScreenState extends State<ThreadScreen> {
         }
         final conversation = matches.first;
         _address = conversation.address;
+        // Shortcodes and alphanumeric DLT sender IDs (bank/OTP/promo alerts)
+        // are one-way — the carrier just drops an SMS sent back to one, so
+        // showing a reply box that can never actually deliver anything
+        // would be misleading. Forwarding a message elsewhere still works
+        // via the per-bubble long-press menu either way.
+        final canReply = isPhoneNumberAddress(conversation.address);
         final messages = conversation.messages.reversed.toList(); // oldest first for chat view
 
         _loadDraftIfNeeded(provider);
@@ -161,12 +171,34 @@ class _ThreadScreenState extends State<ThreadScreen> {
         // search/tap-through, otherwise on the newest message — like any
         // other chat app opens at the bottom, not wherever the list's
         // estimated item extents happen to settle.
+        //
+        // [alignment] positions an item's TOP edge at that fraction of the
+        // viewport (0 = top, 1 = bottom) — it has no notion of an item's
+        // bottom edge. Targeting the real last message with alignment 1
+        // would put *its* top at the viewport's bottom, leaving almost the
+        // whole bubble cut off below the fold. Targeting the zero-height
+        // sentinel item just past the end (see itemCount/itemBuilder below)
+        // instead means that phantom item's top — which sits exactly where
+        // the real last message's bottom is — lands at the viewport's
+        // bottom, so the last message ends up fully visible with nothing
+        // left to scroll for.
+        //
+        // The highlighted-message case doesn't need that trick (0.4 puts a
+        // reasonable amount of context above it without risking cutting off
+        // a tall bubble) — it's set to the same value _scrollToHighlightIfNeeded's
+        // follow-up scrollTo() settles on below, so that animated correction
+        // only has to travel a short, subtle distance instead of visibly
+        // snapping from a completely different spot.
         final highlightIndex =
             widget.highlightMessageId == null ? -1 : messages.indexWhere((m) => m.id == widget.highlightMessageId);
-        final initialIndex = highlightIndex != -1 ? highlightIndex : messages.length - 1;
+        final initialIndex = highlightIndex != -1 ? highlightIndex : messages.length;
+        final initialAlignment = highlightIndex != -1 ? 0.4 : 1.0;
 
         _scrollToHighlightIfNeeded(messages);
         _initSelectedSim(provider.activeSims);
+
+        final visibleIds = messages.map((m) => m.id).toList();
+        final allSelected = visibleIds.isNotEmpty && visibleIds.every(provider.selectedIds.contains);
 
         return Scaffold(
           appBar: provider.isSelecting
@@ -176,10 +208,37 @@ class _ThreadScreenState extends State<ThreadScreen> {
                   onMarkRead: () => provider.markSelectedRead(true),
                   onMarkUnread: () => provider.markSelectedRead(false),
                   onDelete: provider.deleteSelected,
+                  allSelected: allSelected,
+                  onToggleSelectAll: () =>
+                      allSelected ? provider.clearSelection() : provider.selectIds(visibleIds),
                 )
               : AppBar(
-                  title: Text(provider.displayNameFor(conversation.address)),
+                  title: _ThreadTitle(
+                    displayName: provider.displayNameFor(conversation.address),
+                    address: conversation.address,
+                    isKnownContact: provider.contactService.isKnownContact(conversation.address),
+                    onOpenContact: () async {
+                      final opened = await provider.openContact(conversation.address);
+                      if (!opened && context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Could not open contact'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                  ),
                   actions: [
+                    // Same repliability check as the reply bar below — a
+                    // shortcode/sender ID (e.g. "HDFCBK") isn't a number
+                    // the Phone app could dial in the first place.
+                    if (canReply)
+                      IconButton(
+                        icon: const Icon(Icons.call_outlined),
+                        tooltip: 'Call ${conversation.address}',
+                        onPressed: () => _callNumber(context, conversation.address),
+                      ),
                     IconButton(
                       icon: Icon(
                         provider.isPinned(conversation.threadId) ? Icons.push_pin : Icons.push_pin_outlined,
@@ -195,10 +254,13 @@ class _ThreadScreenState extends State<ThreadScreen> {
                 child: ScrollablePositionedList.builder(
                   itemScrollController: _itemScrollController,
                   initialScrollIndex: initialIndex < 0 ? 0 : initialIndex,
-                  initialAlignment: 1,
+                  initialAlignment: initialAlignment,
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  itemCount: messages.length,
+                  // +1 for the trailing zero-height sentinel — see the
+                  // initialIndex/initialAlignment comment above for why.
+                  itemCount: messages.length + 1,
                   itemBuilder: (context, index) {
+                    if (index == messages.length) return const SizedBox.shrink();
                     final m = messages[index];
                     final selected = provider.selectedIds.contains(m.id);
                     final showDateSeparator =
@@ -228,63 +290,164 @@ class _ThreadScreenState extends State<ThreadScreen> {
                   },
                 ),
               ),
-              SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                  child: Row(
-                    children: [
-                      if (provider.activeSims.length > 1) ...[
-                        SimPicker(
-                          sims: provider.activeSims,
-                          selectedSubscriptionId: _selectedSubscriptionId,
-                          onChanged: (id) => setState(() => _selectedSubscriptionId = id),
-                          compact: true,
-                        ),
-                        const SizedBox(width: 8),
-                      ],
-                      Expanded(
-                        child: TextField(
-                          controller: _replyController,
-                          minLines: 1,
-                          maxLines: 4,
-                          decoration: InputDecoration(
-                            hintText: 'Type a message',
-                            filled: true,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(24),
-                              borderSide: BorderSide.none,
+              if (canReply)
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                    child: Row(
+                      children: [
+                        if (provider.activeSims.length > 1) ...[
+                          SimPicker(
+                            sims: provider.activeSims,
+                            selectedSubscriptionId: _selectedSubscriptionId,
+                            onChanged: (id) => setState(() => _selectedSubscriptionId = id),
+                            compact: true,
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        Expanded(
+                          child: TextField(
+                            controller: _replyController,
+                            minLines: 1,
+                            maxLines: 4,
+                            decoration: InputDecoration(
+                              hintText: 'Type a message',
+                              filled: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: BorderSide.none,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton.filled(
-                        icon: const Icon(Icons.send),
-                        onPressed: () async {
-                          final text = _replyController.text.trim();
-                          if (text.isEmpty) return;
-                          _replyController.clear();
-                          if (_draftId != null) {
-                            provider.deleteMessage(_draftId!);
-                            _draftId = null;
-                          }
-                          await provider.sendSms(
-                            conversation.address,
-                            text,
-                            subscriptionId: _selectedSubscriptionId,
-                          );
-                        },
-                      ),
-                    ],
+                        const SizedBox(width: 8),
+                        IconButton.filled(
+                          icon: const Icon(Icons.send),
+                          onPressed: () async {
+                            final text = _replyController.text.trim();
+                            if (text.isEmpty) return;
+                            _replyController.clear();
+                            if (_draftId != null) {
+                              provider.deleteMessage(_draftId!);
+                              _draftId = null;
+                            }
+                            await provider.sendSms(
+                              conversation.address,
+                              text,
+                              subscriptionId: _selectedSubscriptionId,
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                SafeArea(
+                  top: false,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 15,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          "This sender doesn't accept replies",
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+/// Opens the Phone app's dialer pre-filled with [address] — a plain
+/// ACTION_VIEW tel: intent (what url_launcher sends), same as ACTION_DIAL:
+/// it stages the number for the user to actually place the call themselves,
+/// never dials on its own, so this needs no CALL_PHONE permission.
+Future<void> _callNumber(BuildContext context, String address) async {
+  final uri = Uri(scheme: 'tel', path: address);
+  try {
+    final launched = await launchUrl(uri);
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No dialer app found'), duration: Duration(seconds: 2)),
+      );
+    }
+  } catch (_) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No dialer app found'), duration: Duration(seconds: 2)),
+      );
+    }
+  }
+}
+
+/// AppBar title for an open thread — the contact name, plus (only when
+/// [address] actually resolved to a saved contact, not just an unsaved
+/// number/shortcode) a smaller, tappable line underneath showing the raw
+/// number, which opens that contact's page in the system Contacts app.
+class _ThreadTitle extends StatelessWidget {
+  final String displayName;
+  final String address;
+  final bool isKnownContact;
+  final VoidCallback onOpenContact;
+
+  const _ThreadTitle({
+    required this.displayName,
+    required this.address,
+    required this.isKnownContact,
+    required this.onOpenContact,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // Only relevant once the title above is actually showing a contact
+    // *name* in place of the number — for an unsaved number/shortcode the
+    // title already is the raw address, so a second identical line would
+    // just be noise.
+    final showNumberLine = isKnownContact && displayName != address;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
+        if (showNumberLine)
+          GestureDetector(
+            onTap: onOpenContact,
+            child: Text(
+              address,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.normal,
+                color: scheme.onSurface.withOpacity(0.7),
+                decoration: TextDecoration.underline,
+                decorationColor: scheme.onSurface.withOpacity(0.35),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -346,6 +509,17 @@ void _showMessageActions(BuildContext context, SmsProvider provider, SmsMessage 
               onTap: () {
                 Navigator.pop(sheetContext);
                 provider.toggleStarred(message.id);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.label_outline),
+              title: const Text('Change category'),
+              subtitle: Text(
+                message.isCategoryOverridden ? '${message.category.label} · manually set' : message.category.label,
+              ),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                showCategoryPickerSheet(context, provider, message);
               },
             ),
             ListTile(

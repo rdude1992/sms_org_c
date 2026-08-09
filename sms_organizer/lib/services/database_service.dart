@@ -28,12 +28,13 @@ class DatabaseService {
     final path = p.join(dbPath, 'sms_organizer.db');
     return openDatabase(
       path,
-      version: 2,
+      version: 6,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE message_categories (
             sms_id INTEGER PRIMARY KEY,
-            category TEXT NOT NULL
+            category TEXT NOT NULL,
+            is_override INTEGER NOT NULL DEFAULT 0
           )
         ''');
         await db.execute('''
@@ -52,7 +53,9 @@ class DatabaseService {
             bill_due_date INTEGER,
             fastag_wallet_id TEXT,
             vehicle_number TEXT,
-            raw_body TEXT
+            raw_body TEXT,
+            is_override INTEGER NOT NULL DEFAULT 0,
+            spend_category TEXT
           )
         ''');
         await db.execute('''
@@ -66,7 +69,8 @@ class DatabaseService {
             units REAL,
             nav REAL,
             amc TEXT,
-            raw_body TEXT
+            raw_body TEXT,
+            is_override INTEGER NOT NULL DEFAULT 0
           )
         ''');
         await db.execute('''
@@ -98,28 +102,67 @@ class DatabaseService {
             )
           ''');
         }
+        if (oldVersion < 3) {
+          // Lets a manually-corrected category (see SmsProvider.setMessageCategory)
+          // be told apart from an auto-classified one, so cache wipes below can
+          // preserve corrections instead of discarding them.
+          await db.execute(
+            'ALTER TABLE message_categories ADD COLUMN is_override INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        if (oldVersion < 4) {
+          // Same idea as the message_categories column above, but for a
+          // manually-corrected transaction (see SmsProvider.updateTransaction) —
+          // direction/instrument/merchant/wallet fixes need to survive the
+          // same cache wipes a category override does.
+          await db.execute(
+            'ALTER TABLE transactions ADD COLUMN is_override INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        if (oldVersion < 5) {
+          // Same idea again, for a manually-corrected investment (see
+          // SmsProvider.updateInvestment) — kind/fund/AMC/folio fixes need to
+          // survive the same cache wipes a category override does.
+          await db.execute(
+            'ALTER TABLE investments ADD COLUMN is_override INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        if (oldVersion < 6) {
+          // Manually-assigned spend category (see SpendCategory) — always
+          // user-set, never auto-detected, so it doesn't need its own
+          // override flag: it rides along on the transaction row and
+          // persists via the same is_override mechanism already in place.
+          await db.execute('ALTER TABLE transactions ADD COLUMN spend_category TEXT');
+        }
       },
     );
   }
 
   // ---- Categories ----
 
-  Future<void> saveCategory(int smsId, SmsCategory category) async {
+  /// [isOverride] marks a category the user set explicitly (via the "Change
+  /// category" action), as opposed to one CategorizationService produced —
+  /// see [clearAll], which preserves these rows.
+  Future<void> saveCategory(int smsId, SmsCategory category, {bool isOverride = false}) async {
     final db = await database;
     await db.insert(
       'message_categories',
-      {'sms_id': smsId, 'category': category.name},
+      {'sms_id': smsId, 'category': category.name, 'is_override': isOverride ? 1 : 0},
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
+  /// Always writes auto-classified rows (is_override = 0) — callers with a
+  /// user-set category use [saveCategory] instead. Safe against clobbering
+  /// an existing override because SmsProvider.refresh only ever calls this
+  /// for ids that weren't already cached (override or not).
   Future<void> saveCategoriesBulk(Map<int, SmsCategory> categories) async {
     final db = await database;
     final batch = db.batch();
     categories.forEach((id, cat) {
       batch.insert(
         'message_categories',
-        {'sms_id': id, 'category': cat.name},
+        {'sms_id': id, 'category': cat.name, 'is_override': 0},
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     });
@@ -139,35 +182,64 @@ class DatabaseService {
     return map;
   }
 
+  /// ids of messages whose category was set manually rather than by
+  /// CategorizationService — see [saveCategory].
+  Future<Set<int>> loadOverriddenCategoryIds() async {
+    final db = await database;
+    final rows = await db.query('message_categories', columns: ['sms_id'], where: 'is_override = 1');
+    return rows.map((row) => row['sms_id'] as int).toSet();
+  }
+
   // ---- Transactions ----
 
+  Map<String, dynamic> _transactionColumns(Transaction t, {required bool isOverride}) => {
+        'sms_id': t.smsId,
+        'date': t.date.millisecondsSinceEpoch,
+        'amount': t.amount,
+        'direction': t.direction.name,
+        'instrument': t.instrument.name,
+        'instrument_ref': t.instrumentRef,
+        'issuer': t.issuer,
+        'merchant': t.merchant,
+        'balance_after': t.balanceAfter,
+        'entity_type': t.entityType.name,
+        'wallet_type': t.walletType,
+        'bill_due_date': t.billDueDate?.millisecondsSinceEpoch,
+        'fastag_wallet_id': t.fastagWalletId,
+        'vehicle_number': t.vehicleNumber,
+        'raw_body': t.rawBody,
+        'is_override': isOverride ? 1 : 0,
+        'spend_category': t.spendCategory?.name,
+      };
+
+  /// Always writes auto-parsed rows (is_override = 0) — callers with a
+  /// user-corrected transaction use [saveTransaction] instead. Safe against
+  /// clobbering an existing override for the same reason as
+  /// [saveCategoriesBulk]: SmsProvider.refresh only calls this for ids that
+  /// weren't already cached.
   Future<void> saveTransactionsBulk(List<Transaction> transactions) async {
     final db = await database;
     final batch = db.batch();
     for (final t in transactions) {
       batch.insert(
         'transactions',
-        {
-          'sms_id': t.smsId,
-          'date': t.date.millisecondsSinceEpoch,
-          'amount': t.amount,
-          'direction': t.direction.name,
-          'instrument': t.instrument.name,
-          'instrument_ref': t.instrumentRef,
-          'issuer': t.issuer,
-          'merchant': t.merchant,
-          'balance_after': t.balanceAfter,
-          'entity_type': t.entityType.name,
-          'wallet_type': t.walletType,
-          'bill_due_date': t.billDueDate?.millisecondsSinceEpoch,
-          'fastag_wallet_id': t.fastagWalletId,
-          'vehicle_number': t.vehicleNumber,
-          'raw_body': t.rawBody,
-        },
+        _transactionColumns(t, isOverride: false),
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     }
     await batch.commit(noResult: true);
+  }
+
+  /// [isOverride] marks a transaction the user corrected explicitly (via the
+  /// "Edit transaction" action), as opposed to one TransactionParserService
+  /// produced — see [clearAll], which preserves these rows.
+  Future<void> saveTransaction(Transaction t, {bool isOverride = false}) async {
+    final db = await database;
+    await db.insert(
+      'transactions',
+      _transactionColumns(t, isOverride: isOverride),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<List<Transaction>> loadTransactions() async {
@@ -201,34 +273,56 @@ class DatabaseService {
               fastagWalletId: row['fastag_wallet_id'] as String?,
               vehicleNumber: row['vehicle_number'] as String?,
               rawBody: row['raw_body'] as String? ?? '',
+              isOverridden: (row['is_override'] as int? ?? 0) == 1,
+              spendCategory: parseSpendCategory(row['spend_category'] as String?),
             ))
         .toList();
   }
 
   // ---- Investments ----
 
+  Map<String, dynamic> _investmentColumns(InvestmentEvent e, {required bool isOverride}) => {
+        'sms_id': e.smsId,
+        'date': e.date.millisecondsSinceEpoch,
+        'amount': e.amount,
+        'kind': e.kind.name,
+        'fund_or_scheme': e.fundOrScheme,
+        'folio_or_account': e.folioOrAccount,
+        'units': e.units,
+        'nav': e.nav,
+        'amc': e.amc,
+        'raw_body': e.rawBody,
+        'is_override': isOverride ? 1 : 0,
+      };
+
+  /// Always writes auto-parsed rows (is_override = 0) — callers with a
+  /// user-corrected investment use [saveInvestment] instead. Safe against
+  /// clobbering an existing override for the same reason as
+  /// [saveCategoriesBulk]: SmsProvider.refresh only calls this for ids that
+  /// weren't already cached.
   Future<void> saveInvestmentsBulk(List<InvestmentEvent> events) async {
     final db = await database;
     final batch = db.batch();
     for (final e in events) {
       batch.insert(
         'investments',
-        {
-          'sms_id': e.smsId,
-          'date': e.date.millisecondsSinceEpoch,
-          'amount': e.amount,
-          'kind': e.kind.name,
-          'fund_or_scheme': e.fundOrScheme,
-          'folio_or_account': e.folioOrAccount,
-          'units': e.units,
-          'nav': e.nav,
-          'amc': e.amc,
-          'raw_body': e.rawBody,
-        },
+        _investmentColumns(e, isOverride: false),
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     }
     await batch.commit(noResult: true);
+  }
+
+  /// [isOverride] marks an investment the user corrected explicitly (via the
+  /// "Edit investment" action), as opposed to one TransactionParserService
+  /// produced — see [clearAll], which preserves these rows.
+  Future<void> saveInvestment(InvestmentEvent e, {bool isOverride = false}) async {
+    final db = await database;
+    await db.insert(
+      'investments',
+      _investmentColumns(e, isOverride: isOverride),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<List<InvestmentEvent>> loadInvestments() async {
@@ -249,6 +343,7 @@ class DatabaseService {
               nav: row['nav'] as double?,
               amc: row['amc'] as String?,
               rawBody: row['raw_body'] as String? ?? '',
+              isOverridden: (row['is_override'] as int? ?? 0) == 1,
             ))
         .toList();
   }
@@ -290,10 +385,28 @@ class DatabaseService {
     await batch.commit(noResult: true);
   }
 
+  /// Drops any cached transaction/investment parsed for [smsId], without
+  /// touching its category row — used when a manual category override (see
+  /// [saveCategory]) moves a message out of the transactional category, so
+  /// stale spend/investment data doesn't linger in Insights.
+  Future<void> deleteTransactionAndInvestment(int smsId) async {
+    final db = await database;
+    final batch = db.batch();
+    batch.delete('transactions', where: 'sms_id = ?', whereArgs: [smsId]);
+    batch.delete('investments', where: 'sms_id = ?', whereArgs: [smsId]);
+    await batch.commit(noResult: true);
+  }
+
+  /// Wipes auto-classified categories and auto-parsed transactions/
+  /// investments, but keeps rows the user manually corrected (is_override =
+  /// 1) — used by both the classifier-version-bump reprocess and the manual
+  /// "Recalculate" button, neither of which should discard a correction the
+  /// user made. SmsProvider.refresh() re-parses transaction/investment data
+  /// for a preserved category that comes back without any (see there).
   Future<void> clearAll() async {
     final db = await database;
-    await db.delete('message_categories');
-    await db.delete('transactions');
-    await db.delete('investments');
+    await db.delete('message_categories', where: 'is_override = 0');
+    await db.delete('transactions', where: 'is_override = 0');
+    await db.delete('investments', where: 'is_override = 0');
   }
 }

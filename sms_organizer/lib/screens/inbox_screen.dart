@@ -6,6 +6,7 @@ import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
 import '../utils/search_snippet.dart';
 import '../widgets/category_badge.dart';
+import '../widgets/category_picker_sheet.dart';
 import '../widgets/conversation_tile.dart';
 import '../widgets/direction_badge.dart';
 import '../widgets/multi_select_bar.dart';
@@ -70,6 +71,16 @@ class _InboxScreenState extends State<InboxScreen> {
       builder: (context, provider, _) {
         final view = provider.inboxView;
 
+        // Whatever's actually on screen right now for the active view —
+        // already narrowed by the active category tab, search query, and
+        // unread-only toggle the same way the list itself is (see
+        // messagesForCategory/conversationsForCategory) — so "select all"
+        // only ever grabs what's visible, never the whole inbox behind it.
+        final visibleIds = view == InboxView.messages
+            ? provider.messagesForCategory(provider.activeCategoryFilter).map((m) => m.id).toList()
+            : provider.conversationsForCategory(provider.activeCategoryFilter).map((c) => c.latest.id).toList();
+        final allSelected = visibleIds.isNotEmpty && visibleIds.every(provider.selectedIds.contains);
+
         return Scaffold(
           appBar: provider.isSelecting
               ? MultiSelectAppBar(
@@ -78,6 +89,16 @@ class _InboxScreenState extends State<InboxScreen> {
                   onMarkRead: () => provider.markSelectedRead(true),
                   onMarkUnread: () => provider.markSelectedRead(false),
                   onDelete: provider.deleteSelected,
+                  allSelected: allSelected,
+                  onToggleSelectAll: () =>
+                      allSelected ? provider.clearSelection() : provider.selectIds(visibleIds),
+                  // Chats-view selection ids are conversation stand-ins
+                  // (see ConversationTile's onTap) — bulk-recategorising
+                  // just each conversation's latest message would be
+                  // misleading, so this action only appears in Messages.
+                  onSetCategory: view == InboxView.messages
+                      ? () => showBulkCategoryPickerSheet(context, provider, provider.selectedIds.length)
+                      : null,
                 )
               : AppBar(
                   title: _isSearching
@@ -244,13 +265,32 @@ class _ChatsBodyState extends State<_ChatsBody> with SingleTickerProviderStateMi
   }
 }
 
-class _ConversationListView extends StatelessWidget {
+class _ConversationListView extends StatefulWidget {
   final SmsProvider provider;
   final SmsCategory? category;
   const _ConversationListView({required this.provider, required this.category});
 
   @override
+  State<_ConversationListView> createState() => _ConversationListViewState();
+}
+
+class _ConversationListViewState extends State<_ConversationListView> {
+  // Which conversations currently have their avatar-tap quick-preview panel
+  // open — keyed by threadId. Local/ephemeral by design, same reasoning as
+  // the All Messages list's collapsed-date-headers state: a glance aid for
+  // this visit, not a preference worth persisting.
+  final Set<int> _expandedThreadIds = {};
+
+  void _toggleExpanded(int threadId) {
+    setState(() {
+      if (!_expandedThreadIds.remove(threadId)) _expandedThreadIds.add(threadId);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final provider = widget.provider;
+    final category = widget.category;
     final conversations = provider.conversationsForCategory(category);
     final searching = provider.chatSearchQuery.trim().isNotEmpty;
 
@@ -287,6 +327,8 @@ class _ConversationListView extends StatelessWidget {
               selectionMode: provider.isSelecting,
               pinned: pinned,
               searchQuery: provider.chatSearchQuery,
+              expanded: _expandedThreadIds.contains(conversation.threadId),
+              onAvatarTap: () => _toggleExpanded(conversation.threadId),
               onTap: () {
                 if (provider.isSelecting) {
                   provider.toggleSelected(conversation.latest.id);
@@ -410,33 +452,68 @@ class _MessagesListView extends StatelessWidget {
 /// The flat "all messages" list, grouped by calendar day with a pinned
 /// header per group — like the thread view's date separators, but sticky:
 /// the header for whichever day is on screen stays put instead of
-/// scrolling away with its messages.
-class _StickyMessageList extends StatelessWidget {
+/// scrolling away with its messages. Each header is also tappable to
+/// collapse/expand that day — with months of history this is a lot faster
+/// than scrolling past every message just to get from one date to another.
+class _StickyMessageList extends StatefulWidget {
   final SmsProvider provider;
   final List<SmsMessage> messages;
   const _StickyMessageList({required this.provider, required this.messages});
 
   @override
+  State<_StickyMessageList> createState() => _StickyMessageListState();
+}
+
+class _StickyMessageListState extends State<_StickyMessageList> {
+  // Keyed by the header's own display label ("Today", "12 Aug 2025", ...) —
+  // unique per date group in this list, and simpler than carrying a second
+  // DateTime-vs-String identity around just for this. Deliberately
+  // ephemeral (not persisted, not lifted above this widget): a scroll aid
+  // for the current visit to the list, not a preference worth remembering.
+  final Set<String> _collapsedLabels = {};
+
+  void _toggleCollapsed(String label) {
+    setState(() {
+      if (!_collapsedLabels.remove(label)) _collapsedLabels.add(label);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final groups = _groupMessagesByDate(messages);
+    final groups = _groupMessagesByDate(widget.messages);
+
+    final slivers = <Widget>[];
+    for (final group in groups) {
+      final label = Formatters.dateLabel(group.date);
+      final collapsed = _collapsedLabels.contains(label);
+      slivers.add(
+        SliverPersistentHeader(
+          pinned: true,
+          delegate: _DateHeaderDelegate(
+            label: label,
+            count: group.items.length,
+            collapsed: collapsed,
+            onTap: () => _toggleCollapsed(label),
+          ),
+        ),
+      );
+      if (!collapsed) {
+        slivers.add(
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) => _MessageRow(provider: widget.provider, message: group.items[index]),
+              childCount: group.items.length,
+            ),
+          ),
+        );
+      }
+    }
+
     return RefreshIndicator(
-      onRefresh: provider.refresh,
+      onRefresh: widget.provider.refresh,
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          for (final group in groups) ...[
-            SliverPersistentHeader(
-              pinned: true,
-              delegate: _DateHeaderDelegate(Formatters.dateLabel(group.date)),
-            ),
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) => _MessageRow(provider: provider, message: group.items[index]),
-                childCount: group.items.length,
-              ),
-            ),
-          ],
-        ],
+        slivers: slivers,
       ),
     );
   }
@@ -462,33 +539,61 @@ List<_DateGroup> _groupMessagesByDate(List<SmsMessage> messages) {
 
 class _DateHeaderDelegate extends SliverPersistentHeaderDelegate {
   final String label;
-  const _DateHeaderDelegate(this.label);
+  final int count;
+  final bool collapsed;
+  final VoidCallback onTap;
+
+  const _DateHeaderDelegate({
+    required this.label,
+    required this.count,
+    required this.collapsed,
+    required this.onTap,
+  });
 
   @override
-  double get minExtent => 32;
+  double get minExtent => 40;
   @override
-  double get maxExtent => 32;
+  double get maxExtent => 40;
 
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Container(
-      height: 32,
-      alignment: Alignment.centerLeft,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
       color: Theme.of(context).scaffoldBackgroundColor,
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              Icon(
+                collapsed ? Icons.chevron_right : Icons.expand_more,
+                size: 20,
+                color: scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant),
+              ),
+              if (collapsed) ...[
+                const SizedBox(width: 8),
+                Text(
+                  '$count message${count == 1 ? '' : 's'}',
+                  style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant.withOpacity(0.7)),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );
   }
 
   @override
-  bool shouldRebuild(covariant _DateHeaderDelegate oldDelegate) => oldDelegate.label != label;
+  bool shouldRebuild(covariant _DateHeaderDelegate oldDelegate) =>
+      oldDelegate.label != label || oldDelegate.count != count || oldDelegate.collapsed != collapsed;
 }
 
 class _MessageRow extends StatelessWidget {
@@ -590,7 +695,19 @@ class _MessageRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          CategoryBadge(category: m.category, compact: true, showLabel: false),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (m.isCategoryOverridden) ...[
+                Tooltip(
+                  message: 'Manually set',
+                  child: Icon(Icons.edit, size: 10, color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(width: 3),
+              ],
+              CategoryBadge(category: m.category, compact: true, showLabel: false),
+            ],
+          ),
         ],
       ),
       onTap: () {
@@ -711,6 +828,17 @@ void _showMessageRowActions(BuildContext context, SmsProvider provider, SmsMessa
               onTap: () {
                 Navigator.pop(sheetContext);
                 provider.setMessageRead(message.id, unread);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.label_outline),
+              title: const Text('Change category'),
+              subtitle: Text(
+                message.isCategoryOverridden ? '${message.category.label} · manually set' : message.category.label,
+              ),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                showCategoryPickerSheet(context, provider, message);
               },
             ),
             ListTile(

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/transaction.dart';
+import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
+import '../widgets/search_toggle_mixin.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/sparkline.dart';
 import 'transaction_list_screen.dart';
@@ -10,64 +13,92 @@ import 'transaction_list_screen.dart';
 /// flat list of every merchant with a detected name, sorted by total
 /// activity (unlike [InstrumentListScreen], merchants aren't bucketed into
 /// typed sections; there's no equivalent grouping to make there).
-class MerchantListScreen extends StatelessWidget {
-  final List<MerchantSummary> merchants;
+class MerchantListScreen extends StatefulWidget {
   final List<Transaction> transactions;
   final String? subtitle;
 
   const MerchantListScreen({
     super.key,
-    required this.merchants,
     required this.transactions,
     this.subtitle,
   });
 
   @override
+  State<MerchantListScreen> createState() => _MerchantListScreenState();
+}
+
+class _MerchantListScreenState extends State<MerchantListScreen>
+    with SearchToggleMixin<MerchantListScreen> {
+  @override
+  void dispose() {
+    disposeSearch();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final sorted = [...merchants]
-      ..sort((a, b) => (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit));
+    // [transactions] is a one-off snapshot from whichever Insights screen
+    // pushed this route. Re-deriving a live copy from SmsProvider (matched
+    // by id) and re-grouping it into merchant summaries means a correction
+    // made to a transaction deeper in a drilldown (see TransactionTile's
+    // "Edit transaction"/"Not a transaction?" actions) is reflected here
+    // too, instead of this screen staying stale until it's popped and
+    // re-opened.
+    final ids = widget.transactions.map((t) => t.smsId).toSet();
+    final liveTransactions =
+        context.watch<SmsProvider>().transactions.where((t) => ids.contains(t.smsId)).toList();
+    final grouped = groupByMerchant(liveTransactions);
+
+    final trimmedQuery = query.trim().toLowerCase();
+    final sorted = trimmedQuery.isEmpty
+        ? grouped
+        : grouped.where((s) => s.displayName.toLowerCase().contains(trimmedQuery)).toList();
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Merchants'),
-        bottom: subtitle == null
+        title: searchAppBarTitle('Merchants', hintText: 'Search merchants'),
+        actions: searchAppBarActions(),
+        bottom: isSearching || widget.subtitle == null
             ? null
             : PreferredSize(
                 preferredSize: const Size.fromHeight(28),
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
-                    subtitle!,
+                    widget.subtitle!,
                     style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ),
               ),
       ),
       body: sorted.isEmpty
-          ? const EmptyState(
-              icon: Icons.storefront_outlined,
-              title: 'No merchants detected in this range',
+          ? EmptyState(
+              icon: trimmedQuery.isEmpty ? Icons.storefront_outlined : Icons.search_off_outlined,
+              title: trimmedQuery.isEmpty
+                  ? 'No merchants detected in this range'
+                  : 'No matches for "$trimmedQuery"',
             )
           : ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: sorted.length,
               itemBuilder: (context, index) => _MerchantTile(
                 summary: sorted[index],
-                transactions: transactions,
-                onTap: () => _openDrilldown(context, sorted[index]),
+                transactions: liveTransactions,
+                onTap: () => _openDrilldown(context, sorted[index], liveTransactions),
               ),
             ),
     );
   }
 
-  void _openDrilldown(BuildContext context, MerchantSummary s) {
+  void _openDrilldown(BuildContext context, MerchantSummary s, List<Transaction> liveTransactions) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => TransactionListScreen(
           title: s.displayName,
-          subtitle: subtitle,
-          transactions: transactions.where((t) => t.merchantGroupKey == s.key).toList(),
+          subtitle: widget.subtitle,
+          transactions: liveTransactions.where((t) => t.merchantGroupKey == s.key).toList(),
+          matches: (t) => t.merchantGroupKey == s.key,
         ),
       ),
     );

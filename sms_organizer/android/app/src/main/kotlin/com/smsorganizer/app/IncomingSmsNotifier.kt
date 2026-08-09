@@ -5,8 +5,15 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Build
 import android.provider.Telephony
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.text.style.StyleSpan
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -16,6 +23,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import java.text.NumberFormat
+import java.util.Locale
 
 /**
  * Shared entry point called by both SmsDeliverReceiver (app is default) and
@@ -42,6 +51,16 @@ object IncomingSmsNotifier {
 
     private const val GROUP_KEY = "com.smsorganizer.app.INCOMING_SMS_GROUP"
     private const val SUMMARY_NOTIFICATION_ID = 0
+
+    // Same brand tokens as lib/theme/app_colors.dart's AppColors.lightPrimary
+    // (the app's one terracotta accent) and the credit/debit colors
+    // TransactionTile uses everywhere in-app — kept in sync manually, same
+    // caveat as OtpExtractor/Categorizer/TransactionExtractor.
+    private val ACCENT_COLOR = Color.parseColor("#C96442")
+    private val CREDIT_COLOR = Color.parseColor("#10B981")
+    private val DEBIT_COLOR = Color.parseColor("#EF4444")
+
+    private val indianAmountFormat: NumberFormat = NumberFormat.getIntegerInstance(Locale("en", "IN"))
 
     fun notify(context: Context, address: String?, body: String?) {
         if (address.isNullOrEmpty() || body.isNullOrEmpty()) return
@@ -128,7 +147,15 @@ object IncomingSmsNotifier {
 
         val style = NotificationCompat.MessagingStyle(me).setConversationTitle(displayName)
         for (entry in history) {
-            style.addMessage(entry.text, entry.timestamp, if (entry.fromMe) null else sender)
+            // Only ever applied to incoming text — an outgoing "You" reply is
+            // never an OTP or a bank alert. Tried regardless of this
+            // notification's own [category]: a thread can carry more than
+            // one category over time (a bank sender mixing promo and
+            // transactional SMS), and each extractor already returns the
+            // plain text unchanged when it finds nothing to highlight, so
+            // there's no need to track a per-message category to gate this.
+            val text = if (entry.fromMe) entry.text else formatIncomingMessage(entry.text)
+            style.addMessage(text, entry.timestamp, if (entry.fromMe) null else sender)
         }
 
         val shortcutId = "conv_$threadId"
@@ -245,6 +272,79 @@ object IncomingSmsNotifier {
             Log.e("IncomingSmsNotif", "Fallback notification also failed", e)
         }
     }
+
+    /**
+     * Best-effort highlighting for one incoming message's notification text
+     * — bigger/bolder OTP codes, or a compact colored amount + payee/account
+     * summary for transactional SMS (see the Truecaller-style reference this
+     * was modeled after, adapted to the app's own accent/credit/debit
+     * colors). Falls through to the plain [text] whenever neither extractor
+     * finds anything, or if formatting itself throws — this only ever
+     * decorates a notification, never blocks one.
+     */
+    private fun formatIncomingMessage(text: String): CharSequence {
+        return try {
+            formatOtpMessage(text) ?: formatTransactionMessage(text) ?: text
+        } catch (e: Exception) {
+            Log.w("IncomingSmsNotif", "Message formatting failed (non-fatal)", e)
+            text
+        }
+    }
+
+    /** Enlarges, bolds, and accent-colors the OTP code within [body], if any. */
+    private fun formatOtpMessage(body: String): CharSequence? {
+        val code = OtpExtractor.extract(body) ?: return null
+        val index = body.indexOf(code)
+        if (index < 0) return null
+        val spannable = SpannableString(body)
+        val end = index + code.length
+        spannable.setSpan(RelativeSizeSpan(1.5f), index, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        spannable.setSpan(StyleSpan(Typeface.BOLD), index, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        spannable.setSpan(ForegroundColorSpan(ACCENT_COLOR), index, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        return spannable
+    }
+
+    /**
+     * Prepends a Truecaller-style "+/-₹amount" line (credit-green or
+     * debit-red, bold and enlarged) followed by a plain "Paid to X from
+     * Account YYYY" / "Received from X into Account YYYY" summary, built
+     * from whatever [TransactionExtractor] managed to find. Returns null —
+     * leaving the original SMS text untouched — whenever there's no amount,
+     * or the direction is ambiguous/a reversal, since a wrong "+"/"-" would
+     * be actively misleading.
+     */
+    private fun formatTransactionMessage(body: String): CharSequence? {
+        val details = TransactionExtractor.extract(body)
+        val amount = details.amount ?: return null
+        if (details.direction == TransactionExtractor.Direction.UNKNOWN ||
+            details.direction == TransactionExtractor.Direction.REVERSAL
+        ) {
+            return null
+        }
+        val isCredit = details.direction == TransactionExtractor.Direction.CREDIT
+        val sign = if (isCredit) "+" else "-"
+        val color = if (isCredit) CREDIT_COLOR else DEBIT_COLOR
+        val amountText = "$sign₹${formatAmount(amount)}"
+
+        val descriptionParts = mutableListOf<String>()
+        details.merchant?.let { descriptionParts.add(if (isCredit) "from $it" else "to $it") }
+        details.account?.let {
+            val preposition = if (isCredit) "into" else "from"
+            descriptionParts.add("$preposition Account ${it.removePrefix("XX")}")
+        }
+        val verb = if (isCredit) "Received" else "Paid"
+        val description = if (descriptionParts.isEmpty()) "" else "$verb ${descriptionParts.joinToString(" ")}"
+
+        val full = if (description.isEmpty()) amountText else "$amountText\n$description"
+        val spannable = SpannableString(full)
+        spannable.setSpan(RelativeSizeSpan(1.25f), 0, amountText.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        spannable.setSpan(StyleSpan(Typeface.BOLD), 0, amountText.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        spannable.setSpan(ForegroundColorSpan(color), 0, amountText.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        return spannable
+    }
+
+    /** Indian-locale (lakh/crore) digit grouping, matching Formatters.currency() in Dart. */
+    private fun formatAmount(amount: Double): String = indianAmountFormat.format(Math.round(amount))
 
     private fun buildReplyAction(context: Context, threadId: Long, address: String): NotificationCompat.Action {
         val remoteInput = RemoteInput.Builder(NotificationActionReceiver.KEY_REPLY_TEXT)

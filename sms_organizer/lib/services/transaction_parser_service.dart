@@ -1,6 +1,7 @@
 import '../models/sms_message.dart';
 import '../models/transaction.dart';
 import '../utils/sms_extractors.dart' as extractors;
+import 'spend_category_detector.dart';
 
 class TransactionParserService {
   /// Only call this on messages already tagged [SmsCategory.transactional].
@@ -11,7 +12,7 @@ class TransactionParserService {
     final amount = extractors.extractAmount(body);
     if (amount == null) return null;
 
-    return Transaction(
+    final parsed = Transaction(
       smsId: message.id,
       date: message.date,
       amount: amount,
@@ -28,6 +29,11 @@ class TransactionParserService {
       vehicleNumber: extractors.extractVehicleNumber(body),
       rawBody: body,
     );
+    // Best-effort starting point only — see SpendCategoryDetector for why
+    // this never sets isOverridden, so it's freely correctable and never
+    // shadows a value the user actually chose.
+    final detected = SpendCategoryDetector.detect(parsed);
+    return detected == null ? parsed : parsed.copyWith(spendCategory: detected);
   }
 
   /// Only call this on messages already tagged [SmsCategory.transactional]

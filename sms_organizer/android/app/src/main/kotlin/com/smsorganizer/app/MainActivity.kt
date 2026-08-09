@@ -51,6 +51,10 @@ class MainActivity : FlutterActivity() {
                 }
                 "getAllMessages" -> result.success(SmsRepository.getAllMessages(this))
                 "getContacts" -> result.success(ContactsRepository.getAllContacts(this))
+                "openContact" -> {
+                    val number = call.argument<String>("number") ?: ""
+                    result.success(openContact(number))
+                }
                 "getActiveSims" -> result.success(SimRepository.getActiveSims(this))
                 "getMutedCategories" ->
                     result.success(NotificationPrefsRepository.getMuted(this).toList())
@@ -178,6 +182,24 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             // No Settings app able to resolve this intent — nothing
             // sensible to do beyond not crashing.
+        }
+    }
+
+    /**
+     * Opens the system Contacts app's detail page for whichever saved
+     * contact [number] matches — ThreadScreen's tap-to-open-contact action
+     * on the phone number line under the conversation title. Returns false
+     * (rather than throwing) for "no match"/"no Contacts app to handle it"
+     * alike, since Dart only needs to know whether to show a fallback
+     * message, not why it failed.
+     */
+    private fun openContact(number: String): Boolean {
+        val uri = ContactsRepository.getLookupUri(this, number) ?: return false
+        return try {
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 

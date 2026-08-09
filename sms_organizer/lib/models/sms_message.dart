@@ -38,6 +38,11 @@ class SmsMessage {
   /// Populated by CategorizationService after load; not from the OS provider.
   SmsCategory category;
 
+  /// True once the user has manually corrected [category] via
+  /// SmsProvider.setMessageCategory — see that method for why the automatic
+  /// classifier never re-evaluates or overwrites it after that.
+  bool isCategoryOverridden;
+
   SmsMessage({
     required this.id,
     required this.threadId,
@@ -48,6 +53,7 @@ class SmsMessage {
     required this.read,
     this.simSlot,
     this.category = SmsCategory.personal,
+    this.isCategoryOverridden = false,
   });
 
   factory SmsMessage.fromPlatformMap(Map<dynamic, dynamic> map) {
@@ -73,6 +79,7 @@ class SmsMessage {
         'box': box.name,
         'read': read,
         'category': category.name,
+        'categoryOverridden': isCategoryOverridden,
         'simSlot': simSlot,
       };
 
@@ -94,6 +101,7 @@ class SmsMessage {
       (e) => e.name == json['category'],
       orElse: () => SmsCategory.personal,
     );
+    msg.isCategoryOverridden = json['categoryOverridden'] as bool? ?? false;
     return msg;
   }
 

@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import '../models/category.dart';
 import '../models/sms_message.dart';
 import '../utils/formatters.dart';
+import '../utils/message_highlighter.dart';
 import '../utils/sms_extractors.dart';
+import 'sim_picker.dart' show simColor;
 import 'ui/linkified_text.dart';
 
 class MessageBubble extends StatelessWidget {
@@ -46,6 +48,13 @@ class MessageBubble extends StatelessWidget {
     // Computed on demand rather than cached on the model — only otp-tagged
     // messages need it, and it's a single cheap regex pass per render.
     final otpCode = message.category == SmsCategory.otp ? extractOtp(message.body) : null;
+
+    // Same on-demand reasoning — a couple of cheap regex passes per render,
+    // and only for otp/transactional messages at all (see
+    // findMessageHighlights). Bolds/colours the OTP code or the amount/
+    // account reference in place within the bubble text, rather than
+    // requiring a tap into the message details to spot them.
+    final highlights = findMessageHighlights(message.body, message.category);
 
     return GestureDetector(
       onTap: onTap,
@@ -105,6 +114,9 @@ class MessageBubble extends StatelessWidget {
                             // primary link colour would vanish against it —
                             // underline is the only differentiator there instead.
                             linkColor: isOutgoing ? textColor : scheme.primary,
+                            highlights: highlights,
+                            highlightStyle: (kind) =>
+                                _highlightStyle(kind, isOutgoing: isOutgoing, textColor: textColor, scheme: scheme),
                           ),
                           if (otpCode != null) ...[
                             const SizedBox(height: 8),
@@ -125,6 +137,19 @@ class MessageBubble extends StatelessWidget {
                                   style: TextStyle(color: textColor.withOpacity(0.5), fontSize: 10),
                                 ),
                                 const SizedBox(width: 6),
+                                // Same per-slot colour as SimPicker, so which
+                                // line a message went out/came in on reads
+                                // consistently between the picker and the
+                                // thread itself.
+                                Container(
+                                  width: 6,
+                                  height: 6,
+                                  decoration: BoxDecoration(
+                                    color: simColor(message.simSlot!),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
                                 Text(
                                   'SIM ${message.simSlot! + 1}',
                                   style: TextStyle(
@@ -151,6 +176,45 @@ class MessageBubble extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Style for one highlighted run — bold throughout, plus a size bump for
+  /// the OTP code and (incoming bubbles only) a credit/debit-tinted colour
+  /// for the amount. Outgoing bubbles already sit on a primary-coloured
+  /// background, so colouring text green/red there would clash the same
+  /// way a coloured link would — bold-only carries the emphasis instead,
+  /// same reasoning LinkifiedText's own linkColor already applies.
+  TextStyle _highlightStyle(
+    HighlightKind kind, {
+    required bool isOutgoing,
+    required Color textColor,
+    required ColorScheme scheme,
+  }) {
+    switch (kind) {
+      case HighlightKind.otp:
+        return TextStyle(
+          fontWeight: FontWeight.w800,
+          fontSize: 19,
+          color: isOutgoing ? textColor : scheme.primary,
+        );
+      case HighlightKind.creditAmount:
+        return TextStyle(
+          fontWeight: FontWeight.w800,
+          color: isOutgoing ? textColor : const Color(0xFF10B981),
+        );
+      case HighlightKind.debitAmount:
+        return TextStyle(
+          fontWeight: FontWeight.w800,
+          color: isOutgoing ? textColor : const Color(0xFFEF4444),
+        );
+      case HighlightKind.amount:
+        return TextStyle(fontWeight: FontWeight.w800, color: textColor);
+      case HighlightKind.account:
+        return TextStyle(
+          fontWeight: FontWeight.w700,
+          color: isOutgoing ? textColor : scheme.primary,
+        );
+    }
   }
 }
 

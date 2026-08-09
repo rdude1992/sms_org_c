@@ -47,6 +47,22 @@ class _SparklinePainter extends CustomPainter {
 
     double yFor(double value) => size.height - ((value - minV) / range) * size.height;
 
+    // A series mixing credits and debits (signed values) gets rescaled to
+    // fill the box like any other series, which on its own gives no way to
+    // tell whether the line is tracing mostly-positive or mostly-negative
+    // values — draw a faint zero line first so a swing across it reads as
+    // what it is instead of just "the line went up" or "the line went down".
+    if (minV < 0 && maxV > 0) {
+      final zeroY = yFor(0);
+      canvas.drawLine(
+        Offset(0, zeroY),
+        Offset(size.width, zeroY),
+        Paint()
+          ..color = color.withOpacity(0.25)
+          ..strokeWidth = 1,
+      );
+    }
+
     final path = Path()..moveTo(0, yFor(values.first));
     for (var i = 1; i < values.length; i++) {
       path.lineTo(i * stepX, yFor(values[i]));
