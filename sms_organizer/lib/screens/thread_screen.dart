@@ -6,6 +6,7 @@ import '../models/sim_info.dart';
 import '../models/sms_message.dart';
 import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
+import '../widgets/category_picker_sheet.dart';
 import '../widgets/date_separator.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/multi_select_bar.dart';
@@ -346,6 +347,17 @@ void _showMessageActions(BuildContext context, SmsProvider provider, SmsMessage 
               onTap: () {
                 Navigator.pop(sheetContext);
                 provider.toggleStarred(message.id);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.label_outline),
+              title: const Text('Change category'),
+              subtitle: Text(
+                message.isCategoryOverridden ? '${message.category.label} · manually set' : message.category.label,
+              ),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                showCategoryPickerSheet(context, provider, message);
               },
             ),
             ListTile(

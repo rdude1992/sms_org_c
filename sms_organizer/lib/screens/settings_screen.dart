@@ -153,7 +153,8 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                 subtitle: const Text(
                   'Wipes the local cache and re-scans everything from scratch. '
                   'Categories are normally cached once and never re-checked — use '
-                  'this if something looks miscategorised.',
+                  'this if something looks miscategorised. Categories you\'ve '
+                  'manually changed are kept as-is.',
                 ),
                 onTap: () => _confirmRecalculate(context),
               ),

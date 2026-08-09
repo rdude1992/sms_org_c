@@ -365,8 +365,11 @@ class SmsProvider extends ChangeNotifier {
       // maps (i.e. arrived since the last sync) get run through the
       // classifier/parser below.
       final cachedCategories = await _db.loadCategories();
+      final overriddenIds = await _db.loadOverriddenCategoryIds();
       final cachedTransactions = await _db.loadTransactions();
       final cachedInvestments = await _db.loadInvestments();
+      final cachedTxnIds = cachedTransactions.map((t) => t.smsId).toSet();
+      final cachedInvIds = cachedInvestments.map((i) => i.smsId).toSet();
 
       final newCategories = <int, SmsCategory>{};
       final newTransactions = <Transaction>[];
@@ -376,6 +379,24 @@ class SmsProvider extends ChangeNotifier {
         final cached = cachedCategories[m.id];
         if (cached != null) {
           m.category = cached;
+          m.isCategoryOverridden = overriddenIds.contains(m.id);
+          // A cached transactional category can end up without any parsed
+          // transaction/investment row — e.g. a manual override just made it
+          // transactional (see setMessageCategory), or it survived a
+          // classifier-version-bump wipe that cleared parsed data but kept
+          // overridden categories (see DatabaseService.clearAll). Parse it
+          // now rather than leaving it silently missing from Insights forever.
+          if (cached == SmsCategory.transactional &&
+              !cachedTxnIds.contains(m.id) &&
+              !cachedInvIds.contains(m.id)) {
+            final inv = _txnParser.parseInvestment(m);
+            if (inv != null) {
+              newInvestments.add(inv);
+            } else {
+              final txn = _txnParser.parseTransaction(m);
+              if (txn != null) newTransactions.add(txn);
+            }
+          }
           continue; // already processed in a previous sync
         }
 
@@ -553,6 +574,47 @@ class SmsProvider extends ChangeNotifier {
     await refresh();
   }
 
+  /// User-driven correction for when CategorizationService got a message's
+  /// category wrong. Persists immediately as an override (see
+  /// DatabaseService.saveCategory) so it's never silently re-classified or
+  /// discarded by a later cache wipe — unlike an auto-assigned category,
+  /// this one is treated as the source of truth going forward.
+  ///
+  /// Also keeps derived Insights data in sync with the correction: moving a
+  /// message out of Transactions drops its parsed transaction/investment,
+  /// and moving one in attempts to parse it fresh.
+  Future<void> setMessageCategory(SmsMessage message, SmsCategory category) async {
+    final previousCategory = message.category;
+    if (previousCategory == category && message.isCategoryOverridden) return;
+
+    message.category = category;
+    message.isCategoryOverridden = true;
+    notifyListeners();
+    await _db.saveCategory(message.id, category, isOverride: true);
+
+    final wasTransactional = previousCategory == SmsCategory.transactional;
+    final isTransactional = category == SmsCategory.transactional;
+    if (wasTransactional && !isTransactional) {
+      await _db.deleteTransactionAndInvestment(message.id);
+      _transactions.removeWhere((t) => t.smsId == message.id);
+      _investments.removeWhere((i) => i.smsId == message.id);
+      notifyListeners();
+    } else if (!wasTransactional && isTransactional) {
+      final inv = _txnParser.parseInvestment(message);
+      if (inv != null) {
+        await _db.saveInvestmentsBulk([inv]);
+        _investments.add(inv);
+      } else {
+        final txn = _txnParser.parseTransaction(message);
+        if (txn != null) {
+          await _db.saveTransactionsBulk([txn]);
+          _transactions.add(txn);
+        }
+      }
+      notifyListeners();
+    }
+  }
+
   void setCategoryFilter(SmsCategory? category) {
     activeCategoryFilter = category;
     notifyListeners();
@@ -577,7 +639,18 @@ class SmsProvider extends ChangeNotifier {
     _allMessages = bundle.messages;
     _transactions = bundle.transactions;
     _investments = bundle.investments;
-    await _db.saveCategoriesBulk({for (final m in bundle.messages) m.id: m.category});
+    // Manually-corrected categories are restored as overrides too, so a
+    // backup/restore round-trip doesn't quietly forget a correction the user
+    // made before exporting — see setMessageCategory.
+    final autoCategories = <int, SmsCategory>{};
+    for (final m in bundle.messages) {
+      if (m.isCategoryOverridden) {
+        await _db.saveCategory(m.id, m.category, isOverride: true);
+      } else {
+        autoCategories[m.id] = m.category;
+      }
+    }
+    if (autoCategories.isNotEmpty) await _db.saveCategoriesBulk(autoCategories);
     await _db.saveTransactionsBulk(bundle.transactions);
     await _db.saveInvestmentsBulk(bundle.investments);
     notifyListeners();

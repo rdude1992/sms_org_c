@@ -6,6 +6,7 @@ import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
 import '../utils/search_snippet.dart';
 import '../widgets/category_badge.dart';
+import '../widgets/category_picker_sheet.dart';
 import '../widgets/conversation_tile.dart';
 import '../widgets/direction_badge.dart';
 import '../widgets/multi_select_bar.dart';
@@ -590,7 +591,19 @@ class _MessageRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          CategoryBadge(category: m.category, compact: true, showLabel: false),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (m.isCategoryOverridden) ...[
+                Tooltip(
+                  message: 'Manually set',
+                  child: Icon(Icons.edit, size: 10, color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(width: 3),
+              ],
+              CategoryBadge(category: m.category, compact: true, showLabel: false),
+            ],
+          ),
         ],
       ),
       onTap: () {
@@ -711,6 +724,17 @@ void _showMessageRowActions(BuildContext context, SmsProvider provider, SmsMessa
               onTap: () {
                 Navigator.pop(sheetContext);
                 provider.setMessageRead(message.id, unread);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.label_outline),
+              title: const Text('Change category'),
+              subtitle: Text(
+                message.isCategoryOverridden ? '${message.category.label} · manually set' : message.category.label,
+              ),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                showCategoryPickerSheet(context, provider, message);
               },
             ),
             ListTile(

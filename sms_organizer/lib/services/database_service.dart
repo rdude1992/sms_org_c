@@ -28,12 +28,13 @@ class DatabaseService {
     final path = p.join(dbPath, 'sms_organizer.db');
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE message_categories (
             sms_id INTEGER PRIMARY KEY,
-            category TEXT NOT NULL
+            category TEXT NOT NULL,
+            is_override INTEGER NOT NULL DEFAULT 0
           )
         ''');
         await db.execute('''
@@ -98,28 +99,43 @@ class DatabaseService {
             )
           ''');
         }
+        if (oldVersion < 3) {
+          // Lets a manually-corrected category (see SmsProvider.setMessageCategory)
+          // be told apart from an auto-classified one, so cache wipes below can
+          // preserve corrections instead of discarding them.
+          await db.execute(
+            'ALTER TABLE message_categories ADD COLUMN is_override INTEGER NOT NULL DEFAULT 0',
+          );
+        }
       },
     );
   }
 
   // ---- Categories ----
 
-  Future<void> saveCategory(int smsId, SmsCategory category) async {
+  /// [isOverride] marks a category the user set explicitly (via the "Change
+  /// category" action), as opposed to one CategorizationService produced —
+  /// see [clearAll], which preserves these rows.
+  Future<void> saveCategory(int smsId, SmsCategory category, {bool isOverride = false}) async {
     final db = await database;
     await db.insert(
       'message_categories',
-      {'sms_id': smsId, 'category': category.name},
+      {'sms_id': smsId, 'category': category.name, 'is_override': isOverride ? 1 : 0},
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
+  /// Always writes auto-classified rows (is_override = 0) — callers with a
+  /// user-set category use [saveCategory] instead. Safe against clobbering
+  /// an existing override because SmsProvider.refresh only ever calls this
+  /// for ids that weren't already cached (override or not).
   Future<void> saveCategoriesBulk(Map<int, SmsCategory> categories) async {
     final db = await database;
     final batch = db.batch();
     categories.forEach((id, cat) {
       batch.insert(
         'message_categories',
-        {'sms_id': id, 'category': cat.name},
+        {'sms_id': id, 'category': cat.name, 'is_override': 0},
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     });
@@ -137,6 +153,14 @@ class DatabaseService {
       );
     }
     return map;
+  }
+
+  /// ids of messages whose category was set manually rather than by
+  /// CategorizationService — see [saveCategory].
+  Future<Set<int>> loadOverriddenCategoryIds() async {
+    final db = await database;
+    final rows = await db.query('message_categories', columns: ['sms_id'], where: 'is_override = 1');
+    return rows.map((row) => row['sms_id'] as int).toSet();
   }
 
   // ---- Transactions ----
@@ -290,9 +314,27 @@ class DatabaseService {
     await batch.commit(noResult: true);
   }
 
+  /// Drops any cached transaction/investment parsed for [smsId], without
+  /// touching its category row — used when a manual category override (see
+  /// [saveCategory]) moves a message out of the transactional category, so
+  /// stale spend/investment data doesn't linger in Insights.
+  Future<void> deleteTransactionAndInvestment(int smsId) async {
+    final db = await database;
+    final batch = db.batch();
+    batch.delete('transactions', where: 'sms_id = ?', whereArgs: [smsId]);
+    batch.delete('investments', where: 'sms_id = ?', whereArgs: [smsId]);
+    await batch.commit(noResult: true);
+  }
+
+  /// Wipes auto-classified categories and all parsed transactions/investments,
+  /// but keeps rows the user manually corrected (is_override = 1) — used by
+  /// both the classifier-version-bump reprocess and the manual "Recalculate"
+  /// button, neither of which should discard a correction the user made.
+  /// SmsProvider.refresh() re-parses transaction/investment data for a
+  /// preserved category if it comes back without any (see there).
   Future<void> clearAll() async {
     final db = await database;
-    await db.delete('message_categories');
+    await db.delete('message_categories', where: 'is_override = 0');
     await db.delete('transactions');
     await db.delete('investments');
   }
