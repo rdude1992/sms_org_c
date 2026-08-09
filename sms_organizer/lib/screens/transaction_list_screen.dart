@@ -54,6 +54,15 @@ class _TransactionListScreenState extends State<TransactionListScreen>
   final Set<int> _selectedIds = {};
   bool get _selecting => _selectedIds.isNotEmpty;
 
+  /// "Expand all" — shows every tile's inline SMS-body/quick-action panel
+  /// at once (see TransactionTile.expanded) instead of opening and closing
+  /// the detail sheet one row at a time to check what each transaction
+  /// actually says. Local, per-visit state like the Inbox's collapsible
+  /// date headers and avatar-preview toggles — not worth persisting as a
+  /// preference.
+  bool _allExpanded = false;
+  void _toggleAllExpanded() => setState(() => _allExpanded = !_allExpanded);
+
   void _toggleSelected(int smsId) {
     setState(() {
       if (!_selectedIds.remove(smsId)) _selectedIds.add(smsId);
@@ -158,7 +167,14 @@ class _TransactionListScreenState extends State<TransactionListScreen>
               ),
             ),
           ]
-        : searchAppBarActions();
+        : [
+            IconButton(
+              icon: Icon(_allExpanded ? Icons.unfold_less : Icons.unfold_more),
+              tooltip: _allExpanded ? 'Collapse all' : 'Expand all',
+              onPressed: _toggleAllExpanded,
+            ),
+            ...searchAppBarActions(),
+          ];
 
     final totalsHeader = Container(
       width: double.infinity,
@@ -208,6 +224,7 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                 selectedIds: _selectedIds,
                 selecting: _selecting,
                 onToggleSelected: _toggleSelected,
+                allExpanded: _allExpanded,
               ),
             ),
           ],
@@ -260,6 +277,7 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                           selectedIds: _selectedIds,
                           selecting: _selecting,
                           onToggleSelected: _toggleSelected,
+                          allExpanded: _allExpanded,
                         ),
                         _TransactionListView(
                           transactions: credited,
@@ -267,6 +285,7 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                           selectedIds: _selectedIds,
                           selecting: _selecting,
                           onToggleSelected: _toggleSelected,
+                          allExpanded: _allExpanded,
                         ),
                         _TransactionListView(
                           transactions: debited,
@@ -274,6 +293,7 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                           selectedIds: _selectedIds,
                           selecting: _selecting,
                           onToggleSelected: _toggleSelected,
+                          allExpanded: _allExpanded,
                         ),
                       ],
                     ),
@@ -291,6 +311,7 @@ class _TransactionListView extends StatelessWidget {
   final Set<int> selectedIds;
   final bool selecting;
   final ValueChanged<int> onToggleSelected;
+  final bool allExpanded;
 
   const _TransactionListView({
     required this.transactions,
@@ -298,6 +319,7 @@ class _TransactionListView extends StatelessWidget {
     required this.selectedIds,
     required this.selecting,
     required this.onToggleSelected,
+    required this.allExpanded,
   });
 
   @override
@@ -323,6 +345,7 @@ class _TransactionListView extends StatelessWidget {
             onTap: selecting ? () => onToggleSelected(t.smsId) : null,
             onLongPress: selecting ? () => onToggleSelected(t.smsId) : null,
             onSelectStart: () => onToggleSelected(t.smsId),
+            expanded: allExpanded,
           );
         },
       ),

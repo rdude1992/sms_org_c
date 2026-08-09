@@ -29,6 +29,14 @@ class TransactionTile extends StatelessWidget {
   /// selection mode entirely.
   final VoidCallback? onSelectStart;
 
+  /// Shows [_ExpandedTransactionPanel] inline below the row — the raw SMS
+  /// body plus one-tap category/edit shortcuts — without needing a tap to
+  /// open the detail sheet first. Driven by a list-level "expand all"
+  /// toggle (see TransactionListScreen) rather than per-tile state, so
+  /// scanning a whole drilldown for what each entry actually says doesn't
+  /// mean opening and closing the sheet one row at a time.
+  final bool expanded;
+
   const TransactionTile({
     super.key,
     required this.transaction,
@@ -37,6 +45,7 @@ class TransactionTile extends StatelessWidget {
     this.onTap,
     this.onLongPress,
     this.onSelectStart,
+    this.expanded = false,
   });
 
   @override
@@ -62,63 +71,76 @@ class TransactionTile extends StatelessWidget {
             : (isCredit ? Icons.arrow_downward : Icons.arrow_upward);
 
     final scheme = Theme.of(context).colorScheme;
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      minVerticalPadding: 10,
-      selected: selected,
-      selectedTileColor: scheme.primary.withOpacity(0.06),
-      onTap: onTap ?? () => _showDetails(context),
-      onLongPress: onLongPress ?? () => _showActions(context),
-      leading: selectionMode
-          ? Icon(
-              selected ? Icons.check_circle : Icons.radio_button_unchecked,
-              color: selected ? scheme.primary : scheme.outline,
-            )
-          : CircleAvatar(
-              radius: 20,
-              backgroundColor: color.withOpacity(0.12),
-              child: Icon(icon, color: color, size: 18),
+    return Column(
+      children: [
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          minVerticalPadding: 10,
+          selected: selected,
+          selectedTileColor: scheme.primary.withOpacity(0.06),
+          onTap: onTap ?? () => _showDetails(context),
+          onLongPress: onLongPress ?? () => _showActions(context),
+          leading: selectionMode
+              ? Icon(
+                  selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                  color: selected ? scheme.primary : scheme.outline,
+                )
+              : CircleAvatar(
+                  radius: 20,
+                  backgroundColor: color.withOpacity(0.12),
+                  child: Icon(icon, color: color, size: 18),
+                ),
+          title: Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    transaction.merchant ??
+                        transaction.walletType ??
+                        transaction.issuer ??
+                        _instrumentLabel(transaction.instrument),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                if (transaction.isOverridden) ...[
+                  const SizedBox(width: 4),
+                  Tooltip(
+                    message: 'Manually edited',
+                    child:
+                        Icon(Icons.edit, size: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ],
             ),
-      title: Padding(
-        padding: const EdgeInsets.only(bottom: 2),
-        child: Row(
-          children: [
-            Flexible(
-              child: Text(
-                transaction.merchant ??
-                    transaction.walletType ??
-                    transaction.issuer ??
-                    _instrumentLabel(transaction.instrument),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-            if (transaction.isOverridden) ...[
-              const SizedBox(width: 4),
-              Tooltip(
-                message: 'Manually edited',
-                child: Icon(Icons.edit, size: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              ),
-            ],
-          ],
+          ),
+          subtitle: Text(
+            [
+              if (isReversal) 'Reversed' else _instrumentLabel(transaction.instrument),
+              if (transaction.instrumentRef != null) _formatRef(transaction.instrumentRef!),
+              Formatters.relativeOrTime(transaction.date),
+              if (transaction.spendCategory != null) transaction.spendCategory!.label,
+            ].join('  ·  '),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12),
+          ),
+          trailing: Text(
+            '$sign${Formatters.currency(transaction.amount)}',
+            style: TextStyle(color: color, fontWeight: FontWeight.bold),
+          ),
         ),
-      ),
-      subtitle: Text(
-        [
-          if (isReversal) 'Reversed' else _instrumentLabel(transaction.instrument),
-          if (transaction.instrumentRef != null) _formatRef(transaction.instrumentRef!),
-          Formatters.relativeOrTime(transaction.date),
-          if (transaction.spendCategory != null) transaction.spendCategory!.label,
-        ].join('  ·  '),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 12),
-      ),
-      trailing: Text(
-        '$sign${Formatters.currency(transaction.amount)}',
-        style: TextStyle(color: color, fontWeight: FontWeight.bold),
-      ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          alignment: Alignment.topCenter,
+          child: expanded
+              ? _ExpandedTransactionPanel(transaction: transaction)
+              : const SizedBox(width: double.infinity),
+        ),
+      ],
     );
   }
 
@@ -258,5 +280,72 @@ class TransactionTile extends StatelessWidget {
       case InstrumentType.unknown:
         return 'Other';
     }
+  }
+}
+
+/// Inline "peek at the SMS" panel a [TransactionTile] expands to show when
+/// its list's "expand all" toggle is on — the raw message body plus the two
+/// most common corrections (spend category, full edit) one tap away, so
+/// scanning a long drilldown for what actually happened doesn't mean
+/// opening the detail sheet, closing it, and moving to the next row.
+class _ExpandedTransactionPanel extends StatelessWidget {
+  final Transaction transaction;
+  const _ExpandedTransactionPanel({required this.transaction});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final t = transaction;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceVariant.withOpacity(0.4),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 120),
+            child: SingleChildScrollView(
+              child: Text(
+                t.rawBody.isEmpty ? '(no message text)' : t.rawBody,
+                style: TextStyle(fontSize: 13, height: 1.4, color: scheme.onSurface),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    alignment: Alignment.centerLeft,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  icon: const Icon(Icons.sell_outlined, size: 16),
+                  label: Text(
+                    t.spendCategory?.label ?? 'Set category',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onPressed: () =>
+                      showQuickSpendCategorySheet(context, context.read<SmsProvider>(), t),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                tooltip: 'Edit transaction',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => showTransactionEditSheet(context, context.read<SmsProvider>(), t),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
