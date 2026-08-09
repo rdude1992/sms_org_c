@@ -37,6 +37,13 @@ class InstrumentSummary {
   double totalDebit = 0;
   int count = 0;
 
+  /// Balance the most recent transaction (within the summarized range) that
+  /// actually mentioned one reported — null if none of them did. Tracked
+  /// alongside its date purely to know which transaction is "most recent"
+  /// as they're folded in; the date itself isn't shown anywhere.
+  double? lastBalance;
+  DateTime? _lastBalanceDate;
+
   InstrumentSummary({
     required this.key,
     this.entityType = EntityType.unknown,
@@ -44,6 +51,14 @@ class InstrumentSummary {
     this.issuer,
     this.walletType,
   });
+
+  void _considerBalance(double? balance, DateTime date) {
+    if (balance == null) return;
+    if (_lastBalanceDate == null || date.isAfter(_lastBalanceDate!)) {
+      lastBalance = balance;
+      _lastBalanceDate = date;
+    }
+  }
 
   /// The single instrument type driving this group, or the first one seen
   /// if it's a merged debit-card+bank-account group — used wherever a
@@ -183,6 +198,7 @@ class InsightsService {
         summary.totalDebit += t.amount;
       }
       summary.count += 1;
+      summary._considerBalance(t.balanceAfter, t.date);
 
       final merchantKey = t.merchantGroupKey;
       if (merchantKey != null) {

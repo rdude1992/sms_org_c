@@ -654,9 +654,11 @@ class _InstrumentRow extends StatelessWidget {
       leading: Icon(_icon),
       title: Text(summary.displayName),
       subtitle: Text(
-        summary.isLinkedAccount
-            ? '${summary.typeLabel} · ${summary.count} transactions'
-            : '${summary.count} transactions',
+        [
+          if (summary.isLinkedAccount) summary.typeLabel,
+          '${summary.count} transactions',
+          if (summary.lastBalance != null) 'Bal ${Formatters.currency(summary.lastBalance!)}',
+        ].join(' · '),
       ),
       trailing: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
