@@ -229,11 +229,9 @@ List<_ProviderSummary> _groupByProvider(List<InvestmentEvent> investments) {
 }
 
 /// The "By AMC" tab: a self-contained analytics header — its own time
-/// range filter driving a by-provider donut and an invested/redeemed
-/// trend chart — above the always-full list of provider rows. The row
-/// list itself isn't affected by the analytics range filter, so switching
-/// ranges to look at a trend never makes a provider you're looking for
-/// disappear from the list below.
+/// range filter driving a by-provider donut, an invested/redeemed trend
+/// chart, and the provider rows below — so picking e.g. "This month" shows
+/// only that month's events, counts and totals throughout the whole tab.
 class _AmcListView extends StatefulWidget {
   final List<_ProviderSummary> providers;
   final List<InvestmentEvent> investments;
@@ -253,6 +251,15 @@ class _AmcListViewState extends State<_AmcListView> {
       return const EmptyState(icon: Icons.trending_up, title: 'No investment activity.');
     }
 
+    final now = DateTime.now();
+    final (from, to) = _range.boundsFrom(now);
+    final filteredInvestments = widget.investments.where((i) {
+      if (from != null && i.date.isBefore(from)) return false;
+      if (to != null && i.date.isAfter(to)) return false;
+      return true;
+    }).toList();
+    final filteredProviders = _groupByProvider(filteredInvestments);
+
     return ListView(
       children: [
         _AmcAnalytics(
@@ -260,7 +267,7 @@ class _AmcListViewState extends State<_AmcListView> {
           onRangeSelected: (r) => setState(() => _range = r),
           investments: widget.investments,
         ),
-        for (final p in widget.providers) _ProviderRow(provider: p),
+        for (final p in filteredProviders) _ProviderRow(provider: p),
       ],
     );
   }
