@@ -29,6 +29,7 @@ enum SpendCategory {
   transport,
   shopping,
   billsUtilities,
+  creditCardPayment,
   entertainment,
   health,
   travel,
@@ -53,6 +54,8 @@ extension SpendCategoryX on SpendCategory {
         return 'Shopping';
       case SpendCategory.billsUtilities:
         return 'Bills & Utilities';
+      case SpendCategory.creditCardPayment:
+        return 'Credit Card Payment';
       case SpendCategory.entertainment:
         return 'Entertainment';
       case SpendCategory.health:
@@ -86,6 +89,8 @@ extension SpendCategoryX on SpendCategory {
         return Icons.shopping_bag_outlined;
       case SpendCategory.billsUtilities:
         return Icons.receipt_long_outlined;
+      case SpendCategory.creditCardPayment:
+        return Icons.credit_card;
       case SpendCategory.entertainment:
         return Icons.movie_outlined;
       case SpendCategory.health:
@@ -119,6 +124,8 @@ extension SpendCategoryX on SpendCategory {
         return const Color(0xFFEC4899);
       case SpendCategory.billsUtilities:
         return const Color(0xFFEF4444);
+      case SpendCategory.creditCardPayment:
+        return const Color(0xFF0F766E);
       case SpendCategory.entertainment:
         return const Color(0xFF8B5CF6);
       case SpendCategory.health:

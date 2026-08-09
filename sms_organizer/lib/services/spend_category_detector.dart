@@ -18,11 +18,27 @@ class SpendCategoryDetector {
   /// backfill (see _backfillSpendCategories) re-runs over every
   /// still-uncategorised, non-overridden transaction rather than only ever
   /// applying to transactions parsed after the change.
-  static const int version = 2;
+  static const int version = 3;
 
   static SpendCategory? detect(Transaction t) {
     final haystack = [t.merchant, t.walletType, t.rawBody].whereType<String>().join(' ').toLowerCase();
     if (haystack.trim().isEmpty) return null;
+
+    // Paying off your own credit card's bill is real money leaving your
+    // account, not an uncategorisable transfer — tag it under its own
+    // category rather than leaving it Uncategorised (or, worse, letting it
+    // fall through to whatever merchant keyword happens to appear in a
+    // co-branded card's product name, e.g. "...your Amazon Pay ICICI
+    // Credit Card bill..." matching the Shopping rule below). Checked
+    // ahead of the merchant rules for exactly that reason, and scoped to
+    // debit only: the mirror "payment received towards your card" SMS on
+    // the card side is a credit, which groupBySpendCategory already
+    // excludes from every spend total, so tagging it here would only be
+    // cosmetic — not worth loosening the match and risking a false
+    // positive on an unrelated credit.
+    if (t.direction == TxnDirection.debit && _creditCardPaymentKeywords.any(haystack.contains)) {
+      return SpendCategory.creditCardPayment;
+    }
 
     for (final rule in _rules) {
       if (rule.keywords.any(haystack.contains)) return rule.category;
@@ -54,6 +70,20 @@ class _Rule {
   final SpendCategory category;
   const _Rule(this.keywords, this.category);
 }
+
+const _creditCardPaymentKeywords = <String>[
+  'credit card bill',
+  'card bill payment',
+  'towards your credit card',
+  'towards credit card',
+  'credit card payment of',
+  'credit card outstanding',
+  'card outstanding amount',
+  'cc bill payment',
+  'credit card dues',
+  'payment towards your card',
+  'towards your card bill',
+];
 
 const _rules = <_Rule>[
   _Rule([
