@@ -106,6 +106,7 @@ class _InstrumentListScreenState extends State<InstrumentListScreen>
           title: s.displayName,
           subtitle: widget.subtitle,
           transactions: liveTransactions.where((t) => t.instrumentGroupKey == s.key).toList(),
+          matches: (t) => t.instrumentGroupKey == s.key,
         ),
       ),
     );

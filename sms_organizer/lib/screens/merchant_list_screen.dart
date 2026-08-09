@@ -98,6 +98,7 @@ class _MerchantListScreenState extends State<MerchantListScreen>
           title: s.displayName,
           subtitle: widget.subtitle,
           transactions: liveTransactions.where((t) => t.merchantGroupKey == s.key).toList(),
+          matches: (t) => t.merchantGroupKey == s.key,
         ),
       ),
     );

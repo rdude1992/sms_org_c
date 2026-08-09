@@ -400,6 +400,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                           transactions: filteredTransactions
                                               .where((t) => t.instrumentGroupKey == s.key)
                                               .toList(),
+                                          matches: (t) => t.instrumentGroupKey == s.key,
                                         ),
                                       ),
                                     ),
@@ -451,6 +452,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                           transactions: filteredTransactions
                                               .where((t) => t.merchantGroupKey == s.key)
                                               .toList(),
+                                          matches: (t) => t.merchantGroupKey == s.key,
                                         ),
                                       ),
                                     ),
@@ -488,6 +490,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                       transactions: filteredTransactions
                                           .where((t) => t.spendCategory == c.category)
                                           .toList(),
+                                      matches: (t) => t.spendCategory == c.category,
                                     ),
                                   ),
                                 ),
@@ -542,11 +545,17 @@ class _InsightsScreenState extends State<InsightsScreen> {
     required String title,
     required List<Transaction> transactions,
     String? subtitle,
+    bool Function(Transaction)? matches,
   }) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => TransactionListScreen(title: title, subtitle: subtitle, transactions: transactions),
+        builder: (_) => TransactionListScreen(
+          title: title,
+          subtitle: subtitle,
+          transactions: transactions,
+          matches: matches,
+        ),
       ),
     );
   }
@@ -874,6 +883,7 @@ class _InstrumentDonut extends StatelessWidget {
               title: match.displayName,
               subtitle: rangeLabel,
               transactions: filteredTransactions.where((t) => t.instrumentGroupKey == key).toList(),
+              matches: (t) => t.instrumentGroupKey == key,
             ),
           ),
         );
@@ -918,6 +928,7 @@ class _MerchantDonut extends StatelessWidget {
               title: match.displayName,
               subtitle: rangeLabel,
               transactions: filteredTransactions.where((t) => t.merchantGroupKey == key).toList(),
+              matches: (t) => t.merchantGroupKey == key,
             ),
           ),
         );
@@ -1043,6 +1054,7 @@ class _SpendCategoryDonut extends StatelessWidget {
               subtitle: rangeLabel,
               transactions:
                   filteredTransactions.where((t) => t.spendCategory == match.category).toList(),
+              matches: (t) => t.spendCategory == match.category,
             ),
           ),
         );

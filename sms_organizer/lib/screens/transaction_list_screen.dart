@@ -19,11 +19,25 @@ class TransactionListScreen extends StatefulWidget {
   final String? subtitle;
   final List<Transaction> transactions;
 
+  /// Re-applied to the live-refreshed transactions on every rebuild, on top
+  /// of the id-membership check below — lets a drilldown grouped by a
+  /// mutable field (spend category, instrument, merchant) drop a
+  /// transaction the moment it's edited away from the group this screen
+  /// represents, instead of it lingering here forever just because it was
+  /// part of the original snapshot. Left null for drilldowns whose
+  /// grouping can't change underneath them (a fixed date bucket) or where
+  /// staying put is the intended behaviour (the Credited/Debited total
+  /// cards — see the tabbed layout below, which already handles a
+  /// direction change by moving the row to the right tab rather than
+  /// dropping it).
+  final bool Function(Transaction)? matches;
+
   const TransactionListScreen({
     super.key,
     required this.title,
     required this.transactions,
     this.subtitle,
+    this.matches,
   });
 
   @override
@@ -76,15 +90,21 @@ class _TransactionListScreenState extends State<TransactionListScreen>
 
     // [transactions] is a one-off snapshot handed down by whichever Insights
     // screen pushed this route. Re-deriving the live copy from SmsProvider
-    // (matched by id, not by re-running the original filter — this screen
-    // was never given one) means a correction made via a tile's "Edit
-    // transaction"/"Not a transaction?" action (see TransactionTile) is
-    // reflected immediately: it moves to the right Credited/Debited tab, the
-    // header totals update, and a message reclassified out of Transactions
-    // entirely just drops out of the list — all without backing out and
-    // re-opening this drilldown.
+    // (matched by id, plus [widget.matches] when the caller supplied one)
+    // means a correction made via a tile's "Edit transaction"/"Not a
+    // transaction?" action (see TransactionTile) is reflected immediately:
+    // it moves to the right Credited/Debited tab, the header totals update,
+    // a message reclassified out of Transactions entirely just drops out of
+    // the list, and — for a category/instrument/merchant drilldown — one
+    // edited out of this particular group drops out too, all without
+    // backing out and re-opening this drilldown.
     final ids = widget.transactions.map((t) => t.smsId).toSet();
-    final live = context.watch<SmsProvider>().transactions.where((t) => ids.contains(t.smsId)).toList();
+    final matches = widget.matches;
+    final live = context
+        .watch<SmsProvider>()
+        .transactions
+        .where((t) => ids.contains(t.smsId) && (matches == null || matches(t)))
+        .toList();
 
     final trimmedQuery = query.trim().toLowerCase();
     final searched = trimmedQuery.isEmpty ? live : live.where((t) => _matches(t, trimmedQuery)).toList();
