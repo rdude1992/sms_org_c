@@ -8,12 +8,14 @@ import '../utils/formatters.dart';
 /// couldn't tie to a specific account (no last-4 in the SMS at all, e.g. an
 /// NEFT debit that only names the recipient: "... has been credited to SK
 /// on ...") — to one of their already-detected bank accounts/cards. After
-/// the pick, offers to apply the same assignment to other transactions that
-/// look like they're from the same real-world account (same SMS sender,
-/// still unassigned) — see SmsProvider.findSimilarUnassignedTransactions —
-/// but only after showing exactly what would change and getting an
-/// explicit Apply tap; nothing beyond [transaction] itself is ever touched
-/// silently.
+/// the pick, offers to apply the same assignment to other still-unassigned
+/// transactions that look like they're from the same real-world sender —
+/// matched by sender address, detected bank name, or (when neither SMS has
+/// one) a shared message template, since the same bank's alerts can arrive
+/// under several different DLT sender codes — see
+/// SmsProvider.findSimilarUnassignedTransactions — but only after showing
+/// exactly what would change and getting an explicit Apply tap; nothing
+/// beyond [transaction] itself is ever touched silently.
 Future<void> showAssignInstrumentSheet(
   BuildContext context,
   SmsProvider provider,
@@ -169,7 +171,8 @@ class _SimilarTransactionsSheetState extends State<_SimilarTransactionsSheet> {
                   const SizedBox(height: 4),
                   Text(
                     'Found ${widget.similar.length} more transaction${widget.similar.length == 1 ? '' : 's'} '
-                    'from the same sender with no account detected — assign these to '
+                    'that look like the same sender (by address, bank name, or message '
+                    'template) with no account detected — assign these to '
                     '${widget.target.displayName} too?',
                     style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
                   ),

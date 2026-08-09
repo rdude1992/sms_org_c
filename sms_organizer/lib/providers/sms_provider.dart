@@ -789,22 +789,60 @@ class SmsProvider extends ChangeNotifier {
   /// Other transactions likely from the same real-world account as
   /// [source] but which TransactionParserService couldn't pin down (e.g.
   /// an NEFT debit that only names the recipient, never the user's own
-  /// account) — same SMS sender address as [source], still no
-  /// instrumentRef of their own, and not already manually corrected. This
-  /// is the "and similar messages" candidate set offered after assigning
-  /// [source] to a detected account — see [assignInstrumentToTransactions]
-  /// and AssignInstrumentSheet, which is expected to get the user's
-  /// explicit acceptance before more than [source] itself is ever passed
-  /// there.
+  /// account) — still no instrumentRef of their own, and not already
+  /// manually corrected. This is the "and similar messages" candidate set
+  /// offered after assigning [source] to a detected account — see
+  /// [assignInstrumentToTransactions] and AssignInstrumentSheet, which is
+  /// expected to get the user's explicit acceptance before more than
+  /// [source] itself is ever passed there — that review step is what makes
+  /// it safe to cast a reasonably wide net here rather than requiring an
+  /// exact match.
+  ///
+  /// Three signals, checked in order of how much they're trusted:
+  /// 1. Same SMS sender address — the strongest signal, but banks route
+  ///    the same alerts through several different DLT sender codes (e.g.
+  ///    HDFC's own alerts can arrive as "VM-HDFCBK", "AD-HDFCBK-S", etc.
+  ///    depending on operator/circle), so this alone misses a lot.
+  /// 2. Same detected [Transaction.issuer] — the bank name
+  ///    TransactionParserService already normalised out of the sender/body,
+  ///    so it stays the same across those sender-code variants even when
+  ///    the raw address doesn't match.
+  /// 3. Only when *neither* transaction has a detected issuer: the same
+  ///    normalised body template (see [_normalizedSmsTemplate]) — banks'
+  ///    alert SMS are near-identical apart from the amount/date/reference,
+  ///    so two bodies that collapse to the same template are still decent
+  ///    evidence of a shared sender. Gated on both issuers being null so a
+  ///    generic "Rs # debited ... Avl Bal Rs #"-style template two
+  ///    *different* banks happen to share can't override a real,
+  ///    already-known issuer mismatch.
   List<Transaction> findSimilarUnassignedTransactions(Transaction source) {
-    final address = messageById(source.smsId)?.address;
-    if (address == null) return const [];
+    final sourceAddress = messageById(source.smsId)?.address;
+    final sourceIssuer = source.issuer;
+    final sourceTemplate = _normalizedSmsTemplate(source.rawBody);
+
     return _transactions.where((t) {
       if (t.smsId == source.smsId) return false;
       if (t.instrumentRef != null) return false;
       if (t.isOverridden) return false;
-      return messageById(t.smsId)?.address == address;
+
+      if (sourceAddress != null && messageById(t.smsId)?.address == sourceAddress) return true;
+      if (sourceIssuer != null && t.issuer == sourceIssuer) return true;
+      if (sourceIssuer == null && t.issuer == null) {
+        return sourceTemplate.isNotEmpty && _normalizedSmsTemplate(t.rawBody) == sourceTemplate;
+      }
+      return false;
     }).toList();
+  }
+
+  /// Collapses an SMS body to its underlying template for
+  /// [findSimilarUnassignedTransactions]'s text-similarity fallback —
+  /// strips every digit run (amounts, account/reference numbers, dates,
+  /// balances — everything that's actually supposed to differ
+  /// message-to-message) and normalises whitespace/case, so two alerts
+  /// generated from the same bank template collapse to an identical
+  /// string even though none of their numbers match.
+  static String _normalizedSmsTemplate(String body) {
+    return body.toLowerCase().replaceAll(RegExp(r'\d+'), '#').replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   /// Manually pins every transaction in [transactions] to one specific
