@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/category.dart';
 import '../models/sim_info.dart';
 import '../models/sms_message.dart';
@@ -229,6 +230,15 @@ class _ThreadScreenState extends State<ThreadScreen> {
                     },
                   ),
                   actions: [
+                    // Same repliability check as the reply bar below — a
+                    // shortcode/sender ID (e.g. "HDFCBK") isn't a number
+                    // the Phone app could dial in the first place.
+                    if (canReply)
+                      IconButton(
+                        icon: const Icon(Icons.call_outlined),
+                        tooltip: 'Call ${conversation.address}',
+                        onPressed: () => _callNumber(context, conversation.address),
+                      ),
                     IconButton(
                       icon: Icon(
                         provider.isPinned(conversation.threadId) ? Icons.push_pin : Icons.push_pin_outlined,
@@ -366,6 +376,28 @@ class _ThreadScreenState extends State<ThreadScreen> {
         );
       },
     );
+  }
+}
+
+/// Opens the Phone app's dialer pre-filled with [address] — a plain
+/// ACTION_VIEW tel: intent (what url_launcher sends), same as ACTION_DIAL:
+/// it stages the number for the user to actually place the call themselves,
+/// never dials on its own, so this needs no CALL_PHONE permission.
+Future<void> _callNumber(BuildContext context, String address) async {
+  final uri = Uri(scheme: 'tel', path: address);
+  try {
+    final launched = await launchUrl(uri);
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No dialer app found'), duration: Duration(seconds: 2)),
+      );
+    }
+  } catch (_) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No dialer app found'), duration: Duration(seconds: 2)),
+      );
+    }
   }
 }
 

@@ -147,5 +147,12 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="http"/>
         </intent>
+        <!-- Required by url_launcher on Android 11+ to resolve the Phone app
+             for ThreadScreen's call button (opens the dialer pre-filled,
+             same as ACTION_DIAL — never places the call itself). -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="tel"/>
+        </intent>
     </queries>
 </manifest>
