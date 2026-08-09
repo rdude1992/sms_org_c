@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import '../models/category.dart';
 import '../models/sim_info.dart';
 import '../models/sms_message.dart';
 import '../providers/sms_provider.dart';
