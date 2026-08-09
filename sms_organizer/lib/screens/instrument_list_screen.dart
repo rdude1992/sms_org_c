@@ -28,7 +28,7 @@ class InstrumentListScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sections = _bucket(instruments);
+    final sections = _bucket(context, instruments);
 
     return Scaffold(
       appBar: AppBar(
@@ -92,7 +92,7 @@ class InstrumentListScreen extends StatelessWidget {
   /// lands as [InstrumentType.upi] (a bare VPA mention with no account or
   /// card context at all) falls into Other rather than getting its own
   /// section for what should be a rare edge case.
-  List<_SectionData> _bucket(List<InstrumentSummary> items) {
+  List<_SectionData> _bucket(BuildContext context, List<InstrumentSummary> items) {
     final creditCards = <InstrumentSummary>[];
     final debitCards = <InstrumentSummary>[];
     final bankAccounts = <InstrumentSummary>[];
@@ -122,7 +122,7 @@ class InstrumentListScreen extends StatelessWidget {
     return [
       _SectionData('Credit Cards', Icons.credit_card, const Color(0xFF8B5CF6), creditCards),
       _SectionData(
-          'Debit Cards', Icons.credit_card_outlined, const Color(0xFF3B6DF5), debitCards),
+          'Debit Cards', Icons.credit_card_outlined, Theme.of(context).colorScheme.primary, debitCards),
       _SectionData('Bank Accounts', Icons.account_balance, const Color(0xFF10B981), bankAccounts),
       _SectionData(
           'Wallets', Icons.account_balance_wallet_outlined, const Color(0xFFF59E0B), wallets),
@@ -170,7 +170,7 @@ class _Section extends StatelessWidget {
         ...section.items.map(
           (s) => _InstrumentTile(summary: s, transactions: transactions, onTap: () => onTapItem(s)),
         ),
-        const Divider(height: 16),
+        const SizedBox(height: 16),
       ],
     );
   }

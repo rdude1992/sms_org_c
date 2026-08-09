@@ -117,6 +117,25 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                 ),
             ],
           ),
+          _SectionHeader('Message counts'),
+          GroupedCard(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.forum_outlined),
+                title: const Text('Total messages'),
+                trailing: Text(
+                  '${smsProvider.totalMessageCount}',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+              ),
+              for (final entry in smsProvider.categoryCounts.entries)
+                ListTile(
+                  leading: Icon(entry.key.icon, color: entry.key.color),
+                  title: Text(entry.key.label),
+                  trailing: Text('${entry.value}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                ),
+            ],
+          ),
           _SectionHeader('Data & sync'),
           GroupedCard(
             children: [

@@ -80,7 +80,6 @@ class TransactionListScreen extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const Divider(height: 1),
                   Expanded(
                     child: TabBarView(
                       children: [
@@ -110,9 +109,8 @@ class _TransactionListView extends StatelessWidget {
     if (transactions.isEmpty) {
       return EmptyState(icon: Icons.receipt_long_outlined, title: emptyText);
     }
-    return ListView.separated(
+    return ListView.builder(
       itemCount: transactions.length,
-      separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
       itemBuilder: (context, index) => TransactionTile(transaction: transactions[index]),
     );
   }

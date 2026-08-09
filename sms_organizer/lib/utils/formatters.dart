@@ -4,6 +4,7 @@ class Formatters {
   static final _currency = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
   static final _currencyPrecise =
       NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
+  static final _dayOnly = DateFormat('d');
   static final _dayMonth = DateFormat('d MMM');
   static final _dayMonthYear = DateFormat('d MMM yyyy');
   static final _timeOfDay = DateFormat('h:mm a');
@@ -13,6 +14,9 @@ class Formatters {
   static String currency(double value) => _currency.format(value);
   static String currencyPrecise(double value) => _currencyPrecise.format(value);
   static String monthYear(DateTime date) => _monthYear.format(date);
+  static String dayOnly(DateTime date) => _dayOnly.format(date);
+  static String dayMonth(DateTime date) => _dayMonth.format(date);
+  static String dayMonthYear(DateTime date) => _dayMonthYear.format(date);
   static String timeOfDay(DateTime date) => _timeOfDay.format(date);
 
   static String relativeOrTime(DateTime date) {

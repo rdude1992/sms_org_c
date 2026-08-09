@@ -1,10 +1,16 @@
 import '../models/transaction.dart';
 
-class MonthlyTotal {
-  final DateTime month; // normalised to the 1st of the month
+/// How finely [InsightsSummary.trend] buckets transactions — chosen by the
+/// caller to match how wide a date range it's summarizing (a single month
+/// reads best bucketed by day; a whole year needs to be by month, or
+/// there'd be hundreds of bars).
+enum TrendGranularity { day, week, month }
+
+class TrendPoint {
+  final DateTime date; // bucket start; meaning depends on the granularity used to build it
   final double credit;
   final double debit;
-  MonthlyTotal(this.month, this.credit, this.debit);
+  TrendPoint(this.date, this.credit, this.debit);
 }
 
 class InstrumentSummary {
@@ -31,6 +37,13 @@ class InstrumentSummary {
   double totalDebit = 0;
   int count = 0;
 
+  /// Balance the most recent transaction (within the summarized range) that
+  /// actually mentioned one reported — null if none of them did. Tracked
+  /// alongside its date purely to know which transaction is "most recent"
+  /// as they're folded in; the date itself isn't shown anywhere.
+  double? lastBalance;
+  DateTime? _lastBalanceDate;
+
   InstrumentSummary({
     required this.key,
     this.entityType = EntityType.unknown,
@@ -38,6 +51,14 @@ class InstrumentSummary {
     this.issuer,
     this.walletType,
   });
+
+  void _considerBalance(double? balance, DateTime date) {
+    if (balance == null) return;
+    if (_lastBalanceDate == null || date.isAfter(_lastBalanceDate!)) {
+      lastBalance = balance;
+      _lastBalanceDate = date;
+    }
+  }
 
   /// The single instrument type driving this group, or the first one seen
   /// if it's a merged debit-card+bank-account group — used wherever a
@@ -88,12 +109,31 @@ class InstrumentSummary {
   }
 }
 
+/// One row of [InsightsSummary.byMerchant] — see
+/// [Transaction.merchantGroupKey] for how transactions are grouped into
+/// these.
+class MerchantSummary {
+  final String key;
+
+  /// Original casing of the first transaction seen for this merchant —
+  /// [key] itself is lower-cased/normalised and not fit for display.
+  final String displayName;
+
+  double totalCredit = 0;
+  double totalDebit = 0;
+  int count = 0;
+
+  MerchantSummary({required this.key, required this.displayName});
+}
+
 class InsightsSummary {
   final double totalCredit;
   final double totalDebit;
   final int transactionCount;
   final List<InstrumentSummary> byInstrument;
-  final List<MonthlyTotal> monthly;
+  final List<MerchantSummary> byMerchant;
+  final List<TrendPoint> trend;
+  final TrendGranularity trendGranularity;
   final double totalInvested;
   final double totalRedeemed;
   final int investmentEventCount;
@@ -103,7 +143,9 @@ class InsightsSummary {
     required this.totalDebit,
     required this.transactionCount,
     required this.byInstrument,
-    required this.monthly,
+    required this.byMerchant,
+    required this.trend,
+    required this.trendGranularity,
     required this.totalInvested,
     required this.totalRedeemed,
     required this.investmentEventCount,
@@ -118,6 +160,7 @@ class InsightsService {
     required List<InvestmentEvent> investments,
     DateTime? from,
     DateTime? to,
+    TrendGranularity granularity = TrendGranularity.month,
   }) {
     final filtered = transactions.where((t) {
       if (from != null && t.date.isBefore(from)) return false;
@@ -128,7 +171,8 @@ class InsightsService {
     double totalCredit = 0;
     double totalDebit = 0;
     final Map<String, InstrumentSummary> instrumentMap = {};
-    final Map<String, MonthlyTotal> monthlyMap = {};
+    final Map<String, MerchantSummary> merchantMap = {};
+    final Map<String, TrendPoint> trendMap = {};
 
     for (final t in filtered) {
       if (t.direction == TxnDirection.credit) {
@@ -154,16 +198,33 @@ class InsightsService {
         summary.totalDebit += t.amount;
       }
       summary.count += 1;
+      summary._considerBalance(t.balanceAfter, t.date);
 
-      final monthKey = DateTime(t.date.year, t.date.month);
-      final existing = monthlyMap[monthKey.toIso8601String()];
+      final merchantKey = t.merchantGroupKey;
+      if (merchantKey != null) {
+        final merchant = merchantMap.putIfAbsent(
+          merchantKey,
+          () => MerchantSummary(key: merchantKey, displayName: t.merchant!.trim()),
+        );
+        if (t.direction == TxnDirection.credit) {
+          merchant.totalCredit += t.amount;
+        } else if (t.direction == TxnDirection.debit) {
+          merchant.totalDebit += t.amount;
+        }
+        merchant.count += 1;
+      }
+
+      final bucketStart = trendBucketStart(t.date, granularity);
+      final existing = trendMap[bucketStart.toIso8601String()];
       final newCredit = (existing?.credit ?? 0) + (t.direction == TxnDirection.credit ? t.amount : 0);
       final newDebit = (existing?.debit ?? 0) + (t.direction == TxnDirection.debit ? t.amount : 0);
-      monthlyMap[monthKey.toIso8601String()] = MonthlyTotal(monthKey, newCredit, newDebit);
+      trendMap[bucketStart.toIso8601String()] = TrendPoint(bucketStart, newCredit, newDebit);
     }
 
-    final monthlyList = monthlyMap.values.toList()..sort((a, b) => a.month.compareTo(b.month));
+    final trendList = trendMap.values.toList()..sort((a, b) => a.date.compareTo(b.date));
     final instrumentList = instrumentMap.values.toList()
+      ..sort((a, b) => (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit));
+    final merchantList = merchantMap.values.toList()
       ..sort((a, b) => (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit));
 
     double invested = 0;
@@ -185,10 +246,30 @@ class InsightsService {
       totalDebit: totalDebit,
       transactionCount: filtered.length,
       byInstrument: instrumentList,
-      monthly: monthlyList,
+      byMerchant: merchantList,
+      trend: trendList,
+      trendGranularity: granularity,
       totalInvested: invested,
       totalRedeemed: redeemed,
       investmentEventCount: investmentEvents,
     );
+  }
+
+}
+
+/// Truncates [date] to the start of its bucket for [granularity] — a
+/// calendar day, the Monday of its week, or the 1st of its month. Shared
+/// (not just used by [InsightsService.build]) so other screens that bucket
+/// their own data by the same granularity — e.g. the Investments "by AMC"
+/// trend chart — stay in lockstep with how Insights buckets transactions.
+DateTime trendBucketStart(DateTime date, TrendGranularity granularity) {
+  switch (granularity) {
+    case TrendGranularity.day:
+      return DateTime(date.year, date.month, date.day);
+    case TrendGranularity.week:
+      final dayOnly = DateTime(date.year, date.month, date.day);
+      return dayOnly.subtract(Duration(days: date.weekday - 1));
+    case TrendGranularity.month:
+      return DateTime(date.year, date.month);
   }
 }

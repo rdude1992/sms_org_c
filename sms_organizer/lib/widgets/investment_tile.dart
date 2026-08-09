@@ -11,7 +11,7 @@ class InvestmentTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isRedemption = investment.kind.isRedemption;
-    final color = isRedemption ? const Color(0xFFF59E0B) : const Color(0xFF3B6DF5);
+    final color = isRedemption ? const Color(0xFFF59E0B) : Theme.of(context).colorScheme.primary;
     final sign = isRedemption ? '+' : '-';
     final icon = isRedemption ? Icons.call_received : Icons.trending_up;
 
@@ -34,7 +34,13 @@ class InvestmentTile extends StatelessWidget {
         ),
       ),
       subtitle: Text(
-        [investment.kind.label, Formatters.relativeOrTime(investment.date)].join('  ·  '),
+        [
+          investment.kind.label,
+          Formatters.relativeOrTime(investment.date),
+          if (investment.folioOrAccount != null) 'Folio ${investment.folioOrAccount}',
+        ].join('  ·  '),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontSize: 12),
       ),
       trailing: Text(

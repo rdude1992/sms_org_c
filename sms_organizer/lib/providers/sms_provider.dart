@@ -105,6 +105,19 @@ class SmsProvider extends ChangeNotifier {
     return list;
   }
 
+  /// Per-category message counts across every sent/received SMS (drafts
+  /// excluded, same as [_sentOrReceived]) — used by the Settings screen's
+  /// message-count summary. Sum of the values equals [totalMessageCount].
+  Map<SmsCategory, int> get categoryCounts {
+    final counts = {for (final c in SmsCategory.values) c: 0};
+    for (final m in _sentOrReceived) {
+      counts[m.category] = counts[m.category]! + 1;
+    }
+    return counts;
+  }
+
+  int get totalMessageCount => _sentOrReceived.length;
+
   bool isPinned(int threadId) => pinnedThreadIds.contains(threadId);
   bool isStarred(int messageId) => starredMessageIds.contains(messageId);
   List<Transaction> get transactions => _transactions;
@@ -112,10 +125,13 @@ class SmsProvider extends ChangeNotifier {
   List<SimInfo> get activeSims => _activeSims;
   bool get hasMultipleSims => _activeSims.length > 1;
 
-  List<SmsMessage> get filteredMessages {
+  /// Filtered by [category] (unread-only and search query always apply) —
+  /// lets the Inbox build one independently-filtered list per swipeable
+  /// category tab rather than just a single currently-active one.
+  List<SmsMessage> messagesForCategory(SmsCategory? category) {
     Iterable<SmsMessage> msgs = _sentOrReceived;
-    if (activeCategoryFilter != null) {
-      msgs = msgs.where((m) => m.category == activeCategoryFilter);
+    if (category != null) {
+      msgs = msgs.where((m) => m.category == category);
     }
     if (showUnreadOnly) {
       msgs = msgs.where((m) => m.isIncoming && !m.read);
@@ -150,10 +166,11 @@ class SmsProvider extends ChangeNotifier {
     return result;
   }
 
-  List<SmsConversation> get filteredConversations {
+  /// Filtered by [category] — see [messagesForCategory].
+  List<SmsConversation> conversationsForCategory(SmsCategory? category) {
     Iterable<SmsConversation> convs = conversations;
-    if (activeCategoryFilter != null) {
-      convs = convs.where((c) => c.latest.category == activeCategoryFilter);
+    if (category != null) {
+      convs = convs.where((c) => c.latest.category == category);
     }
     if (showUnreadOnly) {
       convs = convs.where((c) => c.unreadCount > 0);
@@ -177,8 +194,18 @@ class SmsProvider extends ChangeNotifier {
   /// alive) when a notification was tapped. Subscribe once at startup.
   Stream<int> get onNotificationThreadTapped => _platform.onNotificationThreadTapped;
 
-  InsightsSummary insightsSummary({DateTime? from, DateTime? to}) {
-    return _insights.build(transactions: _transactions, investments: _investments, from: from, to: to);
+  InsightsSummary insightsSummary({
+    DateTime? from,
+    DateTime? to,
+    TrendGranularity granularity = TrendGranularity.month,
+  }) {
+    return _insights.build(
+      transactions: _transactions,
+      investments: _investments,
+      from: from,
+      to: to,
+      granularity: granularity,
+    );
   }
 
   Future<Map<String, String?>?> checkLaunchComposeExtras() => _platform.getLaunchComposeExtras();

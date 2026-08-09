@@ -1,4 +1,3 @@
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/transaction.dart';
@@ -6,10 +5,13 @@ import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/transaction_tile.dart';
+import '../widgets/ui/breakdown_donut.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/filter_chip_bar.dart';
+import '../widgets/ui/trend_bar_chart.dart';
 import 'instrument_list_screen.dart';
 import 'investment_list_screen.dart';
+import 'merchant_list_screen.dart';
 import 'transaction_list_screen.dart';
 
 enum InsightsRange { allTime, thisMonth, last3Months, thisYear }
@@ -42,6 +44,33 @@ extension on InsightsRange {
         return (DateTime(now.year, 1, 1), now);
     }
   }
+
+  /// How finely the trend chart should bucket this range — day-by-day for
+  /// a single month is readable, but the same granularity across a whole
+  /// year (or all time) would be hundreds of unreadable bars, so wider
+  /// ranges bucket coarser.
+  TrendGranularity get trendGranularity {
+    switch (this) {
+      case InsightsRange.thisMonth:
+        return TrendGranularity.day;
+      case InsightsRange.last3Months:
+        return TrendGranularity.week;
+      case InsightsRange.thisYear:
+      case InsightsRange.allTime:
+        return TrendGranularity.month;
+    }
+  }
+
+  String get trendTitle {
+    switch (trendGranularity) {
+      case TrendGranularity.day:
+        return 'Daily trend';
+      case TrendGranularity.week:
+        return 'Weekly trend';
+      case TrendGranularity.month:
+        return 'Monthly trend';
+    }
+  }
 }
 
 class InsightsScreen extends StatefulWidget {
@@ -60,7 +89,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
       builder: (context, provider, _) {
         final now = DateTime.now();
         final (from, to) = _range.boundsFrom(now);
-        final summary = provider.insightsSummary(from: from, to: to);
+        final summary =
+            provider.insightsSummary(from: from, to: to, granularity: _range.trendGranularity);
 
         // Previous period of equal length, for the trend deltas — undefined
         // (and hidden) for "All time" since there's no prior window to
@@ -87,6 +117,15 @@ class _InsightsScreenState extends State<InsightsScreen> {
         }).toList()
           ..sort((a, b) => b.date.compareTo(a.date));
 
+        // The true latest known balance per instrument, independent of
+        // whatever range is selected — an account's balance is a snapshot,
+        // not something that should disappear just because its most recent
+        // balance-bearing SMS fell outside the chosen window.
+        final lastBalanceByInstrument = <String, double>{
+          for (final s in provider.insightsSummary().byInstrument)
+            if (s.lastBalance != null) s.key: s.lastBalance!,
+        };
+
         return Scaffold(
           appBar: AppBar(title: const Text('Insights')),
           body: Column(
@@ -95,7 +134,6 @@ class _InsightsScreenState extends State<InsightsScreen> {
                 selected: _range,
                 onSelected: (r) => setState(() => _range = r),
               ),
-              const Divider(height: 1),
               Expanded(
                 child: provider.transactions.isEmpty
                     ? const EmptyState(
@@ -125,17 +163,15 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ),
                               ),
                               const SizedBox(height: 20),
-                              Text('Monthly trend', style: Theme.of(context).textTheme.titleMedium),
+                              Text(_range.trendTitle, style: Theme.of(context).textTheme.titleMedium),
                               const SizedBox(height: 12),
-                              _MonthlyChart(
+                              _TrendChart(
                                 summary: summary,
-                                onTapMonth: (month) => _openDrilldown(
+                                onTapBucket: (bucketStart) => _openTrendDrilldown(
                                   context,
-                                  title: Formatters.monthYear(month),
-                                  transactions: filteredTransactions
-                                      .where((t) =>
-                                          t.date.year == month.year && t.date.month == month.month)
-                                      .toList(),
+                                  granularity: summary.trendGranularity,
+                                  bucketStart: bucketStart,
+                                  transactions: filteredTransactions,
                                 ),
                               ),
                               const SizedBox(height: 24),
@@ -181,12 +217,65 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ...summary.byInstrument.take(6).map(
                                       (s) => _InstrumentRow(
                                         summary: s,
+                                        lastBalance: lastBalanceByInstrument[s.key],
                                         onTap: () => _openDrilldown(
                                           context,
                                           title: s.displayName,
                                           subtitle: _range.label,
                                           transactions: filteredTransactions
                                               .where((t) => t.instrumentGroupKey == s.key)
+                                              .toList(),
+                                        ),
+                                      ),
+                                    ),
+                              const SizedBox(height: 24),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('By merchant', style: Theme.of(context).textTheme.titleMedium),
+                                  if (summary.byMerchant.isNotEmpty)
+                                    TextButton(
+                                      onPressed: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => MerchantListScreen(
+                                            merchants: summary.byMerchant,
+                                            transactions: filteredTransactions,
+                                            subtitle: _range.label,
+                                          ),
+                                        ),
+                                      ),
+                                      child: const Text('See all'),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              if (summary.byMerchant.isNotEmpty) ...[
+                                _MerchantDonut(
+                                  merchants: summary.byMerchant,
+                                  filteredTransactions: filteredTransactions,
+                                  rangeLabel: _range.label,
+                                ),
+                                const SizedBox(height: 16),
+                              ],
+                              if (summary.byMerchant.isEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  child: Text(
+                                    'No merchants detected in this range.',
+                                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                  ),
+                                )
+                              else
+                                ...summary.byMerchant.take(6).map(
+                                      (s) => _MerchantRow(
+                                        summary: s,
+                                        onTap: () => _openDrilldown(
+                                          context,
+                                          title: s.displayName,
+                                          subtitle: _range.label,
+                                          transactions: filteredTransactions
+                                              .where((t) => t.merchantGroupKey == s.key)
                                               .toList(),
                                         ),
                                       ),
@@ -246,6 +335,41 @@ class _InsightsScreenState extends State<InsightsScreen> {
       MaterialPageRoute(
         builder: (_) => TransactionListScreen(title: title, subtitle: subtitle, transactions: transactions),
       ),
+    );
+  }
+
+  /// Same as [_openDrilldown], but for a tapped trend-chart bar — the
+  /// matching window and title both depend on [granularity], since
+  /// [bucketStart] means a different span (a day, a week, a month)
+  /// depending on it.
+  void _openTrendDrilldown(
+    BuildContext context, {
+    required TrendGranularity granularity,
+    required DateTime bucketStart,
+    required List<Transaction> transactions,
+  }) {
+    late final String title;
+    late final bool Function(Transaction) matchesBucket;
+    switch (granularity) {
+      case TrendGranularity.day:
+        title = Formatters.dayMonthYear(bucketStart);
+        matchesBucket = (t) => Formatters.isSameDay(t.date, bucketStart);
+        break;
+      case TrendGranularity.week:
+        final weekEnd = DateTime(bucketStart.year, bucketStart.month, bucketStart.day + 6, 23, 59, 59);
+        title = 'Week of ${Formatters.dayMonth(bucketStart)}';
+        matchesBucket = (t) => !t.date.isBefore(bucketStart) && !t.date.isAfter(weekEnd);
+        break;
+      case TrendGranularity.month:
+        title = Formatters.monthYear(bucketStart);
+        matchesBucket = (t) => t.date.year == bucketStart.year && t.date.month == bucketStart.month;
+        break;
+    }
+    _openDrilldown(
+      context,
+      title: title,
+      subtitle: _range.label,
+      transactions: transactions.where(matchesBucket).toList(),
     );
   }
 }
@@ -404,162 +528,39 @@ class _TrendBadge extends StatelessWidget {
   }
 }
 
-class _MonthlyChart extends StatelessWidget {
+/// Stacked bar chart of credit/debit per [InsightsSummary.trend] bucket —
+/// each bar's height is the bucket's total activity, split into a credit
+/// segment and a debit segment stacked on top of it. Bucketing (day / week
+/// / month) comes from [InsightsSummary.trendGranularity], set by the
+/// selected [InsightsRange] — one bar per day for "This month" instead of
+/// the single point a whole-range monthly bucket used to collapse into.
+class _TrendChart extends StatelessWidget {
   final InsightsSummary summary;
-  final ValueChanged<DateTime> onTapMonth;
-  const _MonthlyChart({required this.summary, required this.onTapMonth});
+  final ValueChanged<DateTime> onTapBucket;
+  const _TrendChart({required this.summary, required this.onTapBucket});
 
   static const _creditColor = Color(0xFF10B981);
   static const _debitColor = Color(0xFFEF4444);
 
   @override
   Widget build(BuildContext context) {
-    if (summary.monthly.isEmpty) {
-      return const SizedBox(height: 120, child: Center(child: Text('Not enough data yet.')));
-    }
-    final months = summary.monthly;
-    final scheme = Theme.of(context).colorScheme;
-    final maxVal = months
-        .map((m) => m.credit > m.debit ? m.credit : m.debit)
-        .fold<double>(0, (a, b) => a > b ? a : b);
-    final maxY = maxVal == 0 ? 1.0 : maxVal * 1.2;
-
-    // However many months are in range, only label a handful of them —
-    // cramming a "d MMM" string under every single point is what made the
-    // old chart unreadable once the range grew past a few months.
-    const maxLabels = 6;
-    final labelInterval = (months.length / maxLabels).ceil().clamp(1, months.length);
-
-    void handleTap(FlTouchEvent event, LineTouchResponse? response) {
-      if (event is! FlTapUpEvent) return;
-      final spots = response?.lineBarSpots;
-      if (spots == null || spots.isEmpty) return;
-      final idx = spots.first.x.toInt();
-      if (idx < 0 || idx >= months.length) return;
-      onTapMonth(months[idx].month);
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: const [
-            _LegendDot(color: _creditColor, label: 'Credited'),
-            SizedBox(width: 16),
-            _LegendDot(color: _debitColor, label: 'Debited'),
-          ],
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 200,
-          child: LineChart(
-            LineChartData(
-              minY: 0,
-              maxY: maxY,
-              minX: 0,
-              maxX: (months.length - 1).toDouble(),
-              lineTouchData: LineTouchData(
-                touchCallback: handleTap,
-                touchTooltipData: LineTouchTooltipData(
-                  getTooltipItems: (spots) => spots.map((s) {
-                    final idx = s.x.toInt();
-                    if (idx < 0 || idx >= months.length) return null;
-                    final isCredit = s.barIndex == 0;
-                    return LineTooltipItem(
-                      '${Formatters.monthYear(months[idx].month)}\n'
-                      '${Formatters.currency(s.y)}',
-                      TextStyle(
-                        color: isCredit ? _creditColor : _debitColor,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              lineBarsData: [
-                _line(months.map((m) => m.credit).toList(), _creditColor),
-                _line(months.map((m) => m.debit).toList(), _debitColor),
-              ],
-              titlesData: FlTitlesData(
-                leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                bottomTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    reservedSize: 28,
-                    interval: 1,
-                    getTitlesWidget: (value, meta) {
-                      final idx = value.toInt();
-                      if (idx < 0 || idx >= months.length) return const SizedBox.shrink();
-                      final isLast = idx == months.length - 1;
-                      if (idx % labelInterval != 0 && !isLast) return const SizedBox.shrink();
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Text(
-                          Formatters.monthYear(months[idx].month),
-                          style: const TextStyle(fontSize: 10),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-              gridData: FlGridData(
-                show: true,
-                drawVerticalLine: false,
-                horizontalInterval: maxY / 4,
-                getDrawingHorizontalLine: (_) =>
-                    FlLine(color: scheme.outlineVariant.withOpacity(0.4), strokeWidth: 1),
-              ),
-              borderData: FlBorderData(show: false),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  LineChartBarData _line(List<double> values, Color color) {
-    return LineChartBarData(
-      spots: [for (int i = 0; i < values.length; i++) FlSpot(i.toDouble(), values[i])],
-      isCurved: true,
-      curveSmoothness: 0.15,
-      color: color,
-      barWidth: 2.5,
-      dotData: FlDotData(show: values.length <= 12),
-      belowBarData: BarAreaData(show: true, color: color.withOpacity(0.08)),
+    return TrendBarChart(
+      dates: [for (final p in summary.trend) p.date],
+      primaryValues: [for (final p in summary.trend) p.credit],
+      secondaryValues: [for (final p in summary.trend) p.debit],
+      granularity: summary.trendGranularity,
+      primaryLabel: 'Credited',
+      secondaryLabel: 'Debited',
+      primaryColor: _creditColor,
+      secondaryColor: _debitColor,
+      onTapBucket: onTapBucket,
     );
   }
 }
 
-class _LegendDot extends StatelessWidget {
-  final Color color;
-  final String label;
-  const _LegendDot({required this.color, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-        ),
-      ],
-    );
-  }
-}
-
-/// Tappable donut breakdown of spend/activity by card or account — the top
-/// 6 instruments each get their own slice, with anything past that folded
-/// into a single "Other" slice so the chart doesn't fragment into slivers
-/// once someone has a dozen linked cards. Tapping a slice (or its legend
-/// row) opens the same drilldown as tapping the row in the list below.
+/// The top 6 instruments each get their own [BreakdownDonut] slice, with
+/// anything past that folded into a single "Other" slice so the chart
+/// doesn't fragment into slivers once someone has a dozen linked cards.
 class _InstrumentDonut extends StatelessWidget {
   final List<InstrumentSummary> instruments;
   final List<Transaction> filteredTransactions;
@@ -571,146 +572,77 @@ class _InstrumentDonut extends StatelessWidget {
     required this.rangeLabel,
   });
 
-  static const _palette = [
-    Color(0xFF3B6DF5),
-    Color(0xFF10B981),
-    Color(0xFFF59E0B),
-    Color(0xFF8B5CF6),
-    Color(0xFFEF4444),
-    Color(0xFF06B6D4),
-    Color(0xFFEC4899),
-    Color(0xFF64748B),
-  ];
-
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final top = instruments.take(6).toList();
     final otherTotal =
         instruments.skip(6).fold<double>(0, (a, s) => a + s.totalCredit + s.totalDebit);
 
-    final labels = [for (final s in top) s.displayName, if (otherTotal > 0) 'Other'];
-    final keys = [for (final s in top) s.key, if (otherTotal > 0) null];
-    final values = [
-      for (final s in top) s.totalCredit + s.totalDebit,
-      if (otherTotal > 0) otherTotal,
-    ];
-    final grandTotal = values.fold<double>(0, (a, v) => a + v);
-    if (grandTotal <= 0) return const SizedBox.shrink();
+    return BreakdownDonut(
+      labels: [for (final s in top) s.displayName, if (otherTotal > 0) 'Other'],
+      keys: [for (final s in top) s.key, if (otherTotal > 0) null],
+      values: [for (final s in top) s.totalCredit + s.totalDebit, if (otherTotal > 0) otherTotal],
+      onTapKey: (key) {
+        final match = instruments.firstWhere((s) => s.key == key);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TransactionListScreen(
+              title: match.displayName,
+              subtitle: rangeLabel,
+              transactions: filteredTransactions.where((t) => t.instrumentGroupKey == key).toList(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
 
-    void openFor(String? key) {
-      if (key == null) return;
-      final match = instruments.firstWhere((s) => s.key == key);
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => TransactionListScreen(
-            title: match.displayName,
-            subtitle: rangeLabel,
-            transactions: filteredTransactions.where((t) => t.instrumentGroupKey == key).toList(),
-          ),
-        ),
-      );
-    }
+/// Same idea as [_InstrumentDonut], grouped by [Transaction.merchantGroupKey]
+/// instead of by instrument.
+class _MerchantDonut extends StatelessWidget {
+  final List<MerchantSummary> merchants;
+  final List<Transaction> filteredTransactions;
+  final String rangeLabel;
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        SizedBox(
-          width: 132,
-          height: 132,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              PieChart(
-                PieChartData(
-                  sectionsSpace: 2,
-                  centerSpaceRadius: 42,
-                  pieTouchData: PieTouchData(
-                    touchCallback: (event, response) {
-                      if (event is! FlTapUpEvent) return;
-                      final index = response?.touchedSection?.touchedSectionIndex;
-                      if (index == null || index < 0 || index >= keys.length) return;
-                      openFor(keys[index]);
-                    },
-                  ),
-                  sections: [
-                    for (var i = 0; i < values.length; i++)
-                      PieChartSectionData(
-                        value: values[i],
-                        color: _palette[i % _palette.length],
-                        radius: 20,
-                        showTitle: false,
-                      ),
-                  ],
-                ),
-              ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    Formatters.currency(grandTotal),
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: scheme.onSurface),
-                  ),
-                  Text('total', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
-                ],
-              ),
-            ],
+  const _MerchantDonut({
+    required this.merchants,
+    required this.filteredTransactions,
+    required this.rangeLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final top = merchants.take(6).toList();
+    final otherTotal = merchants.skip(6).fold<double>(0, (a, s) => a + s.totalCredit + s.totalDebit);
+
+    return BreakdownDonut(
+      labels: [for (final s in top) s.displayName, if (otherTotal > 0) 'Other'],
+      keys: [for (final s in top) s.key, if (otherTotal > 0) null],
+      values: [for (final s in top) s.totalCredit + s.totalDebit, if (otherTotal > 0) otherTotal],
+      onTapKey: (key) {
+        final match = merchants.firstWhere((s) => s.key == key);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TransactionListScreen(
+              title: match.displayName,
+              subtitle: rangeLabel,
+              transactions: filteredTransactions.where((t) => t.merchantGroupKey == key).toList(),
+            ),
           ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var i = 0; i < labels.length; i++)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: InkWell(
-                    onTap: keys[i] == null ? null : () => openFor(keys[i]),
-                    borderRadius: BorderRadius.circular(6),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration:
-                              BoxDecoration(color: _palette[i % _palette.length], shape: BoxShape.circle),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            labels[i],
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 12.5, color: scheme.onSurface),
-                          ),
-                        ),
-                        Text(
-                          '${(values[i] / grandTotal * 100).toStringAsFixed(0)}%',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: scheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
+        );
+      },
     );
   }
 }
 
 class _InstrumentRow extends StatelessWidget {
   final InstrumentSummary summary;
+  final double? lastBalance;
   final VoidCallback onTap;
-  const _InstrumentRow({required this.summary, required this.onTap});
+  const _InstrumentRow({required this.summary, required this.lastBalance, required this.onTap});
 
   // UPI isn't its own instrument icon — it's a rail, and almost all UPI
   // activity now classifies as the bank account/card it actually moved
@@ -733,9 +665,11 @@ class _InstrumentRow extends StatelessWidget {
       leading: Icon(_icon),
       title: Text(summary.displayName),
       subtitle: Text(
-        summary.isLinkedAccount
-            ? '${summary.typeLabel} · ${summary.count} transactions'
-            : '${summary.count} transactions',
+        [
+          if (summary.isLinkedAccount) summary.typeLabel,
+          '${summary.count} transactions',
+          if (lastBalance != null) 'Bal ${Formatters.currency(lastBalance!)}',
+        ].join(' · '),
       ),
       trailing: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -745,6 +679,36 @@ class _InstrumentRow extends StatelessWidget {
               style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
           Text('-${Formatters.currency(summary.totalDebit)}',
               style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
+        ],
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
+class _MerchantRow extends StatelessWidget {
+  final MerchantSummary summary;
+  final VoidCallback onTap;
+  const _MerchantRow({required this.summary, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      minVerticalPadding: 10,
+      leading: const Icon(Icons.storefront_outlined),
+      title: Text(summary.displayName),
+      subtitle: Text('${summary.count} transactions'),
+      trailing: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (summary.totalCredit > 0)
+            Text('+${Formatters.currency(summary.totalCredit)}',
+                style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
+          if (summary.totalDebit > 0)
+            Text('-${Formatters.currency(summary.totalDebit)}',
+                style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
         ],
       ),
       onTap: onTap,
@@ -770,7 +734,7 @@ class _InvestmentCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.trending_up, color: Color(0xFF3B6DF5)),
+                  Icon(Icons.trending_up, color: Theme.of(context).colorScheme.primary),
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text('Investments', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -783,7 +747,8 @@ class _InvestmentCard extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: _miniStat(context, 'Invested', summary.totalInvested, const Color(0xFF3B6DF5)),
+                    child: _miniStat(
+                        context, 'Invested', summary.totalInvested, Theme.of(context).colorScheme.primary),
                   ),
                   Expanded(
                     child: _miniStat(context, 'Redeemed', summary.totalRedeemed, const Color(0xFFF59E0B)),

@@ -227,7 +227,6 @@ class _ComposeScreenState extends State<ComposeScreen> {
               ],
             ),
           ),
-          const Divider(height: 1),
           const Expanded(
             child: Center(
               child: Padding(

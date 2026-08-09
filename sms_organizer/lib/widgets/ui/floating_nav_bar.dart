@@ -8,10 +8,10 @@ class FloatingNavItem {
   const FloatingNavItem({required this.icon, required this.selectedIcon, required this.label});
 }
 
-/// A pill-shaped bottom nav that floats above the scaffold background with
-/// an inset margin and a soft shadow, instead of Material's default
-/// edge-to-edge [NavigationBar]. The selected item expands into a tinted
-/// pill with its label; unselected items stay icon-only.
+/// A flat, edge-to-edge bottom nav that stretches the full width of the
+/// screen with a hairline top border, instead of floating as an inset
+/// pill. The selected item still expands into a tinted rounded pill with
+/// its label; unselected items stay icon-only.
 class FloatingNavBar extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onSelected;
@@ -27,34 +27,27 @@ class FloatingNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return SafeArea(
-      minimum: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-      child: Container(
-        height: 62,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
-        decoration: BoxDecoration(
-          color: scheme.surface,
-          borderRadius: BorderRadius.circular(31),
-          border: Border.all(color: scheme.outlineVariant),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.10),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            for (var i = 0; i < items.length; i++)
-              Expanded(
-                child: _NavButton(
-                  item: items[i],
-                  selected: i == selectedIndex,
-                  onTap: () => onSelected(i),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        border: Border(top: BorderSide(color: scheme.outlineVariant)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 62,
+          child: Row(
+            children: [
+              for (var i = 0; i < items.length; i++)
+                Expanded(
+                  child: _NavButton(
+                    item: items[i],
+                    selected: i == selectedIndex,
+                    onTap: () => onSelected(i),
+                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -75,7 +68,6 @@ class _NavButton extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(24),
       child: Center(
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 220),

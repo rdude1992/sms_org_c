@@ -95,6 +95,20 @@ class Transaction {
     return '${instrument.name}|${issuer ?? ''}|${instrumentRef ?? ''}';
   }
 
+  /// Groups transactions by merchant/payee for Insights' "By merchant"
+  /// view — normalised (trimmed, whitespace-collapsed, lower-cased) so
+  /// trivial formatting differences between two SMS from the same merchant
+  /// (extra space, different casing) don't split them into separate
+  /// groups; [merchant] itself keeps its original casing for display. Null
+  /// when no merchant was detected — those transactions (salary credits,
+  /// self-transfers, ambiguous SMS formats) are excluded from merchant
+  /// grouping rather than lumped into a meaningless "Unknown" bucket.
+  String? get merchantGroupKey {
+    final trimmed = merchant?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return trimmed.replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+  }
+
   Map<String, dynamic> toJson() => {
         'smsId': smsId,
         'date': date.millisecondsSinceEpoch,
