@@ -74,7 +74,10 @@ class TransactionTile extends StatelessWidget {
           if (isReversal) 'Reversed' else _instrumentLabel(transaction.instrument),
           if (transaction.instrumentRef != null) _formatRef(transaction.instrumentRef!),
           Formatters.relativeOrTime(transaction.date),
+          if (transaction.spendCategory != null) transaction.spendCategory!.label,
         ].join('  ·  '),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontSize: 12),
       ),
       trailing: Text(
@@ -102,6 +105,7 @@ class TransactionTile extends StatelessWidget {
       if (t.issuer != null) MapEntry('Issuer', t.issuer!),
       if (t.merchant != null) MapEntry('Merchant', t.merchant!),
       if (t.walletType != null) MapEntry('Wallet', t.walletType!),
+      if (t.spendCategory != null) MapEntry('Spend category', t.spendCategory!.label),
       if (t.balanceAfter != null) MapEntry('Balance after', Formatters.currency(t.balanceAfter!)),
       if (t.billDueDate != null) MapEntry('Bill due', Formatters.full(t.billDueDate!)),
       if (t.vehicleNumber != null) MapEntry('Vehicle', t.vehicleNumber!),

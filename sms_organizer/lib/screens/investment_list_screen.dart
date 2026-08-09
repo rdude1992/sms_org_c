@@ -5,6 +5,7 @@ import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/investment_tile.dart';
+import '../widgets/search_toggle_mixin.dart';
 import '../widgets/ui/breakdown_donut.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/filter_chip_bar.dart';
@@ -74,7 +75,7 @@ extension on InvestmentRange {
 /// [InvestmentEvent.providerGroupKey]) and carries its own donut/trend
 /// analytics — leads since it's the most useful breakdown; the flat "All"
 /// list is closer to a raw data dump, so it's last.
-class InvestmentListScreen extends StatelessWidget {
+class InvestmentListScreen extends StatefulWidget {
   final String? subtitle;
   final List<InvestmentEvent> investments;
 
@@ -106,6 +107,24 @@ class InvestmentListScreen extends StatelessWidget {
   });
 
   @override
+  State<InvestmentListScreen> createState() => _InvestmentListScreenState();
+}
+
+class _InvestmentListScreenState extends State<InvestmentListScreen>
+    with SearchToggleMixin<InvestmentListScreen> {
+  @override
+  void dispose() {
+    disposeSearch();
+    super.dispose();
+  }
+
+  bool _matches(InvestmentEvent i, String q) {
+    return (i.fundOrScheme?.toLowerCase().contains(q) ?? false) ||
+        (i.amc?.toLowerCase().contains(q) ?? false) ||
+        (i.folioOrAccount?.toLowerCase().contains(q) ?? false);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
@@ -114,12 +133,23 @@ class InvestmentListScreen extends StatelessWidget {
     // (matched by id) means this screen keeps reflecting reality rather than
     // going stale the moment something changes elsewhere in the app.
     final providerInvestments = context.watch<SmsProvider>().investments;
-    final scopedIds = investments.map((i) => i.smsId).toSet();
-    final liveInvestments =
+    final scopedIds = widget.investments.map((i) => i.smsId).toSet();
+    final liveInvestmentsUnfiltered =
         providerInvestments.where((i) => scopedIds.contains(i.smsId)).toList();
-    final fullIds = (allInvestments ?? investments).map((i) => i.smsId).toSet();
-    final liveAllInvestments =
+    final fullIds = (widget.allInvestments ?? widget.investments).map((i) => i.smsId).toSet();
+    final liveAllInvestmentsUnfiltered =
         providerInvestments.where((i) => fullIds.contains(i.smsId)).toList();
+
+    // A search query narrows the whole screen's universe, including the "By
+    // AMC" tab's own range-filtered view — not just the flat 3 tabs — so
+    // every tab stays consistent with what's in the search box.
+    final trimmedQuery = query.trim().toLowerCase();
+    final liveInvestments = trimmedQuery.isEmpty
+        ? liveInvestmentsUnfiltered
+        : liveInvestmentsUnfiltered.where((i) => _matches(i, trimmedQuery)).toList();
+    final liveAllInvestments = trimmedQuery.isEmpty
+        ? liveAllInvestmentsUnfiltered
+        : liveAllInvestmentsUnfiltered.where((i) => _matches(i, trimmedQuery)).toList();
 
     final sorted = [...liveInvestments]..sort((a, b) => b.date.compareTo(a.date));
     final invested = sorted.where((i) => !i.kind.isRedemption).toList();
@@ -130,18 +160,20 @@ class InvestmentListScreen extends StatelessWidget {
 
     return DefaultTabController(
       length: 4,
-      initialIndex: initialTabIndex,
+      initialIndex: widget.initialTabIndex,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Investments'),
+          title: searchAppBarTitle('Investments', hintText: 'Search investments'),
+          actions: searchAppBarActions(),
           bottom: PreferredSize(
-            preferredSize: Size.fromHeight(subtitle == null ? 48 : 68),
+            preferredSize: Size.fromHeight(isSearching || widget.subtitle == null ? 48 : 68),
             child: Column(
               children: [
-                if (subtitle != null)
+                if (!isSearching && widget.subtitle != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(subtitle!, style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                    child: Text(widget.subtitle!,
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
                   ),
                 TabBar(
                   isScrollable: true,
@@ -158,7 +190,12 @@ class InvestmentListScreen extends StatelessWidget {
           ),
         ),
         body: sorted.isEmpty
-            ? const EmptyState(icon: Icons.trending_up, title: 'No investment activity in this range')
+            ? EmptyState(
+                icon: trimmedQuery.isEmpty ? Icons.trending_up : Icons.search_off_outlined,
+                title: trimmedQuery.isEmpty
+                    ? 'No investment activity in this range'
+                    : 'No matches for "$trimmedQuery"',
+              )
             : Column(
                 children: [
                   Container(

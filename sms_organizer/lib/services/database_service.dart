@@ -28,7 +28,7 @@ class DatabaseService {
     final path = p.join(dbPath, 'sms_organizer.db');
     return openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE message_categories (
@@ -54,7 +54,8 @@ class DatabaseService {
             fastag_wallet_id TEXT,
             vehicle_number TEXT,
             raw_body TEXT,
-            is_override INTEGER NOT NULL DEFAULT 0
+            is_override INTEGER NOT NULL DEFAULT 0,
+            spend_category TEXT
           )
         ''');
         await db.execute('''
@@ -125,6 +126,13 @@ class DatabaseService {
           await db.execute(
             'ALTER TABLE investments ADD COLUMN is_override INTEGER NOT NULL DEFAULT 0',
           );
+        }
+        if (oldVersion < 6) {
+          // Manually-assigned spend category (see SpendCategory) — always
+          // user-set, never auto-detected, so it doesn't need its own
+          // override flag: it rides along on the transaction row and
+          // persists via the same is_override mechanism already in place.
+          await db.execute('ALTER TABLE transactions ADD COLUMN spend_category TEXT');
         }
       },
     );
@@ -201,6 +209,7 @@ class DatabaseService {
         'vehicle_number': t.vehicleNumber,
         'raw_body': t.rawBody,
         'is_override': isOverride ? 1 : 0,
+        'spend_category': t.spendCategory?.name,
       };
 
   /// Always writes auto-parsed rows (is_override = 0) — callers with a
@@ -265,6 +274,7 @@ class DatabaseService {
               vehicleNumber: row['vehicle_number'] as String?,
               rawBody: row['raw_body'] as String? ?? '',
               isOverridden: (row['is_override'] as int? ?? 0) == 1,
+              spendCategory: parseSpendCategory(row['spend_category'] as String?),
             ))
         .toList();
   }

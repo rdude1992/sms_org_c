@@ -126,12 +126,36 @@ class MerchantSummary {
   MerchantSummary({required this.key, required this.displayName});
 }
 
+/// One row of [InsightsSummary.byCategory] — see [Transaction.spendCategory].
+/// Unlike [InstrumentSummary]/[MerchantSummary], this is debit-only from the
+/// ground up (not just in how it's charted): a spend-category breakdown
+/// doesn't have a sensible "credit" side the way an account or merchant
+/// does, so [totalDebit]/[count] only ever count debit transactions.
+class SpendCategorySummary {
+  /// Null for the "Uncategorised" bucket — every debit transaction the user
+  /// hasn't tagged yet lands here, so the breakdown always accounts for the
+  /// full spend total even before anyone's tagged anything.
+  final SpendCategory? category;
+
+  double totalDebit = 0;
+  int count = 0;
+
+  SpendCategorySummary({this.category});
+
+  /// Stable string key for [BreakdownDonut]/drilldown filtering — mirrors
+  /// [InstrumentSummary.key]/[MerchantSummary.key].
+  String get key => category?.name ?? '_uncategorised';
+
+  String get displayName => category?.label ?? 'Uncategorised';
+}
+
 class InsightsSummary {
   final double totalCredit;
   final double totalDebit;
   final int transactionCount;
   final List<InstrumentSummary> byInstrument;
   final List<MerchantSummary> byMerchant;
+  final List<SpendCategorySummary> byCategory;
   final List<TrendPoint> trend;
   final TrendGranularity trendGranularity;
   final double totalInvested;
@@ -144,6 +168,7 @@ class InsightsSummary {
     required this.transactionCount,
     required this.byInstrument,
     required this.byMerchant,
+    required this.byCategory,
     required this.trend,
     required this.trendGranularity,
     required this.totalInvested,
@@ -189,6 +214,7 @@ class InsightsService {
     final trendList = _zeroFillTrend(trendMap.values.toList(), from, to, granularity);
     final instrumentList = groupByInstrument(filtered);
     final merchantList = groupByMerchant(filtered);
+    final categoryList = groupBySpendCategory(filtered);
 
     double invested = 0;
     double redeemed = 0;
@@ -210,6 +236,7 @@ class InsightsService {
       transactionCount: filtered.length,
       byInstrument: instrumentList,
       byMerchant: merchantList,
+      byCategory: categoryList,
       trend: trendList,
       trendGranularity: granularity,
       totalInvested: invested,
@@ -282,6 +309,25 @@ List<MerchantSummary> groupByMerchant(List<Transaction> transactions) {
   }
   return map.values.toList()
     ..sort((a, b) => (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit));
+}
+
+/// Groups [transactions] by [Transaction.spendCategory] — debit-only (see
+/// [SpendCategorySummary]), including an "Uncategorised" bucket (`category:
+/// null`) for every debit the user hasn't tagged yet, so the breakdown
+/// always covers the full spend total rather than silently omitting
+/// whatever isn't tagged.
+List<SpendCategorySummary> groupBySpendCategory(List<Transaction> transactions) {
+  final map = <String, SpendCategorySummary>{};
+  for (final t in transactions) {
+    if (t.direction != TxnDirection.debit) continue;
+    final summary = map.putIfAbsent(
+      t.spendCategory?.name ?? '_uncategorised',
+      () => SpendCategorySummary(category: t.spendCategory),
+    );
+    summary.totalDebit += t.amount;
+    summary.count += 1;
+  }
+  return map.values.toList()..sort((a, b) => b.totalDebit.compareTo(a.totalDebit));
 }
 
 /// Truncates [date] to the start of its bucket for [granularity] — a

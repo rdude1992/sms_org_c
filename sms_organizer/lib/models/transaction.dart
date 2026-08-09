@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 /// `reversal` is new (ported from getTransactionType in the source regex
 /// file): covers "reversed"/"declined"/"failed" transactions, which
 /// shouldn't count toward either credit or debit totals.
@@ -10,6 +12,139 @@ enum InstrumentType { debitCard, creditCard, bankAccount, upi, unknown }
 /// wallet provider (Paytm/PhonePe/Pluxee/FASTag/...), an investment
 /// platform, or a dedicated card-network service (Visa/Amex/...)?
 enum EntityType { bank, wallet, investment, cardService, unknown }
+
+/// What a transaction was actually *for* — Food, Transport, Bills, etc.
+/// Unlike every other classification in this file, nothing auto-detects
+/// this: a transaction starts uncategorised ([Transaction.spendCategory] is
+/// null) until the user tags it via SmsProvider.updateTransaction. There's
+/// no heuristic here to get wrong or maintain — "spend category" is a
+/// judgment call about a purchase's purpose that varies by transaction even
+/// for the same merchant (e.g. a supermarket run can be groceries or
+/// household goods), so it isn't inferred from merchant/instrument the way
+/// [EntityType] or [InstrumentType] are.
+enum SpendCategory {
+  foodDining,
+  groceries,
+  transport,
+  shopping,
+  billsUtilities,
+  entertainment,
+  health,
+  travel,
+  housing,
+  education,
+  transfer,
+  income,
+  other,
+}
+
+extension SpendCategoryX on SpendCategory {
+  String get label {
+    switch (this) {
+      case SpendCategory.foodDining:
+        return 'Food & Dining';
+      case SpendCategory.groceries:
+        return 'Groceries';
+      case SpendCategory.transport:
+        return 'Transport';
+      case SpendCategory.shopping:
+        return 'Shopping';
+      case SpendCategory.billsUtilities:
+        return 'Bills & Utilities';
+      case SpendCategory.entertainment:
+        return 'Entertainment';
+      case SpendCategory.health:
+        return 'Health';
+      case SpendCategory.travel:
+        return 'Travel';
+      case SpendCategory.housing:
+        return 'Housing & Rent';
+      case SpendCategory.education:
+        return 'Education';
+      case SpendCategory.transfer:
+        return 'Transfer';
+      case SpendCategory.income:
+        return 'Income';
+      case SpendCategory.other:
+        return 'Other';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case SpendCategory.foodDining:
+        return Icons.restaurant_outlined;
+      case SpendCategory.groceries:
+        return Icons.local_grocery_store_outlined;
+      case SpendCategory.transport:
+        return Icons.directions_car_outlined;
+      case SpendCategory.shopping:
+        return Icons.shopping_bag_outlined;
+      case SpendCategory.billsUtilities:
+        return Icons.receipt_long_outlined;
+      case SpendCategory.entertainment:
+        return Icons.movie_outlined;
+      case SpendCategory.health:
+        return Icons.local_hospital_outlined;
+      case SpendCategory.travel:
+        return Icons.flight_outlined;
+      case SpendCategory.housing:
+        return Icons.home_outlined;
+      case SpendCategory.education:
+        return Icons.school_outlined;
+      case SpendCategory.transfer:
+        return Icons.swap_horiz;
+      case SpendCategory.income:
+        return Icons.payments_outlined;
+      case SpendCategory.other:
+        return Icons.category_outlined;
+    }
+  }
+
+  Color get color {
+    switch (this) {
+      case SpendCategory.foodDining:
+        return const Color(0xFFF59E0B);
+      case SpendCategory.groceries:
+        return const Color(0xFF10B981);
+      case SpendCategory.transport:
+        return const Color(0xFF3B82F6);
+      case SpendCategory.shopping:
+        return const Color(0xFFEC4899);
+      case SpendCategory.billsUtilities:
+        return const Color(0xFFEF4444);
+      case SpendCategory.entertainment:
+        return const Color(0xFF8B5CF6);
+      case SpendCategory.health:
+        return const Color(0xFF06B6D4);
+      case SpendCategory.travel:
+        return const Color(0xFFC96442);
+      case SpendCategory.housing:
+        return const Color(0xFF64748B);
+      case SpendCategory.education:
+        return const Color(0xFF0EA5E9);
+      case SpendCategory.transfer:
+        return const Color(0xFF9CA3AF);
+      case SpendCategory.income:
+        return const Color(0xFF22C55E);
+      case SpendCategory.other:
+        return const Color(0xFF6B7280);
+    }
+  }
+}
+
+/// Parses a stored/backed-up [SpendCategory] name back into its enum value —
+/// a plain loop (rather than `SpendCategory.values.firstWhere`) because the
+/// null case (no category assigned, or an unrecognised name from an older
+/// backup) needs to stay null rather than falling back to some default
+/// category that wasn't actually chosen.
+SpendCategory? parseSpendCategory(String? name) {
+  if (name == null) return null;
+  for (final c in SpendCategory.values) {
+    if (c.name == name) return c;
+  }
+  return null;
+}
 
 class Transaction {
   final int smsId;
@@ -59,6 +194,10 @@ class Transaction {
   /// overwrites this row after that.
   final bool isOverridden;
 
+  /// What this transaction was actually for — null ("Uncategorised") until
+  /// the user tags it. See [SpendCategory]: nothing auto-detects this.
+  final SpendCategory? spendCategory;
+
   Transaction({
     required this.smsId,
     required this.date,
@@ -76,6 +215,7 @@ class Transaction {
     this.fastagWalletId,
     this.vehicleNumber,
     this.isOverridden = false,
+    this.spendCategory,
   });
 
   /// Groups transactions the same way Insights buckets "by card / account" —
@@ -133,6 +273,7 @@ class Transaction {
         'vehicleNumber': vehicleNumber,
         'rawBody': rawBody,
         'isOverridden': isOverridden,
+        'spendCategory': spendCategory?.name,
       };
 
   factory Transaction.fromJson(Map<String, dynamic> json) => Transaction(
@@ -159,6 +300,7 @@ class Transaction {
         fastagWalletId: json['fastagWalletId'] as String?,
         vehicleNumber: json['vehicleNumber'] as String?,
         isOverridden: json['isOverridden'] as bool? ?? false,
+        spendCategory: parseSpendCategory(json['spendCategory'] as String?),
       );
 }
 

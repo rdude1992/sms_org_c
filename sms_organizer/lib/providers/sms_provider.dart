@@ -630,8 +630,11 @@ class SmsProvider extends ChangeNotifier {
   /// [transaction]'s type, instrument, merchant, or wallet — the case where
   /// the message genuinely is a transaction, but it's filed under the wrong
   /// Credited/Debited tab, the wrong Cards & Accounts bucket, or the wrong
-  /// merchant. (If it isn't a transaction at all, use setMessageCategory
-  /// instead — see messageById.)
+  /// merchant. Also where [spendCategory] gets set — unlike the other
+  /// fields here, nothing auto-detects it, so every value passed in is
+  /// something the user actually chose (or re-chose) in the edit form. (If
+  /// it isn't a transaction at all, use setMessageCategory instead — see
+  /// messageById.)
   ///
   /// Persists as an override (see DatabaseService.saveTransaction) so it's
   /// never silently re-parsed or discarded by a later cache wipe. Also pins
@@ -646,6 +649,7 @@ class SmsProvider extends ChangeNotifier {
     required InstrumentType instrument,
     String? merchant,
     String? walletType,
+    SpendCategory? spendCategory,
   }) async {
     final cleanedMerchant = merchant?.trim();
     final cleanedWallet = walletType?.trim();
@@ -666,6 +670,7 @@ class SmsProvider extends ChangeNotifier {
       vehicleNumber: transaction.vehicleNumber,
       rawBody: transaction.rawBody,
       isOverridden: true,
+      spendCategory: spendCategory,
     );
 
     final index = _transactions.indexWhere((t) => t.smsId == transaction.smsId);

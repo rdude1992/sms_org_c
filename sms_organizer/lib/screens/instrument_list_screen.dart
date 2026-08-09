@@ -4,6 +4,7 @@ import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
+import '../widgets/search_toggle_mixin.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/sparkline.dart';
 import 'transaction_list_screen.dart';
@@ -16,7 +17,7 @@ import 'transaction_list_screen.dart';
 /// glance. A row spanning a debit card and its linked bank account (same
 /// issuer + last-4, see [Transaction.instrumentGroupKey]) shows up once,
 /// under Debit Cards, with a "Debit Card + Bank Account" badge.
-class InstrumentListScreen extends StatelessWidget {
+class InstrumentListScreen extends StatefulWidget {
   final List<Transaction> transactions;
   final String? subtitle;
 
@@ -27,6 +28,18 @@ class InstrumentListScreen extends StatelessWidget {
   });
 
   @override
+  State<InstrumentListScreen> createState() => _InstrumentListScreenState();
+}
+
+class _InstrumentListScreenState extends State<InstrumentListScreen>
+    with SearchToggleMixin<InstrumentListScreen> {
+  @override
+  void dispose() {
+    disposeSearch();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     // [transactions] is a one-off snapshot from whichever Insights screen
     // pushed this route. Re-deriving a live copy from SmsProvider (matched
@@ -35,32 +48,40 @@ class InstrumentListScreen extends StatelessWidget {
     // TransactionTile's "Edit transaction"/"Not a transaction?" actions) is
     // reflected here too, instead of this screen staying stale until it's
     // popped and re-opened.
-    final ids = transactions.map((t) => t.smsId).toSet();
+    final ids = widget.transactions.map((t) => t.smsId).toSet();
     final liveTransactions =
         context.watch<SmsProvider>().transactions.where((t) => ids.contains(t.smsId)).toList();
-    final instruments = groupByInstrument(liveTransactions);
+    final grouped = groupByInstrument(liveTransactions);
+
+    final trimmedQuery = query.trim().toLowerCase();
+    final instruments = trimmedQuery.isEmpty
+        ? grouped
+        : grouped.where((s) => s.displayName.toLowerCase().contains(trimmedQuery)).toList();
     final sections = _bucket(context, instruments);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Cards & Accounts'),
-        bottom: subtitle == null
+        title: searchAppBarTitle('Cards & Accounts', hintText: 'Search cards & accounts'),
+        actions: searchAppBarActions(),
+        bottom: isSearching || widget.subtitle == null
             ? null
             : PreferredSize(
                 preferredSize: const Size.fromHeight(28),
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
-                    subtitle!,
+                    widget.subtitle!,
                     style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ),
               ),
       ),
       body: instruments.isEmpty
-          ? const EmptyState(
-              icon: Icons.credit_card_off_outlined,
-              title: 'No cards or accounts detected in this range',
+          ? EmptyState(
+              icon: trimmedQuery.isEmpty ? Icons.credit_card_off_outlined : Icons.search_off_outlined,
+              title: trimmedQuery.isEmpty
+                  ? 'No cards or accounts detected in this range'
+                  : 'No matches for "$trimmedQuery"',
             )
           : ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
@@ -83,7 +104,7 @@ class InstrumentListScreen extends StatelessWidget {
       MaterialPageRoute(
         builder: (_) => TransactionListScreen(
           title: s.displayName,
-          subtitle: subtitle,
+          subtitle: widget.subtitle,
           transactions: liveTransactions.where((t) => t.instrumentGroupKey == s.key).toList(),
         ),
       ),

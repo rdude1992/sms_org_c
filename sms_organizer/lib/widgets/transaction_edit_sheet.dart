@@ -34,6 +34,7 @@ class _TransactionEditSheet extends StatefulWidget {
 class _TransactionEditSheetState extends State<_TransactionEditSheet> {
   late TxnDirection _direction;
   late InstrumentType _instrument;
+  late SpendCategory? _spendCategory;
   late final TextEditingController _merchantController;
   late final TextEditingController _walletController;
 
@@ -47,6 +48,7 @@ class _TransactionEditSheetState extends State<_TransactionEditSheet> {
     // what gets saved if the user doesn't touch this field at all.
     _direction = t.direction == TxnDirection.unknown ? TxnDirection.debit : t.direction;
     _instrument = t.instrument;
+    _spendCategory = t.spendCategory;
     _merchantController = TextEditingController(text: t.merchant ?? '');
     _walletController = TextEditingController(text: t.walletType ?? '');
   }
@@ -66,6 +68,7 @@ class _TransactionEditSheetState extends State<_TransactionEditSheet> {
       instrument: _instrument,
       merchant: _merchantController.text,
       walletType: _walletController.text,
+      spendCategory: _spendCategory,
     );
   }
 
@@ -96,7 +99,7 @@ class _TransactionEditSheetState extends State<_TransactionEditSheet> {
               const SizedBox(height: 4),
               Text(
                 "Fix the type, instrument, or merchant if this landed in the wrong list or "
-                "total — the change applies right away.",
+                "total, or tag a spend category — the change applies right away.",
                 style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
               ),
               const SizedBox(height: 20),
@@ -142,6 +145,17 @@ class _TransactionEditSheetState extends State<_TransactionEditSheet> {
                   labelText: 'Wallet name',
                   hintText: 'e.g. Paytm Wallet — set to file this under Wallets',
                 ),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<SpendCategory?>(
+                value: _spendCategory,
+                decoration: const InputDecoration(labelText: 'Spend category'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('Uncategorised')),
+                  for (final category in SpendCategory.values)
+                    DropdownMenuItem(value: category, child: Text(category.label)),
+                ],
+                onChanged: (v) => setState(() => _spendCategory = v),
               ),
               const SizedBox(height: 24),
               SizedBox(
