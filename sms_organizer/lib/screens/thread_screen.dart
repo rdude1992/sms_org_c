@@ -212,7 +212,22 @@ class _ThreadScreenState extends State<ThreadScreen> {
                       allSelected ? provider.clearSelection() : provider.selectIds(visibleIds),
                 )
               : AppBar(
-                  title: Text(provider.displayNameFor(conversation.address)),
+                  title: _ThreadTitle(
+                    displayName: provider.displayNameFor(conversation.address),
+                    address: conversation.address,
+                    isKnownContact: provider.contactService.isKnownContact(conversation.address),
+                    onOpenContact: () async {
+                      final opened = await provider.openContact(conversation.address);
+                      if (!opened && context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Could not open contact'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                  ),
                   actions: [
                     IconButton(
                       icon: Icon(
@@ -350,6 +365,57 @@ class _ThreadScreenState extends State<ThreadScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+/// AppBar title for an open thread — the contact name, plus (only when
+/// [address] actually resolved to a saved contact, not just an unsaved
+/// number/shortcode) a smaller, tappable line underneath showing the raw
+/// number, which opens that contact's page in the system Contacts app.
+class _ThreadTitle extends StatelessWidget {
+  final String displayName;
+  final String address;
+  final bool isKnownContact;
+  final VoidCallback onOpenContact;
+
+  const _ThreadTitle({
+    required this.displayName,
+    required this.address,
+    required this.isKnownContact,
+    required this.onOpenContact,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // Only relevant once the title above is actually showing a contact
+    // *name* in place of the number — for an unsaved number/shortcode the
+    // title already is the raw address, so a second identical line would
+    // just be noise.
+    final showNumberLine = isKnownContact && displayName != address;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
+        if (showNumberLine)
+          GestureDetector(
+            onTap: onOpenContact,
+            child: Text(
+              address,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.normal,
+                color: scheme.onSurface.withOpacity(0.7),
+                decoration: TextDecoration.underline,
+                decorationColor: scheme.onSurface.withOpacity(0.35),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

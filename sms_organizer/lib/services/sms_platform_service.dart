@@ -76,6 +76,15 @@ class SmsPlatformService {
   /// Activity instance to redeliver the intent to.
   Stream<int> get onNotificationThreadTapped => _threadTappedController.stream;
 
+  /// Opens the system Contacts app's detail page for whichever saved
+  /// contact matches [number] — see ThreadScreen's tap-to-open-contact
+  /// action. Returns false (no match, no Contacts app to handle it, etc.)
+  /// rather than throwing.
+  Future<bool> openContact(String number) async {
+    final result = await _methodChannel.invokeMethod<bool>('openContact', {'number': number});
+    return result ?? false;
+  }
+
   Future<List<Map<String, String?>>> getContacts() async {
     final raw = await _methodChannel.invokeMethod<List<dynamic>>('getContacts');
     if (raw == null) return [];

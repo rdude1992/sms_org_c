@@ -77,6 +77,42 @@ object ContactsRepository {
     }
 
     /**
+     * The contact-card deep link for [number] — used by ThreadScreen's
+     * tap-to-open-contact affordance to jump straight into the system
+     * Contacts app's detail view, the same URI form
+     * ContactsContract.Contacts.getLookupUri produces (stable across
+     * contact-id churn, unlike a bare row id). Null if there's no match/
+     * permission, same as [lookupDisplayName].
+     */
+    fun getLookupUri(context: Context, number: String): Uri? {
+        return try {
+            val uri = Uri.withAppendedPath(
+                ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
+                Uri.encode(number)
+            )
+            context.contentResolver.query(
+                uri,
+                arrayOf(ContactsContract.PhoneLookup._ID, ContactsContract.PhoneLookup.LOOKUP_KEY),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.PhoneLookup._ID))
+                    val lookupKey = cursor.getString(
+                        cursor.getColumnIndexOrThrow(ContactsContract.PhoneLookup.LOOKUP_KEY)
+                    )
+                    ContactsContract.Contacts.getLookupUri(id, lookupKey)
+                } else {
+                    null
+                }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
      * Contact thumbnail for the sender [Person] on a MessagingStyle
      * notification, or null if there's no match/photo/permission — callers
      * fall back to a generic icon in that case. Uses the thumbnail column

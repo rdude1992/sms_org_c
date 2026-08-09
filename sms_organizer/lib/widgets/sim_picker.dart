@@ -25,10 +25,11 @@ class SimPicker extends StatelessWidget {
   final int? selectedSubscriptionId;
   final ValueChanged<int?> onChanged;
 
-  /// Compact renders as a colour-coded pill that opens a picker menu — for
-  /// tight spaces like the chat reply bar. Non-compact (the default)
-  /// renders a full-width labeled SegmentedButton, used in the compose
-  /// screen.
+  /// Compact renders as a small round tap-to-cycle toggle — sized and
+  /// vertically centred to match the reply text field's single-line height
+  /// rather than opening a separate picker menu, for tight spaces like the
+  /// chat reply bar. Non-compact (the default) renders a full-width labeled
+  /// SegmentedButton, used in the compose screen.
   final bool compact;
 
   const SimPicker({
@@ -44,64 +45,33 @@ class SimPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (compact) {
-      final selected = sims.firstWhere(
-        (s) => s.subscriptionId == selectedSubscriptionId,
-        orElse: () => sims.first,
-      );
+      final index = sims.indexWhere((s) => s.subscriptionId == selectedSubscriptionId);
+      final selected = index == -1 ? sims.first : sims[index];
       final color = simColor(selected.slotIndex);
-      final scheme = Theme.of(context).colorScheme;
-      return PopupMenuButton<int>(
-        tooltip: 'Send from ${_labelFor(selected)}',
-        initialValue: selected.subscriptionId,
-        onSelected: onChanged,
-        itemBuilder: (context) => [
-          for (final sim in sims)
-            PopupMenuItem(
-              value: sim.subscriptionId,
-              child: Row(
-                children: [
-                  _SimDot(color: simColor(sim.slotIndex)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(sim.label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                        if (sim.carrierName?.isNotEmpty == true)
-                          Text(
-                            sim.carrierName!,
-                            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-                          ),
-                      ],
-                    ),
-                  ),
-                  if (sim.subscriptionId == selectedSubscriptionId) ...[
-                    const SizedBox(width: 8),
-                    Icon(Icons.check, size: 16, color: scheme.primary),
-                  ],
-                ],
-              ),
+      return Tooltip(
+        message: 'Sending from ${_labelFor(selected)} — tap to switch',
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () {
+            final current = sims.indexOf(selected);
+            onChanged(sims[(current + 1) % sims.length].subscriptionId);
+          },
+          child: Container(
+            // Matches the reply TextField's single-line height (10 vertical
+            // content padding + ~20 line height) so the two sit flush
+            // instead of the toggle looking a size off next to it.
+            width: 40,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.14),
+              shape: BoxShape.circle,
+              border: Border.all(color: color.withOpacity(0.6)),
             ),
-        ],
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: color.withOpacity(0.5)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _SimDot(color: color),
-              const SizedBox(width: 6),
-              Text(
-                selected.label,
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color),
-              ),
-              Icon(Icons.arrow_drop_down, size: 16, color: color),
-            ],
+            child: Text(
+              '${selected.slotIndex + 1}',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: color),
+            ),
           ),
         ),
       );

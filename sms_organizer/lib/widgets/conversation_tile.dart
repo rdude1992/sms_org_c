@@ -59,12 +59,22 @@ class ConversationTile extends StatelessWidget {
                   ),
                 )
               else
-                CircleAvatar(
-                  radius: 24,
-                  backgroundColor: latest.category.color.withOpacity(0.15),
-                  child: Text(
-                    displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
-                    style: TextStyle(color: latest.category.color, fontWeight: FontWeight.bold),
+                // A Builder just for the avatar's own BuildContext — needed
+                // to anchor _showQuickPreview's dropdown at the avatar's
+                // actual on-screen position, which the tile's outer context
+                // (the whole row) can't give us.
+                Builder(
+                  builder: (avatarContext) => InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: () => _showQuickPreview(avatarContext, conversation, displayName),
+                    child: CircleAvatar(
+                      radius: 24,
+                      backgroundColor: latest.category.color.withOpacity(0.15),
+                      child: Text(
+                        displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
+                        style: TextStyle(color: latest.category.color, fontWeight: FontWeight.bold),
+                      ),
+                    ),
                   ),
                 ),
               const SizedBox(width: 14),
@@ -152,4 +162,74 @@ class ConversationTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Dropdown-style peek at [conversation]'s last message, anchored at the
+/// tapped avatar — lets a user check what a chat was about without leaving
+/// the list to open the full thread. [avatarContext] must be the avatar's
+/// own BuildContext (not the whole tile's) so the popup positions itself
+/// against the avatar rather than the entire row.
+void _showQuickPreview(BuildContext avatarContext, SmsConversation conversation, String displayName) {
+  final box = avatarContext.findRenderObject() as RenderBox;
+  final overlay = Overlay.of(avatarContext).context.findRenderObject() as RenderBox;
+  final position = RelativeRect.fromRect(
+    Rect.fromPoints(
+      box.localToGlobal(Offset.zero, ancestor: overlay),
+      box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay),
+    ),
+    Offset.zero & overlay.size,
+  );
+  final latest = conversation.latest;
+  final scheme = Theme.of(avatarContext).colorScheme;
+
+  showMenu<void>(
+    context: avatarContext,
+    position: position,
+    constraints: const BoxConstraints(maxWidth: 280, minWidth: 240),
+    items: [
+      // A single disabled item is the standard trick for putting arbitrary
+      // custom content (rather than a list of choices) inside a showMenu
+      // dropdown — nothing here is meant to be individually selectable.
+      PopupMenuItem<void>(
+        enabled: false,
+        padding: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    Formatters.relativeOrTime(latest.date),
+                    style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 140),
+                child: SingleChildScrollView(
+                  child: Text(
+                    latest.body.isEmpty ? '(no message text)' : latest.body,
+                    style: TextStyle(fontSize: 13, height: 1.4, color: scheme.onSurface),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ],
+  );
 }

@@ -228,6 +228,11 @@ class SmsProvider extends ChangeNotifier {
     return isDefaultSmsApp;
   }
 
+  /// Opens the system Contacts app's detail page for whichever saved
+  /// contact matches [address] — see ThreadScreen's tap-to-open-contact
+  /// action on the phone number line under the conversation title.
+  Future<bool> openContact(String address) => _platform.openContact(address);
+
   /// The real, current importance of [category]'s notification channel as
   /// configured in Android system settings — see
   /// [SmsPlatformService.getChannelImportance] for why this can disagree

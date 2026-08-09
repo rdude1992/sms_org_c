@@ -62,6 +62,15 @@ class ContactService {
     return _numberToName[normalized] ?? address;
   }
 
+  /// Whether [address] matched a saved contact — lets a caller show
+  /// contact-only affordances (e.g. ThreadScreen's "open in Contacts" number
+  /// line) without having to infer a match from `displayNameFor(address) !=
+  /// address`, which would also be true (wrongly) for an unsaved number.
+  bool isKnownContact(String address) {
+    final normalized = normalize(address);
+    return normalized.isNotEmpty && _numberToName.containsKey(normalized);
+  }
+
   /// Normalises to the last 10 digits so "+91 98765 43210", "098765-43210",
   /// and "9876543210" all match the same contact/conversation. Short
   /// alphanumeric sender IDs (e.g. "AX-HDFCBK") have no digit run this long
