@@ -179,7 +179,15 @@ class _InsightsScreenState extends State<InsightsScreen> {
         };
 
         return Scaffold(
-          appBar: AppBar(title: const Text('Insights')),
+          appBar: AppBar(
+            title: const Text('Insights'),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: provider.refresh,
+              ),
+            ],
+          ),
           body: Column(
             children: [
               _RangeFilterBar(
@@ -199,7 +207,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
                             icon: Icons.filter_alt_off_outlined,
                             title: 'No transactions in this range',
                           )
-                        : ListView(
+                        : RefreshIndicator(
+                            onRefresh: provider.refresh,
+                            child: ListView(
                             padding: const EdgeInsets.all(16),
                             children: [
                               _TotalsRow(
@@ -366,6 +376,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                               const SizedBox(height: 4),
                               ...filteredTransactions.take(15).map((t) => TransactionTile(transaction: t)),
                             ],
+                            ),
                           ),
               ),
             ],

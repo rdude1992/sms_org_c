@@ -687,6 +687,60 @@ class SmsProvider extends ChangeNotifier {
     }
   }
 
+  /// User-driven correction for when TransactionParserService mis-detected
+  /// [investment]'s kind, fund/scheme, AMC, or folio — the case where the
+  /// message genuinely is a SIP/mutual-fund/trade confirmation, but it's
+  /// filed under the wrong Invested/Redeemed tab or the wrong AMC/provider
+  /// bucket. (If it isn't an investment at all, use setMessageCategory
+  /// instead — see messageById.)
+  ///
+  /// Persists as an override (see DatabaseService.saveInvestment) so it's
+  /// never silently re-parsed or discarded by a later cache wipe. Also pins
+  /// the parent message's category as an override for the same reason
+  /// updateTransaction does — see there.
+  Future<void> updateInvestment(
+    InvestmentEvent investment, {
+    required InvestmentKind kind,
+    String? fundOrScheme,
+    String? amc,
+    String? folioOrAccount,
+  }) async {
+    final cleanedFund = fundOrScheme?.trim();
+    final cleanedAmc = amc?.trim();
+    final cleanedFolio = folioOrAccount?.trim();
+    final updated = InvestmentEvent(
+      smsId: investment.smsId,
+      date: investment.date,
+      amount: investment.amount,
+      kind: kind,
+      rawBody: investment.rawBody,
+      fundOrScheme: (cleanedFund == null || cleanedFund.isEmpty) ? null : cleanedFund,
+      folioOrAccount: (cleanedFolio == null || cleanedFolio.isEmpty) ? null : cleanedFolio,
+      units: investment.units,
+      nav: investment.nav,
+      amc: (cleanedAmc == null || cleanedAmc.isEmpty) ? null : cleanedAmc,
+      isOverridden: true,
+    );
+
+    final index = _investments.indexWhere((i) => i.smsId == investment.smsId);
+    if (index != -1) {
+      _investments[index] = updated;
+    } else {
+      _investments.add(updated);
+    }
+    notifyListeners();
+
+    await _db.saveInvestment(updated, isOverride: true);
+    await _db.saveCategory(investment.smsId, SmsCategory.transactional, isOverride: true);
+
+    final message = messageById(investment.smsId);
+    if (message != null) {
+      message.category = SmsCategory.transactional;
+      message.isCategoryOverridden = true;
+      notifyListeners();
+    }
+  }
+
   void setCategoryFilter(SmsCategory? category) {
     activeCategoryFilter = category;
     notifyListeners();
@@ -734,7 +788,17 @@ class SmsProvider extends ChangeNotifier {
       }
     }
     if (autoTransactions.isNotEmpty) await _db.saveTransactionsBulk(autoTransactions);
-    await _db.saveInvestmentsBulk(bundle.investments);
+
+    // Same idea for manually-corrected investments — see updateInvestment.
+    final autoInvestments = <InvestmentEvent>[];
+    for (final i in bundle.investments) {
+      if (i.isOverridden) {
+        await _db.saveInvestment(i, isOverride: true);
+      } else {
+        autoInvestments.add(i);
+      }
+    }
+    if (autoInvestments.isNotEmpty) await _db.saveInvestmentsBulk(autoInvestments);
     notifyListeners();
   }
 

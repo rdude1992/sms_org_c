@@ -88,11 +88,21 @@ class InvestmentListScreen extends StatelessWidget {
   /// events), where there's no broader superset to offer.
   final List<InvestmentEvent>? allInvestments;
 
+  /// Which tab opens first — defaults to 0 ("By AMC"), the most useful
+  /// breakdown when there's more than one provider to break down. A
+  /// single-provider drilldown (see [_ProviderRow]'s onTap) passes 3
+  /// ("All") instead: "By AMC" would just show that one provider again,
+  /// a redundant landing tab. The tab itself is still there either way —
+  /// its own range picker/trend chart are still useful for one provider —
+  /// just not what opens by default.
+  final int initialTabIndex;
+
   const InvestmentListScreen({
     super.key,
     required this.investments,
     this.allInvestments,
     this.subtitle,
+    this.initialTabIndex = 0,
   });
 
   @override
@@ -120,6 +130,7 @@ class InvestmentListScreen extends StatelessWidget {
 
     return DefaultTabController(
       length: 4,
+      initialIndex: initialTabIndex,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Investments'),
@@ -383,6 +394,7 @@ class _AmcAnalytics extends StatelessWidget {
             investments: match.events,
             allInvestments: allInvestments,
             subtitle: match.name,
+            initialTabIndex: 3,
           ),
         ),
       );
@@ -523,6 +535,7 @@ class _ProviderRow extends StatelessWidget {
             investments: p.events,
             allInvestments: allInvestments,
             subtitle: p.name,
+            initialTabIndex: 3,
           ),
         ),
       ),

@@ -203,6 +203,12 @@ class InvestmentEvent {
 
   final String rawBody;
 
+  /// True once the user has manually corrected [kind]/[fundOrScheme]/[amc]/
+  /// [folioOrAccount] via SmsProvider.updateInvestment — see that method for
+  /// why TransactionParserService never re-derives and overwrites this row
+  /// after that.
+  final bool isOverridden;
+
   InvestmentEvent({
     required this.smsId,
     required this.date,
@@ -214,6 +220,7 @@ class InvestmentEvent {
     this.units,
     this.nav,
     this.amc,
+    this.isOverridden = false,
   });
 
   /// Groups investment events by AMC/broker (e.g. "Axis MF", "Zerodha") for
@@ -241,6 +248,7 @@ class InvestmentEvent {
         'nav': nav,
         'amc': amc,
         'rawBody': rawBody,
+        'isOverridden': isOverridden,
       };
 
   factory InvestmentEvent.fromJson(Map<String, dynamic> json) => InvestmentEvent(
@@ -255,5 +263,6 @@ class InvestmentEvent {
         units: (json['units'] as num?)?.toDouble(),
         nav: (json['nav'] as num?)?.toDouble(),
         amc: json['amc'] as String?,
+        isOverridden: json['isOverridden'] as bool? ?? false,
       );
 }

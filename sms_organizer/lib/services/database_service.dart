@@ -28,7 +28,7 @@ class DatabaseService {
     final path = p.join(dbPath, 'sms_organizer.db');
     return openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE message_categories (
@@ -68,7 +68,8 @@ class DatabaseService {
             units REAL,
             nav REAL,
             amc TEXT,
-            raw_body TEXT
+            raw_body TEXT,
+            is_override INTEGER NOT NULL DEFAULT 0
           )
         ''');
         await db.execute('''
@@ -115,6 +116,14 @@ class DatabaseService {
           // same cache wipes a category override does.
           await db.execute(
             'ALTER TABLE transactions ADD COLUMN is_override INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        if (oldVersion < 5) {
+          // Same idea again, for a manually-corrected investment (see
+          // SmsProvider.updateInvestment) — kind/fund/AMC/folio fixes need to
+          // survive the same cache wipes a category override does.
+          await db.execute(
+            'ALTER TABLE investments ADD COLUMN is_override INTEGER NOT NULL DEFAULT 0',
           );
         }
       },
@@ -262,28 +271,48 @@ class DatabaseService {
 
   // ---- Investments ----
 
+  Map<String, dynamic> _investmentColumns(InvestmentEvent e, {required bool isOverride}) => {
+        'sms_id': e.smsId,
+        'date': e.date.millisecondsSinceEpoch,
+        'amount': e.amount,
+        'kind': e.kind.name,
+        'fund_or_scheme': e.fundOrScheme,
+        'folio_or_account': e.folioOrAccount,
+        'units': e.units,
+        'nav': e.nav,
+        'amc': e.amc,
+        'raw_body': e.rawBody,
+        'is_override': isOverride ? 1 : 0,
+      };
+
+  /// Always writes auto-parsed rows (is_override = 0) — callers with a
+  /// user-corrected investment use [saveInvestment] instead. Safe against
+  /// clobbering an existing override for the same reason as
+  /// [saveCategoriesBulk]: SmsProvider.refresh only calls this for ids that
+  /// weren't already cached.
   Future<void> saveInvestmentsBulk(List<InvestmentEvent> events) async {
     final db = await database;
     final batch = db.batch();
     for (final e in events) {
       batch.insert(
         'investments',
-        {
-          'sms_id': e.smsId,
-          'date': e.date.millisecondsSinceEpoch,
-          'amount': e.amount,
-          'kind': e.kind.name,
-          'fund_or_scheme': e.fundOrScheme,
-          'folio_or_account': e.folioOrAccount,
-          'units': e.units,
-          'nav': e.nav,
-          'amc': e.amc,
-          'raw_body': e.rawBody,
-        },
+        _investmentColumns(e, isOverride: false),
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     }
     await batch.commit(noResult: true);
+  }
+
+  /// [isOverride] marks an investment the user corrected explicitly (via the
+  /// "Edit investment" action), as opposed to one TransactionParserService
+  /// produced — see [clearAll], which preserves these rows.
+  Future<void> saveInvestment(InvestmentEvent e, {bool isOverride = false}) async {
+    final db = await database;
+    await db.insert(
+      'investments',
+      _investmentColumns(e, isOverride: isOverride),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<List<InvestmentEvent>> loadInvestments() async {
@@ -304,6 +333,7 @@ class DatabaseService {
               nav: row['nav'] as double?,
               amc: row['amc'] as String?,
               rawBody: row['raw_body'] as String? ?? '',
+              isOverridden: (row['is_override'] as int? ?? 0) == 1,
             ))
         .toList();
   }
@@ -357,17 +387,16 @@ class DatabaseService {
     await batch.commit(noResult: true);
   }
 
-  /// Wipes auto-classified categories and auto-parsed transactions (all
-  /// investments, which don't yet have their own override concept), but
-  /// keeps rows the user manually corrected (is_override = 1) — used by
-  /// both the classifier-version-bump reprocess and the manual "Recalculate"
-  /// button, neither of which should discard a correction the user made.
-  /// SmsProvider.refresh() re-parses transaction/investment data for a
-  /// preserved category that comes back without any (see there).
+  /// Wipes auto-classified categories and auto-parsed transactions/
+  /// investments, but keeps rows the user manually corrected (is_override =
+  /// 1) — used by both the classifier-version-bump reprocess and the manual
+  /// "Recalculate" button, neither of which should discard a correction the
+  /// user made. SmsProvider.refresh() re-parses transaction/investment data
+  /// for a preserved category that comes back without any (see there).
   Future<void> clearAll() async {
     final db = await database;
     await db.delete('message_categories', where: 'is_override = 0');
     await db.delete('transactions', where: 'is_override = 0');
-    await db.delete('investments');
+    await db.delete('investments', where: 'is_override = 0');
   }
 }
