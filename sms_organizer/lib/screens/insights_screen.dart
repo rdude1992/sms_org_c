@@ -117,6 +117,15 @@ class _InsightsScreenState extends State<InsightsScreen> {
         }).toList()
           ..sort((a, b) => b.date.compareTo(a.date));
 
+        // The true latest known balance per instrument, independent of
+        // whatever range is selected — an account's balance is a snapshot,
+        // not something that should disappear just because its most recent
+        // balance-bearing SMS fell outside the chosen window.
+        final lastBalanceByInstrument = <String, double>{
+          for (final s in provider.insightsSummary().byInstrument)
+            if (s.lastBalance != null) s.key: s.lastBalance!,
+        };
+
         return Scaffold(
           appBar: AppBar(title: const Text('Insights')),
           body: Column(
@@ -208,6 +217,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ...summary.byInstrument.take(6).map(
                                       (s) => _InstrumentRow(
                                         summary: s,
+                                        lastBalance: lastBalanceByInstrument[s.key],
                                         onTap: () => _openDrilldown(
                                           context,
                                           title: s.displayName,
@@ -630,8 +640,9 @@ class _MerchantDonut extends StatelessWidget {
 
 class _InstrumentRow extends StatelessWidget {
   final InstrumentSummary summary;
+  final double? lastBalance;
   final VoidCallback onTap;
-  const _InstrumentRow({required this.summary, required this.onTap});
+  const _InstrumentRow({required this.summary, required this.lastBalance, required this.onTap});
 
   // UPI isn't its own instrument icon — it's a rail, and almost all UPI
   // activity now classifies as the bank account/card it actually moved
@@ -657,7 +668,7 @@ class _InstrumentRow extends StatelessWidget {
         [
           if (summary.isLinkedAccount) summary.typeLabel,
           '${summary.count} transactions',
-          if (summary.lastBalance != null) 'Bal ${Formatters.currency(summary.lastBalance!)}',
+          if (lastBalance != null) 'Bal ${Formatters.currency(lastBalance!)}',
         ].join(' · '),
       ),
       trailing: Column(
