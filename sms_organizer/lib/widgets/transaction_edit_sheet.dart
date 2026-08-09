@@ -5,16 +5,26 @@ import '../providers/sms_provider.dart';
 /// Bulk spend-category tagging for TransactionListScreen's multi-select —
 /// see SmsProvider.setSpendCategoryForTransactions. Includes an
 /// "Uncategorised" option so a batch that was auto-tagged wrong can be
-/// cleared in one pass too, not just set.
+/// cleared in one pass too, not just set. [onApplied] fires right after the
+/// category is persisted — TransactionListScreen uses it to clear its local
+/// selection so the tiles un-check and drop out of selection mode instead of
+/// staying checked with a category that's already been applied.
 Future<void> showBulkSpendCategorySheet(
   BuildContext context,
   SmsProvider provider,
-  List<int> smsIds,
-) {
+  List<int> smsIds, {
+  VoidCallback? onApplied,
+}) {
   return showModalBottomSheet(
     context: context,
     builder: (sheetContext) {
       final scheme = Theme.of(sheetContext).colorScheme;
+      void apply(SpendCategory? category) {
+        Navigator.pop(sheetContext);
+        provider.setSpendCategoryForTransactions(smsIds, category);
+        onApplied?.call();
+      }
+
       return SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -34,19 +44,13 @@ Future<void> showBulkSpendCategorySheet(
             ListTile(
               leading: const Icon(Icons.category_outlined),
               title: const Text('Uncategorised'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                provider.setSpendCategoryForTransactions(smsIds, null);
-              },
+              onTap: () => apply(null),
             ),
             for (final category in SpendCategory.values)
               ListTile(
                 leading: Icon(category.icon, color: category.color),
                 title: Text(category.label),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  provider.setSpendCategoryForTransactions(smsIds, category);
-                },
+                onTap: () => apply(category),
               ),
             const SizedBox(height: 8),
           ],

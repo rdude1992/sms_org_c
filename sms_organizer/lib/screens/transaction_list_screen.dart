@@ -114,6 +114,7 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                 context,
                 context.read<SmsProvider>(),
                 _selectedIds.toList(),
+                onApplied: _clearSelection,
               ),
             ),
           ]
@@ -264,19 +265,27 @@ class _TransactionListView extends StatelessWidget {
     if (transactions.isEmpty) {
       return EmptyState(icon: Icons.receipt_long_outlined, title: emptyText);
     }
-    return ListView.builder(
-      itemCount: transactions.length,
-      itemBuilder: (context, index) {
-        final t = transactions[index];
-        return TransactionTile(
-          transaction: t,
-          selected: selectedIds.contains(t.smsId),
-          selectionMode: selecting,
-          onTap: selecting ? () => onToggleSelected(t.smsId) : null,
-          onLongPress: selecting ? () => onToggleSelected(t.smsId) : null,
-          onSelectStart: () => onToggleSelected(t.smsId),
-        );
-      },
+    // [transactions] is re-derived from SmsProvider on every rebuild (see
+    // TransactionListScreen.build), so a pull-triggered refresh() naturally
+    // flows through to this list the same way it already does for the
+    // Inbox/Insights lists — no separate reload needed here.
+    return RefreshIndicator(
+      onRefresh: context.read<SmsProvider>().refresh,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: transactions.length,
+        itemBuilder: (context, index) {
+          final t = transactions[index];
+          return TransactionTile(
+            transaction: t,
+            selected: selectedIds.contains(t.smsId),
+            selectionMode: selecting,
+            onTap: selecting ? () => onToggleSelected(t.smsId) : null,
+            onLongPress: selecting ? () => onToggleSelected(t.smsId) : null,
+            onSelectStart: () => onToggleSelected(t.smsId),
+          );
+        },
+      ),
     );
   }
 }
