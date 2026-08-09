@@ -170,9 +170,28 @@ class _ThreadScreenState extends State<ThreadScreen> {
         // search/tap-through, otherwise on the newest message — like any
         // other chat app opens at the bottom, not wherever the list's
         // estimated item extents happen to settle.
+        //
+        // [alignment] positions an item's TOP edge at that fraction of the
+        // viewport (0 = top, 1 = bottom) — it has no notion of an item's
+        // bottom edge. Targeting the real last message with alignment 1
+        // would put *its* top at the viewport's bottom, leaving almost the
+        // whole bubble cut off below the fold. Targeting the zero-height
+        // sentinel item just past the end (see itemCount/itemBuilder below)
+        // instead means that phantom item's top — which sits exactly where
+        // the real last message's bottom is — lands at the viewport's
+        // bottom, so the last message ends up fully visible with nothing
+        // left to scroll for.
+        //
+        // The highlighted-message case doesn't need that trick (0.4 puts a
+        // reasonable amount of context above it without risking cutting off
+        // a tall bubble) — it's set to the same value _scrollToHighlightIfNeeded's
+        // follow-up scrollTo() settles on below, so that animated correction
+        // only has to travel a short, subtle distance instead of visibly
+        // snapping from a completely different spot.
         final highlightIndex =
             widget.highlightMessageId == null ? -1 : messages.indexWhere((m) => m.id == widget.highlightMessageId);
-        final initialIndex = highlightIndex != -1 ? highlightIndex : messages.length - 1;
+        final initialIndex = highlightIndex != -1 ? highlightIndex : messages.length;
+        final initialAlignment = highlightIndex != -1 ? 0.4 : 1.0;
 
         _scrollToHighlightIfNeeded(messages);
         _initSelectedSim(provider.activeSims);
@@ -210,10 +229,13 @@ class _ThreadScreenState extends State<ThreadScreen> {
                 child: ScrollablePositionedList.builder(
                   itemScrollController: _itemScrollController,
                   initialScrollIndex: initialIndex < 0 ? 0 : initialIndex,
-                  initialAlignment: 1,
+                  initialAlignment: initialAlignment,
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  itemCount: messages.length,
+                  // +1 for the trailing zero-height sentinel — see the
+                  // initialIndex/initialAlignment comment above for why.
+                  itemCount: messages.length + 1,
                   itemBuilder: (context, index) {
+                    if (index == messages.length) return const SizedBox.shrink();
                     final m = messages[index];
                     final selected = provider.selectedIds.contains(m.id);
                     final showDateSeparator =
