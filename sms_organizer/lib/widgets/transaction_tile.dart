@@ -156,10 +156,14 @@ class TransactionTile extends StatelessWidget {
     );
   }
 
-  /// Long-press menu: "Edit transaction" for when it's correctly a
-  /// transaction but its type/instrument/merchant/wallet is wrong, or
-  /// "Not a transaction?" for when it shouldn't be here at all — the latter
-  /// hands off to the same category picker the message list uses, so both
+  /// Long-press menu. "Set category" is the fast path for the single most
+  /// common correction (tap a category, applies immediately, no separate
+  /// form) — see showQuickSpendCategorySheet, added specifically so this
+  /// one field doesn't require opening "Edit transaction" and scrolling
+  /// past Type/Instrument/Merchant/Wallet to reach it. "Edit transaction"
+  /// remains for everything else, or for changing several fields at once.
+  /// "Not a transaction?" is for when it shouldn't be here at all — hands
+  /// off to the same category picker the message list uses, so both
   /// corrections end up going through the same override machinery.
   void _showActions(BuildContext context) {
     final provider = context.read<SmsProvider>();
@@ -172,6 +176,15 @@ class TransactionTile extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 8),
+              ListTile(
+                leading: const Icon(Icons.sell_outlined),
+                title: const Text('Set category'),
+                subtitle: Text(transaction.spendCategory?.label ?? 'Uncategorised'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  showQuickSpendCategorySheet(context, provider, transaction);
+                },
+              ),
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
                 title: const Text('Edit transaction'),

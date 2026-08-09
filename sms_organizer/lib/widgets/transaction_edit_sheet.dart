@@ -60,6 +60,64 @@ Future<void> showBulkSpendCategorySheet(
   );
 }
 
+/// Fast, single-transaction spend-category picker — tap a category and it
+/// applies immediately, no Save button, mirroring showCategoryPickerSheet's
+/// SMS-category flow. Reachable directly from TransactionTile's long-press
+/// menu so changing just the category doesn't require opening the full
+/// "Edit transaction" form and scrolling past Type/Instrument/Merchant/
+/// Wallet to reach it.
+Future<void> showQuickSpendCategorySheet(
+  BuildContext context,
+  SmsProvider provider,
+  Transaction transaction,
+) {
+  return showModalBottomSheet(
+    context: context,
+    builder: (sheetContext) {
+      final scheme = Theme.of(sheetContext).colorScheme;
+      void apply(SpendCategory? category) {
+        Navigator.pop(sheetContext);
+        provider.setSpendCategoryForTransactions([transaction.smsId], category);
+      }
+
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Set category',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: scheme.onSurface),
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            ListTile(
+              leading: const Icon(Icons.category_outlined),
+              title: const Text('Uncategorised'),
+              trailing: transaction.spendCategory == null ? Icon(Icons.check, color: scheme.primary) : null,
+              onTap: () => apply(null),
+            ),
+            for (final category in SpendCategory.values)
+              ListTile(
+                leading: Icon(category.icon, color: category.color),
+                title: Text(category.label),
+                trailing:
+                    transaction.spendCategory == category ? Icon(Icons.check, color: scheme.primary) : null,
+                onTap: () => apply(category),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 /// Bottom sheet letting the user correct a transaction's type, instrument,
 /// merchant, or wallet when TransactionParserService got it wrong — see
 /// SmsProvider.updateTransaction. Opens as a StatefulWidget (rather than the
