@@ -5,6 +5,7 @@ import '../models/sms_message.dart';
 import '../utils/formatters.dart';
 import '../utils/message_highlighter.dart';
 import '../utils/sms_extractors.dart';
+import 'sim_picker.dart' show simColor;
 import 'ui/linkified_text.dart';
 
 class MessageBubble extends StatelessWidget {
@@ -136,6 +137,19 @@ class MessageBubble extends StatelessWidget {
                                   style: TextStyle(color: textColor.withOpacity(0.5), fontSize: 10),
                                 ),
                                 const SizedBox(width: 6),
+                                // Same per-slot colour as SimPicker, so which
+                                // line a message went out/came in on reads
+                                // consistently between the picker and the
+                                // thread itself.
+                                Container(
+                                  width: 6,
+                                  height: 6,
+                                  decoration: BoxDecoration(
+                                    color: simColor(message.simSlot!),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
                                 Text(
                                   'SIM ${message.simSlot! + 1}',
                                   style: TextStyle(

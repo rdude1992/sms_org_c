@@ -1,5 +1,6 @@
 import '../models/category.dart';
 import '../models/sms_message.dart';
+import '../utils/address_utils.dart';
 import '../utils/sms_extractors.dart';
 
 /// Ported from categorizeMessage(sender, content) in the source
@@ -240,9 +241,8 @@ class CategorizationService {
     }
 
     // Personal: only plain 10-digit senders (excludes shortcodes and
-    // alphanumeric sender IDs), after removing a +91/91 country-code prefix.
-    final cleanedNumber = sender.replaceFirst(RegExp(r'^\+?91'), '').replaceAll(RegExp(r'\D'), '');
-    if (RegExp(r'^\d{10}$').hasMatch(cleanedNumber)) return SmsCategory.personal;
+    // alphanumeric sender IDs) — see isPhoneNumberAddress.
+    if (isPhoneNumberAddress(sender)) return SmsCategory.personal;
 
     // Everything else (shortcodes, alphanumeric senders, etc.) defaults to updates.
     return SmsCategory.updates;

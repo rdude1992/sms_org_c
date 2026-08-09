@@ -6,6 +6,7 @@ import '../models/category.dart';
 import '../models/sim_info.dart';
 import '../models/sms_message.dart';
 import '../providers/sms_provider.dart';
+import '../utils/address_utils.dart';
 import '../utils/formatters.dart';
 import '../widgets/category_picker_sheet.dart';
 import '../widgets/date_separator.dart';
@@ -155,6 +156,12 @@ class _ThreadScreenState extends State<ThreadScreen> {
         }
         final conversation = matches.first;
         _address = conversation.address;
+        // Shortcodes and alphanumeric DLT sender IDs (bank/OTP/promo alerts)
+        // are one-way — the carrier just drops an SMS sent back to one, so
+        // showing a reply box that can never actually deliver anything
+        // would be misleading. Forwarding a message elsewhere still works
+        // via the per-bubble long-press menu either way.
+        final canReply = isPhoneNumberAddress(conversation.address);
         final messages = conversation.messages.reversed.toList(); // oldest first for chat view
 
         _loadDraftIfNeeded(provider);
@@ -236,59 +243,87 @@ class _ThreadScreenState extends State<ThreadScreen> {
                   },
                 ),
               ),
-              SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                  child: Row(
-                    children: [
-                      if (provider.activeSims.length > 1) ...[
-                        SimPicker(
-                          sims: provider.activeSims,
-                          selectedSubscriptionId: _selectedSubscriptionId,
-                          onChanged: (id) => setState(() => _selectedSubscriptionId = id),
-                          compact: true,
-                        ),
-                        const SizedBox(width: 8),
-                      ],
-                      Expanded(
-                        child: TextField(
-                          controller: _replyController,
-                          minLines: 1,
-                          maxLines: 4,
-                          decoration: InputDecoration(
-                            hintText: 'Type a message',
-                            filled: true,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(24),
-                              borderSide: BorderSide.none,
+              if (canReply)
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                    child: Row(
+                      children: [
+                        if (provider.activeSims.length > 1) ...[
+                          SimPicker(
+                            sims: provider.activeSims,
+                            selectedSubscriptionId: _selectedSubscriptionId,
+                            onChanged: (id) => setState(() => _selectedSubscriptionId = id),
+                            compact: true,
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        Expanded(
+                          child: TextField(
+                            controller: _replyController,
+                            minLines: 1,
+                            maxLines: 4,
+                            decoration: InputDecoration(
+                              hintText: 'Type a message',
+                              filled: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: BorderSide.none,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton.filled(
-                        icon: const Icon(Icons.send),
-                        onPressed: () async {
-                          final text = _replyController.text.trim();
-                          if (text.isEmpty) return;
-                          _replyController.clear();
-                          if (_draftId != null) {
-                            provider.deleteMessage(_draftId!);
-                            _draftId = null;
-                          }
-                          await provider.sendSms(
-                            conversation.address,
-                            text,
-                            subscriptionId: _selectedSubscriptionId,
-                          );
-                        },
-                      ),
-                    ],
+                        const SizedBox(width: 8),
+                        IconButton.filled(
+                          icon: const Icon(Icons.send),
+                          onPressed: () async {
+                            final text = _replyController.text.trim();
+                            if (text.isEmpty) return;
+                            _replyController.clear();
+                            if (_draftId != null) {
+                              provider.deleteMessage(_draftId!);
+                              _draftId = null;
+                            }
+                            await provider.sendSms(
+                              conversation.address,
+                              text,
+                              subscriptionId: _selectedSubscriptionId,
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                SafeArea(
+                  top: false,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 15,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          "This sender doesn't accept replies",
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         );
