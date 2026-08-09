@@ -11,6 +11,7 @@ import '../services/contact_service.dart';
 import '../services/database_service.dart';
 import '../services/insights_service.dart';
 import '../services/sms_platform_service.dart';
+import '../services/spend_category_detector.dart';
 import '../services/transaction_parser_service.dart';
 
 enum LoadState { idle, loading, ready, error }
@@ -249,6 +250,7 @@ class SmsProvider extends ChangeNotifier {
     await _loadActiveSims();
     await _ensureCacheMatchesCurrentLogic();
     await refresh();
+    await _backfillSpendCategories();
     _listenForIncoming();
   }
 
@@ -347,6 +349,42 @@ class SmsProvider extends ChangeNotifier {
 
     await _db.clearAll();
     await _db.setMeta('categorizer_version', currentVersion);
+  }
+
+  /// One-time pass tagging already-cached transactions with a
+  /// [SpendCategory] that [SpendCategoryDetector] can confidently infer
+  /// from their merchant/body. Without this, only transactions parsed
+  /// *after* SpendCategoryDetector's rules existed would ever get an
+  /// automatic category — anything synced earlier (the bulk of a real
+  /// user's ~2000-message history) would stay "Uncategorised" forever,
+  /// since refresh() never re-processes a transaction once it's cached.
+  ///
+  /// Runs once per [SpendCategoryDetector.version] bump, then no-ops until
+  /// the rules next change (tracked the same way as
+  /// [_ensureCacheMatchesCurrentLogic]'s categorizer-version gate, just
+  /// without wiping anything — this only ever fills in a blank
+  /// [Transaction.spendCategory], never overwrites one the user set or a
+  /// transaction they've otherwise corrected).
+  Future<void> _backfillSpendCategories() async {
+    final storedVersion = await _db.getMeta('spend_category_version');
+    final currentVersion = SpendCategoryDetector.version.toString();
+    if (storedVersion != currentVersion) {
+      final updated = <Transaction>[];
+      for (var i = 0; i < _transactions.length; i++) {
+        final t = _transactions[i];
+        if (t.spendCategory != null || t.isOverridden) continue;
+        final detected = SpendCategoryDetector.detect(t);
+        if (detected == null) continue;
+        final withCategory = t.copyWith(spendCategory: detected);
+        _transactions[i] = withCategory;
+        updated.add(withCategory);
+      }
+      if (updated.isNotEmpty) {
+        await _db.saveTransactionsBulk(updated);
+        notifyListeners();
+      }
+      await _db.setMeta('spend_category_version', currentVersion);
+    }
   }
 
   Future<bool> requestDefaultSmsRole() async {
@@ -520,6 +558,39 @@ class SmsProvider extends ChangeNotifier {
     await refresh();
   }
 
+  /// Bulk equivalent of [setMessageCategory] for the current multi-select
+  /// — see MultiSelectAppBar's "Set category" action on the Inbox's flat
+  /// Messages list. Exists because manually categorising a couple thousand
+  /// pre-existing SMS one at a time isn't realistic; this lets a batch of
+  /// mis-filed messages (e.g. every promo SMS a particular sender ever
+  /// sent) get corrected in one pass instead. Routes through
+  /// setMessageCategory per message so each one gets the same
+  /// override-persistence and transaction/investment re-parse it would from
+  /// a single manual correction.
+  Future<void> setSelectedCategory(SmsCategory category) async {
+    final ids = selectedIds.toList();
+    clearSelection();
+    for (final id in ids) {
+      final message = messageById(id);
+      if (message != null) await setMessageCategory(message, category);
+    }
+  }
+
+  /// Bulk equivalent of the spend-category field in [updateTransaction] —
+  /// see TransactionListScreen's multi-select "Set category" action, for
+  /// tagging a batch of transactions SpendCategoryDetector left
+  /// "Uncategorised" (or got wrong) in one pass instead of one at a time.
+  Future<void> setSpendCategoryForTransactions(List<int> smsIds, SpendCategory? category) async {
+    for (final id in smsIds) {
+      final index = _transactions.indexWhere((t) => t.smsId == id);
+      if (index == -1) continue;
+      final updated = _transactions[index].copyWith(spendCategory: category, isOverridden: true);
+      _transactions[index] = updated;
+      await _db.saveTransaction(updated, isOverride: true);
+    }
+    notifyListeners();
+  }
+
   // ---- Single-item actions (swipe actions, long-press context menu) ----
 
   Future<void> deleteMessage(int id) async {
@@ -630,11 +701,11 @@ class SmsProvider extends ChangeNotifier {
   /// [transaction]'s type, instrument, merchant, or wallet — the case where
   /// the message genuinely is a transaction, but it's filed under the wrong
   /// Credited/Debited tab, the wrong Cards & Accounts bucket, or the wrong
-  /// merchant. Also where [spendCategory] gets set — unlike the other
-  /// fields here, nothing auto-detects it, so every value passed in is
-  /// something the user actually chose (or re-chose) in the edit form. (If
-  /// it isn't a transaction at all, use setMessageCategory instead — see
-  /// messageById.)
+  /// merchant. Also where [spendCategory] gets set from the edit form, and
+  /// (see [assignInstrumentToTransactions]) where [issuer]/[instrumentRef]
+  /// get manually pinned to a specific detected account when the SMS never
+  /// named one explicitly. (If it isn't a transaction at all, use
+  /// setMessageCategory instead — see messageById.)
   ///
   /// Persists as an override (see DatabaseService.saveTransaction) so it's
   /// never silently re-parsed or discarded by a later cache wipe. Also pins
@@ -650,6 +721,8 @@ class SmsProvider extends ChangeNotifier {
     String? merchant,
     String? walletType,
     SpendCategory? spendCategory,
+    String? issuer,
+    String? instrumentRef,
   }) async {
     final cleanedMerchant = merchant?.trim();
     final cleanedWallet = walletType?.trim();
@@ -659,8 +732,8 @@ class SmsProvider extends ChangeNotifier {
       amount: transaction.amount,
       direction: direction,
       instrument: instrument,
-      instrumentRef: transaction.instrumentRef,
-      issuer: transaction.issuer,
+      instrumentRef: instrumentRef ?? transaction.instrumentRef,
+      issuer: issuer ?? transaction.issuer,
       merchant: (cleanedMerchant == null || cleanedMerchant.isEmpty) ? null : cleanedMerchant,
       balanceAfter: transaction.balanceAfter,
       entityType: transaction.entityType,
@@ -690,6 +763,63 @@ class SmsProvider extends ChangeNotifier {
       message.isCategoryOverridden = true;
       notifyListeners();
     }
+  }
+
+  /// Detected bank/card accounts a transaction can be manually pinned to —
+  /// the pick-list for [assignInstrumentToTransactions]. Only instruments
+  /// with a known last-4 [InstrumentSummary.ref] qualify: assigning a
+  /// transaction to another ref-less "account" wouldn't actually link it
+  /// to anything more specific than it already is.
+  List<InstrumentSummary> get assignableInstruments => groupByInstrument(_transactions)
+      .where((s) => s.ref != null && (s.isBankAccount || s.isDebitCard || s.isCreditCard))
+      .toList();
+
+  /// Other transactions likely from the same real-world account as
+  /// [source] but which TransactionParserService couldn't pin down (e.g.
+  /// an NEFT debit that only names the recipient, never the user's own
+  /// account) — same SMS sender address as [source], still no
+  /// instrumentRef of their own, and not already manually corrected. This
+  /// is the "and similar messages" candidate set offered after assigning
+  /// [source] to a detected account — see [assignInstrumentToTransactions]
+  /// and AssignInstrumentSheet, which is expected to get the user's
+  /// explicit acceptance before more than [source] itself is ever passed
+  /// there.
+  List<Transaction> findSimilarUnassignedTransactions(Transaction source) {
+    final address = messageById(source.smsId)?.address;
+    if (address == null) return const [];
+    return _transactions.where((t) {
+      if (t.smsId == source.smsId) return false;
+      if (t.instrumentRef != null) return false;
+      if (t.isOverridden) return false;
+      return messageById(t.smsId)?.address == address;
+    }).toList();
+  }
+
+  /// Manually pins every transaction in [transactions] to one specific
+  /// detected account/card (an [assignableInstruments] entry) — for a
+  /// transaction whose SMS never included an explicit account number, so
+  /// TransactionParserService could tell it moved money but not through
+  /// which of the user's own accounts. Marks each as overridden, same as
+  /// [updateTransaction], so a later cache wipe or re-sync never silently
+  /// un-links it again.
+  Future<void> assignInstrumentToTransactions(
+    List<Transaction> transactions, {
+    required InstrumentType instrument,
+    required String? issuer,
+    required String? instrumentRef,
+  }) async {
+    for (final t in transactions) {
+      final updated = t.copyWith(
+        instrument: instrument,
+        issuer: issuer,
+        instrumentRef: instrumentRef,
+        isOverridden: true,
+      );
+      final index = _transactions.indexWhere((x) => x.smsId == t.smsId);
+      if (index != -1) _transactions[index] = updated;
+      await _db.saveTransaction(updated, isOverride: true);
+    }
+    notifyListeners();
   }
 
   /// User-driven correction for when TransactionParserService mis-detected

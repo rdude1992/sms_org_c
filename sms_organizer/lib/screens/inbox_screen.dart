@@ -79,6 +79,13 @@ class _InboxScreenState extends State<InboxScreen> {
                   onMarkRead: () => provider.markSelectedRead(true),
                   onMarkUnread: () => provider.markSelectedRead(false),
                   onDelete: provider.deleteSelected,
+                  // Chats-view selection ids are conversation stand-ins
+                  // (see ConversationTile's onTap) — bulk-recategorising
+                  // just each conversation's latest message would be
+                  // misleading, so this action only appears in Messages.
+                  onSetCategory: view == InboxView.messages
+                      ? () => showBulkCategoryPickerSheet(context, provider, provider.selectedIds.length)
+                      : null,
                 )
               : AppBar(
                   title: _isSearching

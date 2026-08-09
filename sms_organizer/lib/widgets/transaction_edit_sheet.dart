@@ -2,6 +2,60 @@ import 'package:flutter/material.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
 
+/// Bulk spend-category tagging for TransactionListScreen's multi-select —
+/// see SmsProvider.setSpendCategoryForTransactions. Includes an
+/// "Uncategorised" option so a batch that was auto-tagged wrong can be
+/// cleared in one pass too, not just set.
+Future<void> showBulkSpendCategorySheet(
+  BuildContext context,
+  SmsProvider provider,
+  List<int> smsIds,
+) {
+  return showModalBottomSheet(
+    context: context,
+    builder: (sheetContext) {
+      final scheme = Theme.of(sheetContext).colorScheme;
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Set category for ${smsIds.length} transaction${smsIds.length == 1 ? '' : 's'}',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: scheme.onSurface),
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            ListTile(
+              leading: const Icon(Icons.category_outlined),
+              title: const Text('Uncategorised'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                provider.setSpendCategoryForTransactions(smsIds, null);
+              },
+            ),
+            for (final category in SpendCategory.values)
+              ListTile(
+                leading: Icon(category.icon, color: category.color),
+                title: Text(category.label),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  provider.setSpendCategoryForTransactions(smsIds, category);
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 /// Bottom sheet letting the user correct a transaction's type, instrument,
 /// merchant, or wallet when TransactionParserService got it wrong — see
 /// SmsProvider.updateTransaction. Opens as a StatefulWidget (rather than the

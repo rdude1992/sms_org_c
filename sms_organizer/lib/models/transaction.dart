@@ -14,14 +14,15 @@ enum InstrumentType { debitCard, creditCard, bankAccount, upi, unknown }
 enum EntityType { bank, wallet, investment, cardService, unknown }
 
 /// What a transaction was actually *for* — Food, Transport, Bills, etc.
-/// Unlike every other classification in this file, nothing auto-detects
-/// this: a transaction starts uncategorised ([Transaction.spendCategory] is
-/// null) until the user tags it via SmsProvider.updateTransaction. There's
-/// no heuristic here to get wrong or maintain — "spend category" is a
-/// judgment call about a purchase's purpose that varies by transaction even
-/// for the same merchant (e.g. a supermarket run can be groceries or
-/// household goods), so it isn't inferred from merchant/instrument the way
-/// [EntityType] or [InstrumentType] are.
+/// [Transaction.spendCategory] starts null ("Uncategorised") until tagged —
+/// either by the user via SmsProvider.updateTransaction, or by a confident
+/// merchant/keyword match from SpendCategoryDetector. The detector is
+/// deliberately conservative and never overwrites a value the user chose
+/// (see there): "spend category" is a judgment call about a purchase's
+/// purpose that varies by transaction even for the same merchant (e.g. a
+/// supermarket run can be groceries or household goods), so anything it
+/// can't confidently infer from the merchant/body is left for the user
+/// rather than guessed.
 enum SpendCategory {
   foodDining,
   groceries,
@@ -146,6 +147,11 @@ SpendCategory? parseSpendCategory(String? name) {
   return null;
 }
 
+/// Sentinel default for [Transaction.copyWith]'s nullable-field params, so
+/// "not passed" (keep existing value) is distinguishable from "passed
+/// null" (clear the field).
+const _unset = Object();
+
 class Transaction {
   final int smsId;
   final DateTime date;
@@ -195,7 +201,9 @@ class Transaction {
   final bool isOverridden;
 
   /// What this transaction was actually for — null ("Uncategorised") until
-  /// the user tags it. See [SpendCategory]: nothing auto-detects this.
+  /// tagged, either by the user or by a confident SpendCategoryDetector
+  /// merchant/keyword match (see there — never [isOverridden], so it's
+  /// always a starting point rather than a claim about user intent).
   final SpendCategory? spendCategory;
 
   Transaction({
@@ -217,6 +225,44 @@ class Transaction {
     this.isOverridden = false,
     this.spendCategory,
   });
+
+  /// Field-level overrides on top of this transaction's existing values —
+  /// e.g. the spend-category backfill only ever needs to change one field,
+  /// and rebuilding the other dozen unchanged would just be noise at every
+  /// call site. `Object?`-sentinel params ([instrumentRef]/[issuer]) let a
+  /// caller explicitly clear a field to null (distinct from "leave it
+  /// alone") the same way the rest of this codebase's edit flows do.
+  Transaction copyWith({
+    TxnDirection? direction,
+    InstrumentType? instrument,
+    Object? instrumentRef = _unset,
+    Object? issuer = _unset,
+    Object? merchant = _unset,
+    Object? walletType = _unset,
+    bool? isOverridden,
+    Object? spendCategory = _unset,
+  }) {
+    return Transaction(
+      smsId: smsId,
+      date: date,
+      amount: amount,
+      direction: direction ?? this.direction,
+      instrument: instrument ?? this.instrument,
+      rawBody: rawBody,
+      instrumentRef: identical(instrumentRef, _unset) ? this.instrumentRef : instrumentRef as String?,
+      issuer: identical(issuer, _unset) ? this.issuer : issuer as String?,
+      merchant: identical(merchant, _unset) ? this.merchant : merchant as String?,
+      balanceAfter: balanceAfter,
+      entityType: entityType,
+      walletType: identical(walletType, _unset) ? this.walletType : walletType as String?,
+      billDueDate: billDueDate,
+      fastagWalletId: fastagWalletId,
+      vehicleNumber: vehicleNumber,
+      isOverridden: isOverridden ?? this.isOverridden,
+      spendCategory:
+          identical(spendCategory, _unset) ? this.spendCategory : spendCategory as SpendCategory?,
+    );
+  }
 
   /// Groups transactions the same way Insights buckets "by card / account" —
   /// a specific wallet name if there is one, else instrument+issuer+ref.

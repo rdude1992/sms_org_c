@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
 import '../widgets/search_toggle_mixin.dart';
+import '../widgets/transaction_edit_sheet.dart';
 import '../widgets/transaction_tile.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/total_stat.dart';
@@ -31,6 +32,22 @@ class TransactionListScreen extends StatefulWidget {
 
 class _TransactionListScreenState extends State<TransactionListScreen>
     with SearchToggleMixin<TransactionListScreen> {
+  // Local to this screen (unlike SmsProvider.selectedIds, which the Inbox's
+  // message/chat lists share) — a transaction drilldown is always opened
+  // fresh from Insights, so there's no cross-screen selection state to stay
+  // in sync with, and keeping it local avoids a stray selection left over
+  // from a different screen bleeding in here.
+  final Set<int> _selectedIds = {};
+  bool get _selecting => _selectedIds.isNotEmpty;
+
+  void _toggleSelected(int smsId) {
+    setState(() {
+      if (!_selectedIds.remove(smsId)) _selectedIds.add(smsId);
+    });
+  }
+
+  void _clearSelection() => setState(_selectedIds.clear);
+
   @override
   void dispose() {
     disposeSearch();
@@ -83,6 +100,25 @@ class _TransactionListScreenState extends State<TransactionListScreen>
 
     final emptyTitle = trimmedQuery.isEmpty ? 'No transactions in this range' : 'No matches for "$trimmedQuery"';
 
+    final appBarLeading =
+        _selecting ? IconButton(icon: const Icon(Icons.close), onPressed: _clearSelection) : null;
+    final appBarTitle = _selecting
+        ? Text('${_selectedIds.length} selected')
+        : searchAppBarTitle(widget.title, hintText: 'Search transactions');
+    final appBarActions = _selecting
+        ? [
+            IconButton(
+              icon: const Icon(Icons.label_outline),
+              tooltip: 'Set category',
+              onPressed: () => showBulkSpendCategorySheet(
+                context,
+                context.read<SmsProvider>(),
+                _selectedIds.toList(),
+              ),
+            ),
+          ]
+        : searchAppBarActions();
+
     final totalsHeader = Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -107,9 +143,10 @@ class _TransactionListScreenState extends State<TransactionListScreen>
     if (!showTabs) {
       return Scaffold(
         appBar: AppBar(
-          title: searchAppBarTitle(widget.title, hintText: 'Search transactions'),
-          actions: searchAppBarActions(),
-          bottom: isSearching || widget.subtitle == null
+          leading: appBarLeading,
+          title: appBarTitle,
+          actions: appBarActions,
+          bottom: _selecting || isSearching || widget.subtitle == null
               ? null
               : PreferredSize(
                   preferredSize: const Size.fromHeight(28),
@@ -123,7 +160,15 @@ class _TransactionListScreenState extends State<TransactionListScreen>
         body: Column(
           children: [
             totalsHeader,
-            Expanded(child: _TransactionListView(transactions: sorted, emptyText: emptyTitle)),
+            Expanded(
+              child: _TransactionListView(
+                transactions: sorted,
+                emptyText: emptyTitle,
+                selectedIds: _selectedIds,
+                selecting: _selecting,
+                onToggleSelected: _toggleSelected,
+              ),
+            ),
           ],
         ),
       );
@@ -133,8 +178,9 @@ class _TransactionListScreenState extends State<TransactionListScreen>
       length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: searchAppBarTitle(widget.title, hintText: 'Search transactions'),
-          actions: searchAppBarActions(),
+          leading: appBarLeading,
+          title: appBarTitle,
+          actions: appBarActions,
           bottom: PreferredSize(
             preferredSize: Size.fromHeight(isSearching || widget.subtitle == null ? 48 : 68),
             child: Column(
@@ -167,11 +213,27 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                   Expanded(
                     child: TabBarView(
                       children: [
-                        _TransactionListView(transactions: sorted, emptyText: emptyTitle),
                         _TransactionListView(
-                            transactions: credited, emptyText: 'No credited transactions.'),
+                          transactions: sorted,
+                          emptyText: emptyTitle,
+                          selectedIds: _selectedIds,
+                          selecting: _selecting,
+                          onToggleSelected: _toggleSelected,
+                        ),
                         _TransactionListView(
-                            transactions: debited, emptyText: 'No debited transactions.'),
+                          transactions: credited,
+                          emptyText: 'No credited transactions.',
+                          selectedIds: _selectedIds,
+                          selecting: _selecting,
+                          onToggleSelected: _toggleSelected,
+                        ),
+                        _TransactionListView(
+                          transactions: debited,
+                          emptyText: 'No debited transactions.',
+                          selectedIds: _selectedIds,
+                          selecting: _selecting,
+                          onToggleSelected: _toggleSelected,
+                        ),
                       ],
                     ),
                   ),
@@ -185,8 +247,17 @@ class _TransactionListScreenState extends State<TransactionListScreen>
 class _TransactionListView extends StatelessWidget {
   final List<Transaction> transactions;
   final String emptyText;
+  final Set<int> selectedIds;
+  final bool selecting;
+  final ValueChanged<int> onToggleSelected;
 
-  const _TransactionListView({required this.transactions, required this.emptyText});
+  const _TransactionListView({
+    required this.transactions,
+    required this.emptyText,
+    required this.selectedIds,
+    required this.selecting,
+    required this.onToggleSelected,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -195,7 +266,17 @@ class _TransactionListView extends StatelessWidget {
     }
     return ListView.builder(
       itemCount: transactions.length,
-      itemBuilder: (context, index) => TransactionTile(transaction: transactions[index]),
+      itemBuilder: (context, index) {
+        final t = transactions[index];
+        return TransactionTile(
+          transaction: t,
+          selected: selectedIds.contains(t.smsId),
+          selectionMode: selecting,
+          onTap: selecting ? () => onToggleSelected(t.smsId) : null,
+          onLongPress: selecting ? () => onToggleSelected(t.smsId) : null,
+          onSelectStart: () => onToggleSelected(t.smsId),
+        );
+      },
     );
   }
 }

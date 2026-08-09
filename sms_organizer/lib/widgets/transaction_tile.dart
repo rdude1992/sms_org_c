@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
+import 'assign_instrument_sheet.dart';
 import 'category_picker_sheet.dart';
 import 'detected_sms_sheet.dart';
 import 'transaction_edit_sheet.dart';
@@ -10,7 +11,33 @@ import 'transaction_edit_sheet.dart';
 class TransactionTile extends StatelessWidget {
   final Transaction transaction;
 
-  const TransactionTile({super.key, required this.transaction});
+  /// Multi-select support for TransactionListScreen's bulk spend-category
+  /// action — mirrors ConversationTile's selected/selectionMode pattern.
+  /// [onTap]/[onLongPress] override the tile's own detail-sheet/actions-menu
+  /// behaviour while set, so a tap toggles selection instead of opening
+  /// anything.
+  final bool selected;
+  final bool selectionMode;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+
+  /// When set, adds a "Select" entry to the long-press actions sheet (only
+  /// reachable while [onLongPress] is null, i.e. not already selecting) so
+  /// multi-select is still one tap away without long-press itself having to
+  /// mean "start selecting" — that would bury the sheet's other actions
+  /// (Edit transaction, Assign to account, Not a transaction?) behind
+  /// selection mode entirely.
+  final VoidCallback? onSelectStart;
+
+  const TransactionTile({
+    super.key,
+    required this.transaction,
+    this.selected = false,
+    this.selectionMode = false,
+    this.onTap,
+    this.onLongPress,
+    this.onSelectStart,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -34,16 +61,24 @@ class TransactionTile extends StatelessWidget {
             ? Icons.remove
             : (isCredit ? Icons.arrow_downward : Icons.arrow_upward);
 
+    final scheme = Theme.of(context).colorScheme;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       minVerticalPadding: 10,
-      onTap: () => _showDetails(context),
-      onLongPress: () => _showActions(context),
-      leading: CircleAvatar(
-        radius: 20,
-        backgroundColor: color.withOpacity(0.12),
-        child: Icon(icon, color: color, size: 18),
-      ),
+      selected: selected,
+      selectedTileColor: scheme.primary.withOpacity(0.06),
+      onTap: onTap ?? () => _showDetails(context),
+      onLongPress: onLongPress ?? () => _showActions(context),
+      leading: selectionMode
+          ? Icon(
+              selected ? Icons.check_circle : Icons.radio_button_unchecked,
+              color: selected ? scheme.primary : scheme.outline,
+            )
+          : CircleAvatar(
+              radius: 20,
+              backgroundColor: color.withOpacity(0.12),
+              child: Icon(icon, color: color, size: 18),
+            ),
       title: Padding(
         padding: const EdgeInsets.only(bottom: 2),
         child: Row(
@@ -146,6 +181,16 @@ class TransactionTile extends StatelessWidget {
                   showTransactionEditSheet(context, provider, transaction);
                 },
               ),
+              if (transaction.instrumentRef == null)
+                ListTile(
+                  leading: const Icon(Icons.account_balance_outlined),
+                  title: const Text('Assign to account'),
+                  subtitle: const Text("SMS didn't name a specific account — pick one of yours"),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    showAssignInstrumentSheet(context, provider, transaction);
+                  },
+                ),
               ListTile(
                 leading: const Icon(Icons.label_outline),
                 title: const Text('Not a transaction?'),
@@ -162,6 +207,15 @@ class TransactionTile extends StatelessWidget {
                         showCategoryPickerSheet(context, provider, message);
                       },
               ),
+              if (onSelectStart != null)
+                ListTile(
+                  leading: const Icon(Icons.check_circle_outline),
+                  title: const Text('Select'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    onSelectStart!();
+                  },
+                ),
               const SizedBox(height: 8),
             ],
           ),
