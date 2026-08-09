@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/transaction.dart';
+import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/ui/empty_state.dart';
@@ -11,21 +13,28 @@ import 'transaction_list_screen.dart';
 /// activity (unlike [InstrumentListScreen], merchants aren't bucketed into
 /// typed sections; there's no equivalent grouping to make there).
 class MerchantListScreen extends StatelessWidget {
-  final List<MerchantSummary> merchants;
   final List<Transaction> transactions;
   final String? subtitle;
 
   const MerchantListScreen({
     super.key,
-    required this.merchants,
     required this.transactions,
     this.subtitle,
   });
 
   @override
   Widget build(BuildContext context) {
-    final sorted = [...merchants]
-      ..sort((a, b) => (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit));
+    // [transactions] is a one-off snapshot from whichever Insights screen
+    // pushed this route. Re-deriving a live copy from SmsProvider (matched
+    // by id) and re-grouping it into merchant summaries means a correction
+    // made to a transaction deeper in a drilldown (see TransactionTile's
+    // "Edit transaction"/"Not a transaction?" actions) is reflected here
+    // too, instead of this screen staying stale until it's popped and
+    // re-opened.
+    final ids = transactions.map((t) => t.smsId).toSet();
+    final liveTransactions =
+        context.watch<SmsProvider>().transactions.where((t) => ids.contains(t.smsId)).toList();
+    final sorted = groupByMerchant(liveTransactions);
 
     return Scaffold(
       appBar: AppBar(
@@ -53,21 +62,21 @@ class MerchantListScreen extends StatelessWidget {
               itemCount: sorted.length,
               itemBuilder: (context, index) => _MerchantTile(
                 summary: sorted[index],
-                transactions: transactions,
-                onTap: () => _openDrilldown(context, sorted[index]),
+                transactions: liveTransactions,
+                onTap: () => _openDrilldown(context, sorted[index], liveTransactions),
               ),
             ),
     );
   }
 
-  void _openDrilldown(BuildContext context, MerchantSummary s) {
+  void _openDrilldown(BuildContext context, MerchantSummary s, List<Transaction> liveTransactions) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => TransactionListScreen(
           title: s.displayName,
           subtitle: subtitle,
-          transactions: transactions.where((t) => t.merchantGroupKey == s.key).toList(),
+          transactions: liveTransactions.where((t) => t.merchantGroupKey == s.key).toList(),
         ),
       ),
     );

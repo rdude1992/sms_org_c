@@ -46,6 +46,61 @@ class TransactionListScreen extends StatelessWidget {
     final creditTotal = credited.fold<double>(0, (a, t) => a + t.amount);
     final debitTotal = debited.fold<double>(0, (a, t) => a + t.amount);
 
+    // A list where every transaction shares one direction — e.g. opened via
+    // the Insights "Credited"/"Debited" total card, or (the common case) a
+    // merchant/instrument that's purely spend or purely income — makes the
+    // All/Credited/Debited tabs pointless: one tab is empty and the other is
+    // identical to "All". Skip the tab bar entirely rather than show two
+    // dead tabs. An empty list falls through to the tabbed branch too (its
+    // EmptyState looks the same either way).
+    final isPureCredit = sorted.isNotEmpty && credited.length == sorted.length;
+    final isPureDebit = sorted.isNotEmpty && debited.length == sorted.length;
+    final showTabs = !isPureCredit && !isPureDebit;
+
+    final totalsHeader = Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      color: scheme.surfaceVariant.withOpacity(0.4),
+      child: Row(
+        children: [
+          Expanded(
+            child: TotalStat(label: 'Credited', value: creditTotal, color: const Color(0xFF10B981)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TotalStat(label: 'Debited', value: debitTotal, color: const Color(0xFFEF4444)),
+          ),
+          Text(
+            '${sorted.length} txns',
+            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+
+    if (!showTabs) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(title),
+          bottom: subtitle == null
+              ? null
+              : PreferredSize(
+                  preferredSize: const Size.fromHeight(28),
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(subtitle!, style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                  ),
+                ),
+        ),
+        body: Column(
+          children: [
+            totalsHeader,
+            Expanded(child: _TransactionListView(transactions: sorted, emptyText: 'No transactions.')),
+          ],
+        ),
+      );
+    }
+
     return DefaultTabController(
       length: 3,
       child: Scaffold(
@@ -75,26 +130,7 @@ class TransactionListScreen extends StatelessWidget {
             ? const EmptyState(icon: Icons.receipt_long_outlined, title: 'No transactions in this range')
             : Column(
                 children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    color: scheme.surfaceVariant.withOpacity(0.4),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TotalStat(label: 'Credited', value: creditTotal, color: const Color(0xFF10B981)),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TotalStat(label: 'Debited', value: debitTotal, color: const Color(0xFFEF4444)),
-                        ),
-                        Text(
-                          '${sorted.length} txns',
-                          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                        ),
-                      ],
-                    ),
-                  ),
+                  totalsHeader,
                   Expanded(
                     child: TabBarView(
                       children: [

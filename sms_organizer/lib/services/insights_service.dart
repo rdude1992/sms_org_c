@@ -170,8 +170,6 @@ class InsightsService {
 
     double totalCredit = 0;
     double totalDebit = 0;
-    final Map<String, InstrumentSummary> instrumentMap = {};
-    final Map<String, MerchantSummary> merchantMap = {};
     final Map<String, TrendPoint> trendMap = {};
 
     for (final t in filtered) {
@@ -181,39 +179,6 @@ class InsightsService {
         totalDebit += t.amount;
       }
 
-      final summary = instrumentMap.putIfAbsent(
-        t.instrumentGroupKey,
-        () => InstrumentSummary(
-          key: t.instrumentGroupKey,
-          entityType: t.entityType,
-          ref: t.instrumentRef,
-          issuer: t.issuer,
-          walletType: t.walletType,
-        ),
-      );
-      summary.types.add(t.instrument);
-      if (t.direction == TxnDirection.credit) {
-        summary.totalCredit += t.amount;
-      } else if (t.direction == TxnDirection.debit) {
-        summary.totalDebit += t.amount;
-      }
-      summary.count += 1;
-      summary._considerBalance(t.balanceAfter, t.date);
-
-      final merchantKey = t.merchantGroupKey;
-      if (merchantKey != null) {
-        final merchant = merchantMap.putIfAbsent(
-          merchantKey,
-          () => MerchantSummary(key: merchantKey, displayName: t.merchant!.trim()),
-        );
-        if (t.direction == TxnDirection.credit) {
-          merchant.totalCredit += t.amount;
-        } else if (t.direction == TxnDirection.debit) {
-          merchant.totalDebit += t.amount;
-        }
-        merchant.count += 1;
-      }
-
       final bucketStart = trendBucketStart(t.date, granularity);
       final existing = trendMap[bucketStart.toIso8601String()];
       final newCredit = (existing?.credit ?? 0) + (t.direction == TxnDirection.credit ? t.amount : 0);
@@ -221,11 +186,9 @@ class InsightsService {
       trendMap[bucketStart.toIso8601String()] = TrendPoint(bucketStart, newCredit, newDebit);
     }
 
-    final trendList = trendMap.values.toList()..sort((a, b) => a.date.compareTo(b.date));
-    final instrumentList = instrumentMap.values.toList()
-      ..sort((a, b) => (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit));
-    final merchantList = merchantMap.values.toList()
-      ..sort((a, b) => (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit));
+    final trendList = _zeroFillTrend(trendMap.values.toList(), from, to, granularity);
+    final instrumentList = groupByInstrument(filtered);
+    final merchantList = groupByMerchant(filtered);
 
     double invested = 0;
     double redeemed = 0;
@@ -257,6 +220,70 @@ class InsightsService {
 
 }
 
+/// Groups [transactions] by [Transaction.instrumentGroupKey] into
+/// per-instrument totals — a top-level function (not a method on
+/// [InsightsService]) so it doubles as the re-derivation logic a drilldown
+/// screen can call directly on a live subset of transactions (matched by
+/// id) rather than carrying a static summary snapshot computed once at
+/// navigation time. See InstrumentListScreen.
+///
+/// Only credit/debit transactions count toward [InstrumentSummary.count] —
+/// a reversed or unknown-direction transaction still contributes to
+/// [InstrumentSummary.types] (so its instrument still shows up at all) but
+/// is excluded from the count, keeping "N transactions" in lockstep with
+/// what totalCredit/totalDebit actually add up to instead of over-counting
+/// against them.
+List<InstrumentSummary> groupByInstrument(List<Transaction> transactions) {
+  final map = <String, InstrumentSummary>{};
+  for (final t in transactions) {
+    final summary = map.putIfAbsent(
+      t.instrumentGroupKey,
+      () => InstrumentSummary(
+        key: t.instrumentGroupKey,
+        entityType: t.entityType,
+        ref: t.instrumentRef,
+        issuer: t.issuer,
+        walletType: t.walletType,
+      ),
+    );
+    summary.types.add(t.instrument);
+    if (t.direction == TxnDirection.credit) {
+      summary.totalCredit += t.amount;
+      summary.count += 1;
+    } else if (t.direction == TxnDirection.debit) {
+      summary.totalDebit += t.amount;
+      summary.count += 1;
+    }
+    summary._considerBalance(t.balanceAfter, t.date);
+  }
+  return map.values.toList()
+    ..sort((a, b) => (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit));
+}
+
+/// Same idea as [groupByInstrument], grouped by [Transaction.merchantGroupKey]
+/// — see there for why only credit/debit transactions count toward
+/// [MerchantSummary.count].
+List<MerchantSummary> groupByMerchant(List<Transaction> transactions) {
+  final map = <String, MerchantSummary>{};
+  for (final t in transactions) {
+    final merchantKey = t.merchantGroupKey;
+    if (merchantKey == null) continue;
+    final merchant = map.putIfAbsent(
+      merchantKey,
+      () => MerchantSummary(key: merchantKey, displayName: t.merchant!.trim()),
+    );
+    if (t.direction == TxnDirection.credit) {
+      merchant.totalCredit += t.amount;
+      merchant.count += 1;
+    } else if (t.direction == TxnDirection.debit) {
+      merchant.totalDebit += t.amount;
+      merchant.count += 1;
+    }
+  }
+  return map.values.toList()
+    ..sort((a, b) => (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit));
+}
+
 /// Truncates [date] to the start of its bucket for [granularity] — a
 /// calendar day, the Monday of its week, or the 1st of its month. Shared
 /// (not just used by [InsightsService.build]) so other screens that bucket
@@ -272,4 +299,49 @@ DateTime trendBucketStart(DateTime date, TrendGranularity granularity) {
     case TrendGranularity.month:
       return DateTime(date.year, date.month);
   }
+}
+
+/// Every bucket-start date from [start] to [end] inclusive, stepping by
+/// [granularity] — used to fill in zero-value buckets across a trend
+/// chart's full time range rather than silently omitting the ones with no
+/// data, which would compress the x-axis (bars stop being evenly spaced in
+/// time, and a gap becomes invisible) and skew any "average per bucket"
+/// figure derived from the point count (see TrendBarChart).
+List<DateTime> bucketStartsBetween(DateTime start, DateTime end, TrendGranularity granularity) {
+  final startBucket = trendBucketStart(start, granularity);
+  final endBucket = trendBucketStart(end, granularity);
+  final result = <DateTime>[];
+  var current = startBucket;
+  while (!current.isAfter(endBucket)) {
+    result.add(current);
+    current = switch (granularity) {
+      TrendGranularity.day => current.add(const Duration(days: 1)),
+      TrendGranularity.week => current.add(const Duration(days: 7)),
+      TrendGranularity.month => DateTime(current.year, current.month + 1, 1),
+    };
+  }
+  return result;
+}
+
+/// Fills gaps in [points] (only built for buckets that actually had a
+/// transaction) with zero-value entries so a trend chart's bars are evenly
+/// spaced in time — a month with no spend gets a visible zero bar instead of
+/// silently vanishing from between its neighbours. Falls back to the
+/// earliest/latest point's own date when [from]/[to] is null (the "all
+/// time" range has no explicit bound to extend to), so allTime still stops
+/// at the actual data rather than manufacturing empty buckets before/after it.
+List<TrendPoint> _zeroFillTrend(
+  List<TrendPoint> points,
+  DateTime? from,
+  DateTime? to,
+  TrendGranularity granularity,
+) {
+  if (points.isEmpty) return [];
+  final sorted = [...points]..sort((a, b) => a.date.compareTo(b.date));
+  final rangeStart = from ?? sorted.first.date;
+  final rangeEnd = to ?? sorted.last.date;
+  final byDate = {for (final p in sorted) p.date: p};
+  return [
+    for (final d in bucketStartsBetween(rangeStart, rangeEnd, granularity)) byDate[d] ?? TrendPoint(d, 0, 0),
+  ];
 }

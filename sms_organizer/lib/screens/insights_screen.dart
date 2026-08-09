@@ -61,6 +61,25 @@ extension on InsightsRange {
     }
   }
 
+  /// How many calendar months back the "vs prev." comparison window should
+  /// be shifted — null for `allTime`, which has no meaningful prior period.
+  /// `thisYear` shifts a full 12 months rather than "however many months
+  /// have elapsed so far this year", so it reads as a year-over-year
+  /// comparison (same Jan 1–to-date window, one year earlier) rather than
+  /// an odd partial-year lookback.
+  int? get comparisonMonthsBack {
+    switch (this) {
+      case InsightsRange.allTime:
+        return null;
+      case InsightsRange.thisMonth:
+        return 1;
+      case InsightsRange.last3Months:
+        return 3;
+      case InsightsRange.thisYear:
+        return 12;
+    }
+  }
+
   String get trendTitle {
     switch (trendGranularity) {
       case TrendGranularity.day:
@@ -71,6 +90,29 @@ extension on InsightsRange {
         return 'Monthly trend';
     }
   }
+}
+
+/// [date] shifted back by [months] calendar months, clamping the day of
+/// month to the target month's actual length (e.g. Aug 31 minus one month
+/// lands on Jul 31, not an overflowed Aug 1 via naive DateTime normalisation)
+/// so a previous-period comparison never silently rolls into the wrong
+/// month. Time-of-day is preserved so a same-time-of-day `to` bound (e.g.
+/// "now") shifts cleanly too.
+DateTime _shiftMonths(DateTime date, int months) {
+  final targetYear = date.year;
+  final targetMonth = date.month - months;
+  final normalized = DateTime(targetYear, targetMonth, 1);
+  final daysInTargetMonth = DateTime(normalized.year, normalized.month + 1, 0).day;
+  final day = date.day > daysInTargetMonth ? daysInTargetMonth : date.day;
+  return DateTime(
+    normalized.year,
+    normalized.month,
+    day,
+    date.hour,
+    date.minute,
+    date.second,
+    date.millisecond,
+  );
 }
 
 class InsightsScreen extends StatefulWidget {
@@ -92,14 +134,24 @@ class _InsightsScreenState extends State<InsightsScreen> {
         final summary =
             provider.insightsSummary(from: from, to: to, granularity: _range.trendGranularity);
 
-        // Previous period of equal length, for the trend deltas — undefined
-        // (and hidden) for "All time" since there's no prior window to
-        // compare against.
+        // Previous comparable period for the trend deltas — a true
+        // calendar-month shift (see InsightsRange.comparisonMonthsBack), not
+        // a raw duration subtraction. The old approach anchored the window
+        // at `from` and walked back by however many days had elapsed since
+        // it, which degenerates badly early in a period — e.g. on the 2nd of
+        // the month it compared a single day against a single day from the
+        // month before, and the compared dates weren't even the same
+        // calendar days. Shifting both bounds back by whole months instead
+        // gives "day 1–9 of this month" vs "day 1–9 of last month" and
+        // "Jan 1–Aug 9 this year" vs "Jan 1–Aug 9 last year" — genuinely
+        // comparable windows regardless of where in the period "now" falls.
+        // Undefined (and hidden) for "All time" since there's no prior
+        // window to compare against.
         InsightsSummary? previousSummary;
-        if (from != null) {
-          final length = (to ?? now).difference(from);
-          final prevTo = from;
-          final prevFrom = from.subtract(length);
+        final monthsBack = _range.comparisonMonthsBack;
+        if (from != null && monthsBack != null) {
+          final prevFrom = _shiftMonths(from, monthsBack);
+          final prevTo = _shiftMonths(to ?? now, monthsBack);
           previousSummary = provider.insightsSummary(from: prevFrom, to: prevTo);
         }
 
@@ -186,7 +238,6 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                         context,
                                         MaterialPageRoute(
                                           builder: (_) => InstrumentListScreen(
-                                            instruments: summary.byInstrument,
                                             transactions: filteredTransactions,
                                             subtitle: _range.label,
                                           ),
@@ -239,7 +290,6 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                         context,
                                         MaterialPageRoute(
                                           builder: (_) => MerchantListScreen(
-                                            merchants: summary.byMerchant,
                                             transactions: filteredTransactions,
                                             subtitle: _range.label,
                                           ),
@@ -290,6 +340,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                           MaterialPageRoute(
                                             builder: (_) => InvestmentListScreen(
                                               investments: filteredInvestments,
+                                              allInvestments: provider.investments,
                                               subtitle: _range.label,
                                             ),
                                           ),
@@ -308,7 +359,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                       subtitle: _range.label,
                                       transactions: filteredTransactions,
                                     ),
-                                    child: Text('${filteredTransactions.length} total · See all'),
+                                    child: Text('${summary.transactionCount} total · See all'),
                                   ),
                                 ],
                               ),
@@ -558,9 +609,19 @@ class _TrendChart extends StatelessWidget {
   }
 }
 
-/// The top 6 instruments each get their own [BreakdownDonut] slice, with
-/// anything past that folded into a single "Other" slice so the chart
-/// doesn't fragment into slivers once someone has a dozen linked cards.
+/// The top 6 instruments by *spend* (debit only) each get their own
+/// [BreakdownDonut] slice, with anything past that folded into a single
+/// "Other" slice so the chart doesn't fragment into slivers once someone
+/// has a dozen linked cards.
+///
+/// Deliberately ranks and sizes slices by [InstrumentSummary.totalDebit]
+/// alone, not totalCredit+totalDebit — a primarily-income account (e.g. a
+/// salary account) would otherwise dominate a chart that reads as "where
+/// does my money go", inflated by money arriving rather than being spent.
+/// An instrument with no debit activity in range doesn't get a slice at
+/// all; it still shows up in the row list below with both its credit and
+/// debit totals, so nothing is hidden — just not folded into a spend pie
+/// it isn't part of.
 class _InstrumentDonut extends StatelessWidget {
   final List<InstrumentSummary> instruments;
   final List<Transaction> filteredTransactions;
@@ -574,14 +635,16 @@ class _InstrumentDonut extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final top = instruments.take(6).toList();
-    final otherTotal =
-        instruments.skip(6).fold<double>(0, (a, s) => a + s.totalCredit + s.totalDebit);
+    final bySpend = instruments.where((s) => s.totalDebit > 0).toList()
+      ..sort((a, b) => b.totalDebit.compareTo(a.totalDebit));
+    final top = bySpend.take(6).toList();
+    final otherTotal = bySpend.skip(6).fold<double>(0, (a, s) => a + s.totalDebit);
 
     return BreakdownDonut(
       labels: [for (final s in top) s.displayName, if (otherTotal > 0) 'Other'],
       keys: [for (final s in top) s.key, if (otherTotal > 0) null],
-      values: [for (final s in top) s.totalCredit + s.totalDebit, if (otherTotal > 0) otherTotal],
+      values: [for (final s in top) s.totalDebit, if (otherTotal > 0) otherTotal],
+      centerLabel: 'spend',
       onTapKey: (key) {
         final match = instruments.firstWhere((s) => s.key == key);
         Navigator.push(
@@ -599,8 +662,10 @@ class _InstrumentDonut extends StatelessWidget {
   }
 }
 
-/// Same idea as [_InstrumentDonut], grouped by [Transaction.merchantGroupKey]
-/// instead of by instrument.
+/// Same idea as [_InstrumentDonut] — ranked and sized by
+/// [MerchantSummary.totalDebit] alone, not totalCredit+totalDebit, for the
+/// same "this is a spend chart, not an activity chart" reason — grouped by
+/// [Transaction.merchantGroupKey] instead of by instrument.
 class _MerchantDonut extends StatelessWidget {
   final List<MerchantSummary> merchants;
   final List<Transaction> filteredTransactions;
@@ -614,13 +679,16 @@ class _MerchantDonut extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final top = merchants.take(6).toList();
-    final otherTotal = merchants.skip(6).fold<double>(0, (a, s) => a + s.totalCredit + s.totalDebit);
+    final bySpend = merchants.where((s) => s.totalDebit > 0).toList()
+      ..sort((a, b) => b.totalDebit.compareTo(a.totalDebit));
+    final top = bySpend.take(6).toList();
+    final otherTotal = bySpend.skip(6).fold<double>(0, (a, s) => a + s.totalDebit);
 
     return BreakdownDonut(
       labels: [for (final s in top) s.displayName, if (otherTotal > 0) 'Other'],
       keys: [for (final s in top) s.key, if (otherTotal > 0) null],
-      values: [for (final s in top) s.totalCredit + s.totalDebit, if (otherTotal > 0) otherTotal],
+      values: [for (final s in top) s.totalDebit, if (otherTotal > 0) otherTotal],
+      centerLabel: 'spend',
       onTapKey: (key) {
         final match = merchants.firstWhere((s) => s.key == key);
         Navigator.push(

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/transaction.dart';
+import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/ui/empty_state.dart';
@@ -15,19 +17,28 @@ import 'transaction_list_screen.dart';
 /// issuer + last-4, see [Transaction.instrumentGroupKey]) shows up once,
 /// under Debit Cards, with a "Debit Card + Bank Account" badge.
 class InstrumentListScreen extends StatelessWidget {
-  final List<InstrumentSummary> instruments;
   final List<Transaction> transactions;
   final String? subtitle;
 
   const InstrumentListScreen({
     super.key,
-    required this.instruments,
     required this.transactions,
     this.subtitle,
   });
 
   @override
   Widget build(BuildContext context) {
+    // [transactions] is a one-off snapshot from whichever Insights screen
+    // pushed this route. Re-deriving a live copy from SmsProvider (matched
+    // by id) and re-grouping it into instrument summaries means a
+    // correction made to a transaction deeper in a drilldown (see
+    // TransactionTile's "Edit transaction"/"Not a transaction?" actions) is
+    // reflected here too, instead of this screen staying stale until it's
+    // popped and re-opened.
+    final ids = transactions.map((t) => t.smsId).toSet();
+    final liveTransactions =
+        context.watch<SmsProvider>().transactions.where((t) => ids.contains(t.smsId)).toList();
+    final instruments = groupByInstrument(liveTransactions);
     final sections = _bucket(context, instruments);
 
     return Scaffold(
@@ -58,22 +69,22 @@ class InstrumentListScreen extends StatelessWidget {
                   if (section.items.isNotEmpty)
                     _Section(
                       section: section,
-                      transactions: transactions,
-                      onTapItem: (s) => _openDrilldown(context, s),
+                      transactions: liveTransactions,
+                      onTapItem: (s) => _openDrilldown(context, s, liveTransactions),
                     ),
               ],
             ),
     );
   }
 
-  void _openDrilldown(BuildContext context, InstrumentSummary s) {
+  void _openDrilldown(BuildContext context, InstrumentSummary s, List<Transaction> liveTransactions) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => TransactionListScreen(
           title: s.displayName,
           subtitle: subtitle,
-          transactions: transactions.where((t) => t.instrumentGroupKey == s.key).toList(),
+          transactions: liveTransactions.where((t) => t.instrumentGroupKey == s.key).toList(),
         ),
       ),
     );

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/transaction.dart';
+import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/investment_tile.dart';
@@ -76,12 +78,40 @@ class InvestmentListScreen extends StatelessWidget {
   final String? subtitle;
   final List<InvestmentEvent> investments;
 
-  const InvestmentListScreen({super.key, required this.investments, this.subtitle});
+  /// The true, unscoped superset [investments] was drawn from — e.g. every
+  /// investment ever detected, when [investments] is only this month's. The
+  /// "By AMC" tab's own date-range picker filters from this instead of
+  /// [investments], so picking a wider window there always has an effect
+  /// instead of silently being a no-op against an already-narrowed list (see
+  /// _AmcAnalytics). Defaults to [investments] itself when omitted — correct
+  /// for a drilldown that's already maximally specific (e.g. one provider's
+  /// events), where there's no broader superset to offer.
+  final List<InvestmentEvent>? allInvestments;
+
+  const InvestmentListScreen({
+    super.key,
+    required this.investments,
+    this.allInvestments,
+    this.subtitle,
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final sorted = [...investments]..sort((a, b) => b.date.compareTo(a.date));
+
+    // Both [investments] and [allInvestments] are one-off snapshots handed
+    // down at navigation time; re-deriving live copies from SmsProvider
+    // (matched by id) means this screen keeps reflecting reality rather than
+    // going stale the moment something changes elsewhere in the app.
+    final providerInvestments = context.watch<SmsProvider>().investments;
+    final scopedIds = investments.map((i) => i.smsId).toSet();
+    final liveInvestments =
+        providerInvestments.where((i) => scopedIds.contains(i.smsId)).toList();
+    final fullIds = (allInvestments ?? investments).map((i) => i.smsId).toSet();
+    final liveAllInvestments =
+        providerInvestments.where((i) => fullIds.contains(i.smsId)).toList();
+
+    final sorted = [...liveInvestments]..sort((a, b) => b.date.compareTo(a.date));
     final invested = sorted.where((i) => !i.kind.isRedemption).toList();
     final redeemed = sorted.where((i) => i.kind.isRedemption).toList();
     final investedTotal = invested.fold<double>(0, (a, i) => a + i.amount);
@@ -163,7 +193,7 @@ class InvestmentListScreen extends StatelessWidget {
                   Expanded(
                     child: TabBarView(
                       children: [
-                        _AmcListView(providers: providers, investments: sorted),
+                        _AmcListView(providers: providers, allInvestments: liveAllInvestments),
                         _InvestmentListView(investments: invested, emptyText: 'Nothing invested.'),
                         _InvestmentListView(investments: redeemed, emptyText: 'Nothing redeemed.'),
                         _InvestmentListView(investments: sorted, emptyText: 'No investment activity.'),
@@ -233,10 +263,15 @@ List<_ProviderSummary> _groupByProvider(List<InvestmentEvent> investments) {
 /// chart, and the provider rows below — so picking e.g. "This month" shows
 /// only that month's events, counts and totals throughout the whole tab.
 class _AmcListView extends StatefulWidget {
+  /// Only used for the empty-state guard below — reflects whatever scope
+  /// the caller opened this screen with, same as the other 3 tabs.
   final List<_ProviderSummary> providers;
-  final List<InvestmentEvent> investments;
 
-  const _AmcListView({required this.providers, required this.investments});
+  /// The true unscoped dataset (see InvestmentListScreen.allInvestments) —
+  /// everything the range picker and its drilldowns filter from.
+  final List<InvestmentEvent> allInvestments;
+
+  const _AmcListView({required this.providers, required this.allInvestments});
 
   @override
   State<_AmcListView> createState() => _AmcListViewState();
@@ -253,7 +288,7 @@ class _AmcListViewState extends State<_AmcListView> {
 
     final now = DateTime.now();
     final (from, to) = _range.boundsFrom(now);
-    final filteredInvestments = widget.investments.where((i) {
+    final filteredInvestments = widget.allInvestments.where((i) {
       if (from != null && i.date.isBefore(from)) return false;
       if (to != null && i.date.isAfter(to)) return false;
       return true;
@@ -265,27 +300,30 @@ class _AmcListViewState extends State<_AmcListView> {
         _AmcAnalytics(
           range: _range,
           onRangeSelected: (r) => setState(() => _range = r),
-          investments: widget.investments,
+          allInvestments: widget.allInvestments,
         ),
-        for (final p in filteredProviders) _ProviderRow(provider: p),
+        for (final p in filteredProviders)
+          _ProviderRow(provider: p, allInvestments: widget.allInvestments),
       ],
     );
   }
 }
 
 /// Range filter + by-provider donut + invested/redeemed trend chart for
-/// the "By AMC" tab — filters [investments] by [range] internally rather
+/// the "By AMC" tab — filters [allInvestments] by [range] internally rather
 /// than taking an already-filtered list, so it can offer finer/coarser
-/// windows than whatever range the caller filtered this whole screen to.
+/// windows than whatever range the caller filtered this whole screen to
+/// (see InvestmentListScreen.allInvestments for why that requires the true
+/// unscoped dataset, not whatever this screen's other 3 tabs are showing).
 class _AmcAnalytics extends StatelessWidget {
   final InvestmentRange range;
   final ValueChanged<InvestmentRange> onRangeSelected;
-  final List<InvestmentEvent> investments;
+  final List<InvestmentEvent> allInvestments;
 
   const _AmcAnalytics({
     required this.range,
     required this.onRangeSelected,
-    required this.investments,
+    required this.allInvestments,
   });
 
   @override
@@ -293,7 +331,7 @@ class _AmcAnalytics extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final now = DateTime.now();
     final (from, to) = range.boundsFrom(now);
-    final filtered = investments.where((i) {
+    final filtered = allInvestments.where((i) {
       if (from != null && i.date.isBefore(from)) return false;
       if (to != null && i.date.isAfter(to)) return false;
       return true;
@@ -319,13 +357,18 @@ class _AmcAnalytics extends StatelessWidget {
               ),
             )
           else
-            ..._buildCharts(context, filtered),
+            ..._buildCharts(context, filtered, from, to),
         ],
       ),
     );
   }
 
-  List<Widget> _buildCharts(BuildContext context, List<InvestmentEvent> filtered) {
+  List<Widget> _buildCharts(
+    BuildContext context,
+    List<InvestmentEvent> filtered,
+    DateTime? from,
+    DateTime? to,
+  ) {
     final scheme = Theme.of(context).colorScheme;
     final providers = _groupByProvider(filtered);
     final topProviders = providers.take(6).toList();
@@ -336,7 +379,11 @@ class _AmcAnalytics extends StatelessWidget {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => InvestmentListScreen(investments: match.events, subtitle: match.name),
+          builder: (_) => InvestmentListScreen(
+            investments: match.events,
+            allInvestments: allInvestments,
+            subtitle: match.name,
+          ),
         ),
       );
     }
@@ -353,7 +400,23 @@ class _AmcAnalytics extends StatelessWidget {
       final newRedeemed = (existing?.redeemed ?? 0) + (i.kind.isRedemption ? i.amount : 0);
       buckets[key] = (date: bucketStart, invested: newInvested, redeemed: newRedeemed);
     }
-    final points = buckets.values.toList()..sort((a, b) => a.date.compareTo(b.date));
+    // Zero-fill gaps (see bucketStartsBetween) so a month/week/day with no
+    // investment activity still gets a visible zero bar instead of just
+    // vanishing from between its neighbours — same fix as the transactions
+    // trend chart in InsightsService.build.
+    final rawPoints = buckets.values.toList()..sort((a, b) => a.date.compareTo(b.date));
+    final List<({DateTime date, double invested, double redeemed})> points;
+    if (rawPoints.isEmpty) {
+      points = [];
+    } else {
+      final rangeStart = from ?? rawPoints.first.date;
+      final rangeEnd = to ?? rawPoints.last.date;
+      final byDate = {for (final p in rawPoints) p.date: p};
+      points = [
+        for (final d in bucketStartsBetween(rangeStart, rangeEnd, range.trendGranularity))
+          byDate[d] ?? (date: d, invested: 0.0, redeemed: 0.0),
+      ];
+    }
 
     void openBucket(DateTime bucketStart) {
       late final String title;
@@ -378,6 +441,7 @@ class _AmcAnalytics extends StatelessWidget {
         MaterialPageRoute(
           builder: (_) => InvestmentListScreen(
             investments: filtered.where(matchesBucket).toList(),
+            allInvestments: allInvestments,
             subtitle: title,
           ),
         ),
@@ -419,7 +483,14 @@ class _AmcAnalytics extends StatelessWidget {
 
 class _ProviderRow extends StatelessWidget {
   final _ProviderSummary provider;
-  const _ProviderRow({required this.provider});
+
+  /// Passed straight through to the pushed screen (see
+  /// InvestmentListScreen.allInvestments) so its "By AMC" tab keeps access
+  /// to the true unscoped dataset rather than being narrowed a level
+  /// further every time a provider row is drilled into.
+  final List<InvestmentEvent> allInvestments;
+
+  const _ProviderRow({required this.provider, required this.allInvestments});
 
   @override
   Widget build(BuildContext context) {
@@ -448,7 +519,11 @@ class _ProviderRow extends StatelessWidget {
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => InvestmentListScreen(investments: p.events, subtitle: p.name),
+          builder: (_) => InvestmentListScreen(
+            investments: p.events,
+            allInvestments: allInvestments,
+            subtitle: p.name,
+          ),
         ),
       ),
     );
