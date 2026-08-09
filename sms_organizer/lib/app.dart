@@ -13,7 +13,7 @@ class SmsOrganizerApp extends StatelessWidget {
     final themeProvider = context.watch<ThemeProvider>();
 
     return MaterialApp(
-      title: 'SMS Organiser',
+      title: 'SmartSMS',
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
       theme: AppTheme.light,

@@ -48,7 +48,7 @@ class BackupService {
       transactions: transactions,
       investments: investments,
     );
-    await Share.shareXFiles([XFile(file.path)], text: 'SMS Organiser backup');
+    await Share.shareXFiles([XFile(file.path)], text: 'SmartSMS backup');
   }
 
   Future<BackupBundle> restoreFromFile(File file) async {

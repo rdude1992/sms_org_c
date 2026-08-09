@@ -92,7 +92,7 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
                 child: Icon(Icons.forum_outlined, size: 30, color: Theme.of(context).colorScheme.primary),
               ),
               const SizedBox(height: 24),
-              Text('Set up SMS Organiser', style: Theme.of(context).textTheme.headlineSmall),
+              Text('Set up SmartSMS', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 12),
               Text(
                 'To read, send, and organise your messages — including detecting '

@@ -1,4 +1,4 @@
-# SMS Organiser (MVP)
+# SmartSMS (MVP)
 
 A Flutter + native-Android smart SMS app: conversational and flat-list views,
 auto-categorisation (personal / promotional / transactional / OTP),
