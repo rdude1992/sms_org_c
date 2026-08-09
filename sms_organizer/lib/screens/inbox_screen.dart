@@ -265,13 +265,32 @@ class _ChatsBodyState extends State<_ChatsBody> with SingleTickerProviderStateMi
   }
 }
 
-class _ConversationListView extends StatelessWidget {
+class _ConversationListView extends StatefulWidget {
   final SmsProvider provider;
   final SmsCategory? category;
   const _ConversationListView({required this.provider, required this.category});
 
   @override
+  State<_ConversationListView> createState() => _ConversationListViewState();
+}
+
+class _ConversationListViewState extends State<_ConversationListView> {
+  // Which conversations currently have their avatar-tap quick-preview panel
+  // open — keyed by threadId. Local/ephemeral by design, same reasoning as
+  // the All Messages list's collapsed-date-headers state: a glance aid for
+  // this visit, not a preference worth persisting.
+  final Set<int> _expandedThreadIds = {};
+
+  void _toggleExpanded(int threadId) {
+    setState(() {
+      if (!_expandedThreadIds.remove(threadId)) _expandedThreadIds.add(threadId);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final provider = widget.provider;
+    final category = widget.category;
     final conversations = provider.conversationsForCategory(category);
     final searching = provider.chatSearchQuery.trim().isNotEmpty;
 
@@ -308,6 +327,8 @@ class _ConversationListView extends StatelessWidget {
               selectionMode: provider.isSelecting,
               pinned: pinned,
               searchQuery: provider.chatSearchQuery,
+              expanded: _expandedThreadIds.contains(conversation.threadId),
+              onAvatarTap: () => _toggleExpanded(conversation.threadId),
               onTap: () {
                 if (provider.isSelecting) {
                   provider.toggleSelected(conversation.latest.id);
