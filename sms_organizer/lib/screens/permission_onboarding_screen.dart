@@ -15,6 +15,15 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
   bool _requesting = false;
   bool _permissionsGranted = false;
 
+  /// True until [_checkExisting] resolves. The already-set-up case (by far
+  /// the common one on every ordinary launch, not just first-run) is the
+  /// whole reason this matters: [build] renders nothing but a bare
+  /// background while this is true, so a user who's already granted
+  /// everything sees the native splash hold a beat longer rather than a
+  /// flash of "Step 1: Grant SMS & contacts permission" they don't need,
+  /// right before this screen gets replaced by Home anyway.
+  bool _checking = true;
+
   @override
   void initState() {
     super.initState();
@@ -23,12 +32,17 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
 
   Future<void> _checkExisting() async {
     final granted = await _hasRuntimePermissions();
+    if (!mounted) return;
     final smsProvider = context.read<SmsProvider>();
     final isDefault = await smsProvider.checkIsDefaultSmsApp();
+    if (!mounted) return;
     if (granted && isDefault) {
       _goToHome();
     } else {
-      setState(() => _permissionsGranted = granted);
+      setState(() {
+        _permissionsGranted = granted;
+        _checking = false;
+      });
     }
   }
 
@@ -74,6 +88,11 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
 
   @override
   Widget build(BuildContext context) {
+    // Bare background only — no spinner, no step list — so this reads as
+    // the native launch splash continuing rather than as its own screen.
+    if (_checking) {
+      return const Scaffold(body: SizedBox.shrink());
+    }
     return Scaffold(
       body: SafeArea(
         child: Padding(
