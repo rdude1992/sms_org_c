@@ -17,6 +17,14 @@ Future<void> showBulkSpendCategorySheet(
 }) {
   return showModalBottomSheet(
     context: context,
+    // Uncategorised + all of SpendCategory.values is ~15 rows — taller than
+    // a non-scroll-controlled sheet's bounded height on most phones, which
+    // would silently clip the bottom of the list (categories added later,
+    // like Investment, ending up unreachable) rather than scroll to them.
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
     builder: (sheetContext) {
       final scheme = Theme.of(sheetContext).colorScheme;
       void apply(SpendCategory? category) {
@@ -41,17 +49,24 @@ Future<void> showBulkSpendCategorySheet(
               ),
             ),
             const SizedBox(height: 4),
-            ListTile(
-              leading: const Icon(Icons.category_outlined),
-              title: const Text('Uncategorised'),
-              onTap: () => apply(null),
-            ),
-            for (final category in SpendCategory.values)
-              ListTile(
-                leading: Icon(category.icon, color: category.color),
-                title: Text(category.label),
-                onTap: () => apply(category),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.category_outlined),
+                    title: const Text('Uncategorised'),
+                    onTap: () => apply(null),
+                  ),
+                  for (final category in SpendCategory.values)
+                    ListTile(
+                      leading: Icon(category.icon, color: category.color),
+                      title: Text(category.label),
+                      onTap: () => apply(category),
+                    ),
+                ],
               ),
+            ),
             const SizedBox(height: 8),
           ],
         ),
@@ -73,6 +88,13 @@ Future<void> showQuickSpendCategorySheet(
 ) {
   return showModalBottomSheet(
     context: context,
+    // Same reasoning as showBulkSpendCategorySheet: ~15 rows is taller than
+    // a non-scroll-controlled sheet's bounded height, which would silently
+    // clip the bottom of the list instead of letting it scroll.
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
     builder: (sheetContext) {
       final scheme = Theme.of(sheetContext).colorScheme;
       void apply(SpendCategory? category) {
@@ -96,20 +118,29 @@ Future<void> showQuickSpendCategorySheet(
               ),
             ),
             const SizedBox(height: 4),
-            ListTile(
-              leading: const Icon(Icons.category_outlined),
-              title: const Text('Uncategorised'),
-              trailing: transaction.spendCategory == null ? Icon(Icons.check, color: scheme.primary) : null,
-              onTap: () => apply(null),
-            ),
-            for (final category in SpendCategory.values)
-              ListTile(
-                leading: Icon(category.icon, color: category.color),
-                title: Text(category.label),
-                trailing:
-                    transaction.spendCategory == category ? Icon(Icons.check, color: scheme.primary) : null,
-                onTap: () => apply(category),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.category_outlined),
+                    title: const Text('Uncategorised'),
+                    trailing:
+                        transaction.spendCategory == null ? Icon(Icons.check, color: scheme.primary) : null,
+                    onTap: () => apply(null),
+                  ),
+                  for (final category in SpendCategory.values)
+                    ListTile(
+                      leading: Icon(category.icon, color: category.color),
+                      title: Text(category.label),
+                      trailing: transaction.spendCategory == category
+                          ? Icon(Icons.check, color: scheme.primary)
+                          : null,
+                      onTap: () => apply(category),
+                    ),
+                ],
               ),
+            ),
             const SizedBox(height: 8),
           ],
         ),

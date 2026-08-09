@@ -12,6 +12,15 @@ Future<void> showCategoryPickerSheet(
 ) {
   return showModalBottomSheet(
     context: context,
+    // Scroll-controlled + a Flexible/ListView list (rather than a plain
+    // Column) so this stays reachable in full if SmsCategory ever grows, or
+    // on a shorter/landscape screen — a fixed-height, non-scrolling sheet
+    // would otherwise silently clip whatever doesn't fit (see the near-miss
+    // this caused for the 14-option SpendCategory pickers).
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
     builder: (sheetContext) {
       final scheme = Theme.of(sheetContext).colorScheme;
       return SafeArea(
@@ -30,16 +39,24 @@ Future<void> showCategoryPickerSheet(
               ),
             ),
             const SizedBox(height: 4),
-            for (final category in SmsCategory.values)
-              ListTile(
-                leading: Icon(category.icon, color: category.color),
-                title: Text(category.label),
-                trailing: message.category == category ? Icon(Icons.check, color: scheme.primary) : null,
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  provider.setMessageCategory(message, category);
-                },
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final category in SmsCategory.values)
+                    ListTile(
+                      leading: Icon(category.icon, color: category.color),
+                      title: Text(category.label),
+                      trailing:
+                          message.category == category ? Icon(Icons.check, color: scheme.primary) : null,
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        provider.setMessageCategory(message, category);
+                      },
+                    ),
+                ],
               ),
+            ),
             const SizedBox(height: 8),
           ],
         ),
@@ -59,6 +76,10 @@ Future<void> showBulkCategoryPickerSheet(
 ) {
   return showModalBottomSheet(
     context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
     builder: (sheetContext) {
       final scheme = Theme.of(sheetContext).colorScheme;
       return SafeArea(
@@ -77,15 +98,22 @@ Future<void> showBulkCategoryPickerSheet(
               ),
             ),
             const SizedBox(height: 4),
-            for (final category in SmsCategory.values)
-              ListTile(
-                leading: Icon(category.icon, color: category.color),
-                title: Text(category.label),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  provider.setSelectedCategory(category);
-                },
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final category in SmsCategory.values)
+                    ListTile(
+                      leading: Icon(category.icon, color: category.color),
+                      title: Text(category.label),
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        provider.setSelectedCategory(category);
+                      },
+                    ),
+                ],
               ),
+            ),
             const SizedBox(height: 8),
           ],
         ),
