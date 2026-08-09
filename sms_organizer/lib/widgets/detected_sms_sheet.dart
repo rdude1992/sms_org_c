@@ -5,13 +5,17 @@ import '../utils/formatters.dart';
 /// Bottom sheet shared by transaction and investment tiles: shows the
 /// parsed/detected fields side by side with the original SMS text, so a
 /// user can sanity-check how an amount/merchant/instrument was extracted —
-/// or just confirm what the underlying message actually said.
+/// or just confirm what the underlying message actually said. [onEdit], when
+/// given, shows a pencil next to the title that jumps straight into editing
+/// (closing this sheet first) — so a correction doesn't require backing out
+/// and long-pressing the tile instead.
 void showDetectedSmsSheet(
   BuildContext context, {
   required String title,
   required DateTime date,
   required String rawBody,
   required List<MapEntry<String, String>> details,
+  VoidCallback? onEdit,
 }) {
   showModalBottomSheet(
     context: context,
@@ -42,11 +46,32 @@ void showDetectedSmsSheet(
                 ),
               ),
               const SizedBox(height: 16),
-              Text(title, style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 2),
-              Text(
-                Formatters.full(date),
-                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 2),
+                        Text(
+                          Formatters.full(date),
+                          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (onEdit != null)
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined),
+                      tooltip: 'Edit',
+                      onPressed: () {
+                        Navigator.pop(context);
+                        onEdit();
+                      },
+                    ),
+                ],
               ),
               const SizedBox(height: 16),
               for (final entry in details)

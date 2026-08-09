@@ -109,12 +109,21 @@ Future<void> showQuickSpendCategorySheet(
             const SizedBox(height: 12),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Set category',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: scheme.onSurface),
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Set category',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: scheme.onSurface),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    transaction.merchant ?? transaction.rawBody,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 4),

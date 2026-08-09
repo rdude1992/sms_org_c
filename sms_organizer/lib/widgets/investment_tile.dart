@@ -86,6 +86,7 @@ class InvestmentTile extends StatelessWidget {
       date: i.date,
       rawBody: i.rawBody,
       details: details,
+      onEdit: () => showInvestmentEditSheet(context, context.read<SmsProvider>(), i),
     );
   }
 

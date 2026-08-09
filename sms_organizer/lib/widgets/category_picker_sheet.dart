@@ -30,12 +30,25 @@ Future<void> showCategoryPickerSheet(
             const SizedBox(height: 12),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Set category',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: scheme.onSurface),
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Set category',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: scheme.onSurface),
+                  ),
+                  const SizedBox(height: 6),
+                  // Which message this actually applies to isn't always
+                  // obvious from context alone (e.g. reached via a
+                  // transaction's "Not a transaction?" action) — a short
+                  // preview means never having to guess or back out to check.
+                  Text(
+                    message.body,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 4),

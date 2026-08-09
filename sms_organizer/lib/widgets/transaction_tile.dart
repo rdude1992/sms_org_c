@@ -153,6 +153,7 @@ class TransactionTile extends StatelessWidget {
       date: t.date,
       rawBody: t.rawBody,
       details: details,
+      onEdit: () => showTransactionEditSheet(context, context.read<SmsProvider>(), t),
     );
   }
 
