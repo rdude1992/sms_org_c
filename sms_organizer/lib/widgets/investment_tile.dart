@@ -34,7 +34,13 @@ class InvestmentTile extends StatelessWidget {
         ),
       ),
       subtitle: Text(
-        [investment.kind.label, Formatters.relativeOrTime(investment.date)].join('  ·  '),
+        [
+          investment.kind.label,
+          Formatters.relativeOrTime(investment.date),
+          if (investment.folioOrAccount != null) 'Folio ${investment.folioOrAccount}',
+        ].join('  ·  '),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontSize: 12),
       ),
       trailing: Text(
