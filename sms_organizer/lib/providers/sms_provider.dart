@@ -85,6 +85,17 @@ class SmsProvider extends ChangeNotifier {
 
   List<SmsMessage> get allMessages => _allMessages;
 
+  /// Looks up the SMS a parsed [Transaction] came from — e.g. so an "this
+  /// isn't a transaction" action can reach the message's category to
+  /// correct it (see setMessageCategory). Null if the message has since
+  /// been deleted from the device.
+  SmsMessage? messageById(int id) {
+    for (final m in _allMessages) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
+
   /// [_allMessages] minus drafts — drafts aren't messages that were ever
   /// sent or received, so they're excluded from every regular list
   /// (conversations, All Messages, thread bubbles) and only surfaced
@@ -615,6 +626,67 @@ class SmsProvider extends ChangeNotifier {
     }
   }
 
+  /// User-driven correction for when TransactionParserService mis-detected
+  /// [transaction]'s type, instrument, merchant, or wallet — the case where
+  /// the message genuinely is a transaction, but it's filed under the wrong
+  /// Credited/Debited tab, the wrong Cards & Accounts bucket, or the wrong
+  /// merchant. (If it isn't a transaction at all, use setMessageCategory
+  /// instead — see messageById.)
+  ///
+  /// Persists as an override (see DatabaseService.saveTransaction) so it's
+  /// never silently re-parsed or discarded by a later cache wipe. Also pins
+  /// the parent message's category as an override — even though the
+  /// category value itself isn't changing — so a wipe doesn't delete the
+  /// category row, fall through to re-classifying the message from
+  /// scratch, and re-derive a fresh (uncorrected) transaction on top of
+  /// this one.
+  Future<void> updateTransaction(
+    Transaction transaction, {
+    required TxnDirection direction,
+    required InstrumentType instrument,
+    String? merchant,
+    String? walletType,
+  }) async {
+    final cleanedMerchant = merchant?.trim();
+    final cleanedWallet = walletType?.trim();
+    final updated = Transaction(
+      smsId: transaction.smsId,
+      date: transaction.date,
+      amount: transaction.amount,
+      direction: direction,
+      instrument: instrument,
+      instrumentRef: transaction.instrumentRef,
+      issuer: transaction.issuer,
+      merchant: (cleanedMerchant == null || cleanedMerchant.isEmpty) ? null : cleanedMerchant,
+      balanceAfter: transaction.balanceAfter,
+      entityType: transaction.entityType,
+      walletType: (cleanedWallet == null || cleanedWallet.isEmpty) ? null : cleanedWallet,
+      billDueDate: transaction.billDueDate,
+      fastagWalletId: transaction.fastagWalletId,
+      vehicleNumber: transaction.vehicleNumber,
+      rawBody: transaction.rawBody,
+      isOverridden: true,
+    );
+
+    final index = _transactions.indexWhere((t) => t.smsId == transaction.smsId);
+    if (index != -1) {
+      _transactions[index] = updated;
+    } else {
+      _transactions.add(updated);
+    }
+    notifyListeners();
+
+    await _db.saveTransaction(updated, isOverride: true);
+    await _db.saveCategory(transaction.smsId, SmsCategory.transactional, isOverride: true);
+
+    final message = messageById(transaction.smsId);
+    if (message != null) {
+      message.category = SmsCategory.transactional;
+      message.isCategoryOverridden = true;
+      notifyListeners();
+    }
+  }
+
   void setCategoryFilter(SmsCategory? category) {
     activeCategoryFilter = category;
     notifyListeners();
@@ -651,7 +723,17 @@ class SmsProvider extends ChangeNotifier {
       }
     }
     if (autoCategories.isNotEmpty) await _db.saveCategoriesBulk(autoCategories);
-    await _db.saveTransactionsBulk(bundle.transactions);
+
+    // Same idea for manually-corrected transactions — see updateTransaction.
+    final autoTransactions = <Transaction>[];
+    for (final t in bundle.transactions) {
+      if (t.isOverridden) {
+        await _db.saveTransaction(t, isOverride: true);
+      } else {
+        autoTransactions.add(t);
+      }
+    }
+    if (autoTransactions.isNotEmpty) await _db.saveTransactionsBulk(autoTransactions);
     await _db.saveInvestmentsBulk(bundle.investments);
     notifyListeners();
   }

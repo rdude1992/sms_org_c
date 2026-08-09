@@ -53,6 +53,12 @@ class Transaction {
 
   final String rawBody;
 
+  /// True once the user has manually corrected [direction]/[instrument]/
+  /// [merchant]/[walletType] via SmsProvider.updateTransaction — see that
+  /// method for why TransactionParserService never re-derives and
+  /// overwrites this row after that.
+  final bool isOverridden;
+
   Transaction({
     required this.smsId,
     required this.date,
@@ -69,6 +75,7 @@ class Transaction {
     this.billDueDate,
     this.fastagWalletId,
     this.vehicleNumber,
+    this.isOverridden = false,
   });
 
   /// Groups transactions the same way Insights buckets "by card / account" —
@@ -125,6 +132,7 @@ class Transaction {
         'fastagWalletId': fastagWalletId,
         'vehicleNumber': vehicleNumber,
         'rawBody': rawBody,
+        'isOverridden': isOverridden,
       };
 
   factory Transaction.fromJson(Map<String, dynamic> json) => Transaction(
@@ -150,6 +158,7 @@ class Transaction {
             : null,
         fastagWalletId: json['fastagWalletId'] as String?,
         vehicleNumber: json['vehicleNumber'] as String?,
+        isOverridden: json['isOverridden'] as bool? ?? false,
       );
 }
 

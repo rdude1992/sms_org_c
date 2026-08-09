@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/transaction.dart';
+import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
+import 'category_picker_sheet.dart';
 import 'detected_sms_sheet.dart';
+import 'transaction_edit_sheet.dart';
 
 class TransactionTile extends StatelessWidget {
   final Transaction transaction;
@@ -34,6 +38,7 @@ class TransactionTile extends StatelessWidget {
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       minVerticalPadding: 10,
       onTap: () => _showDetails(context),
+      onLongPress: () => _showActions(context),
       leading: CircleAvatar(
         radius: 20,
         backgroundColor: color.withOpacity(0.12),
@@ -41,14 +46,27 @@ class TransactionTile extends StatelessWidget {
       ),
       title: Padding(
         padding: const EdgeInsets.only(bottom: 2),
-        child: Text(
-          transaction.merchant ??
-              transaction.walletType ??
-              transaction.issuer ??
-              _instrumentLabel(transaction.instrument),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w600),
+        child: Row(
+          children: [
+            Flexible(
+              child: Text(
+                transaction.merchant ??
+                    transaction.walletType ??
+                    transaction.issuer ??
+                    _instrumentLabel(transaction.instrument),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (transaction.isOverridden) ...[
+              const SizedBox(width: 4),
+              Tooltip(
+                message: 'Manually edited',
+                child: Icon(Icons.edit, size: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ],
         ),
       ),
       subtitle: Text(
@@ -96,6 +114,55 @@ class TransactionTile extends StatelessWidget {
       date: t.date,
       rawBody: t.rawBody,
       details: details,
+    );
+  }
+
+  /// Long-press menu: "Edit transaction" for when it's correctly a
+  /// transaction but its type/instrument/merchant/wallet is wrong, or
+  /// "Not a transaction?" for when it shouldn't be here at all — the latter
+  /// hands off to the same category picker the message list uses, so both
+  /// corrections end up going through the same override machinery.
+  void _showActions(BuildContext context) {
+    final provider = context.read<SmsProvider>();
+    final message = provider.messageById(transaction.smsId);
+    showModalBottomSheet(
+      context: context,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit transaction'),
+                subtitle: const Text('Fix the type, instrument, merchant, or wallet'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  showTransactionEditSheet(context, provider, transaction);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.label_outline),
+                title: const Text('Not a transaction?'),
+                subtitle: Text(
+                  message == null
+                      ? 'Original message no longer available'
+                      : 'Move it out of Transactions entirely',
+                ),
+                enabled: message != null,
+                onTap: message == null
+                    ? null
+                    : () {
+                        Navigator.pop(sheetContext);
+                        showCategoryPickerSheet(context, provider, message);
+                      },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
     );
   }
 

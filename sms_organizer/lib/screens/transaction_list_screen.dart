@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/transaction.dart';
+import '../providers/sms_provider.dart';
 import '../widgets/transaction_tile.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/total_stat.dart';
@@ -25,7 +27,20 @@ class TransactionListScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final sorted = [...transactions]..sort((a, b) => b.date.compareTo(a.date));
+
+    // [transactions] is a one-off snapshot handed down by whichever Insights
+    // screen pushed this route. Re-deriving the live copy from SmsProvider
+    // (matched by id, not by re-running the original filter — this screen
+    // was never given one) means a correction made via a tile's "Edit
+    // transaction"/"Not a transaction?" action (see TransactionTile) is
+    // reflected immediately: it moves to the right Credited/Debited tab, the
+    // header totals update, and a message reclassified out of Transactions
+    // entirely just drops out of the list — all without backing out and
+    // re-opening this drilldown.
+    final ids = transactions.map((t) => t.smsId).toSet();
+    final live = context.watch<SmsProvider>().transactions.where((t) => ids.contains(t.smsId)).toList();
+
+    final sorted = [...live]..sort((a, b) => b.date.compareTo(a.date));
     final credited = sorted.where((t) => t.direction == TxnDirection.credit).toList();
     final debited = sorted.where((t) => t.direction == TxnDirection.debit).toList();
     final creditTotal = credited.fold<double>(0, (a, t) => a + t.amount);
