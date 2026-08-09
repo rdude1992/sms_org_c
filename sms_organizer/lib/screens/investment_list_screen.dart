@@ -134,9 +134,28 @@ class InvestmentListScreen extends StatelessWidget {
                           child: TotalStat(
                               label: 'Redeemed', value: redeemedTotal, color: const Color(0xFFF59E0B)),
                         ),
-                        Text(
-                          '${sorted.length} events',
-                          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                        // Builder gives us a context below DefaultTabController
+                        // (the outer `context` here is this widget's own,
+                        // which sits above it in the tree we're building) so
+                        // DefaultTabController.of can actually find it.
+                        Builder(
+                          builder: (context) => InkWell(
+                            borderRadius: BorderRadius.circular(6),
+                            // Index 3 is the "All" tab — see the TabBar above.
+                            onTap: () => DefaultTabController.of(context).animateTo(3),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                              child: Text(
+                                '${sorted.length} events',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: scheme.onSurfaceVariant,
+                                  decoration: TextDecoration.underline,
+                                  decorationColor: scheme.onSurfaceVariant.withOpacity(0.4),
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
