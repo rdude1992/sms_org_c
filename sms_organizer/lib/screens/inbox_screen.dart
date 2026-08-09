@@ -431,33 +431,68 @@ class _MessagesListView extends StatelessWidget {
 /// The flat "all messages" list, grouped by calendar day with a pinned
 /// header per group — like the thread view's date separators, but sticky:
 /// the header for whichever day is on screen stays put instead of
-/// scrolling away with its messages.
-class _StickyMessageList extends StatelessWidget {
+/// scrolling away with its messages. Each header is also tappable to
+/// collapse/expand that day — with months of history this is a lot faster
+/// than scrolling past every message just to get from one date to another.
+class _StickyMessageList extends StatefulWidget {
   final SmsProvider provider;
   final List<SmsMessage> messages;
   const _StickyMessageList({required this.provider, required this.messages});
 
   @override
+  State<_StickyMessageList> createState() => _StickyMessageListState();
+}
+
+class _StickyMessageListState extends State<_StickyMessageList> {
+  // Keyed by the header's own display label ("Today", "12 Aug 2025", ...) —
+  // unique per date group in this list, and simpler than carrying a second
+  // DateTime-vs-String identity around just for this. Deliberately
+  // ephemeral (not persisted, not lifted above this widget): a scroll aid
+  // for the current visit to the list, not a preference worth remembering.
+  final Set<String> _collapsedLabels = {};
+
+  void _toggleCollapsed(String label) {
+    setState(() {
+      if (!_collapsedLabels.remove(label)) _collapsedLabels.add(label);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final groups = _groupMessagesByDate(messages);
+    final groups = _groupMessagesByDate(widget.messages);
+
+    final slivers = <Widget>[];
+    for (final group in groups) {
+      final label = Formatters.dateLabel(group.date);
+      final collapsed = _collapsedLabels.contains(label);
+      slivers.add(
+        SliverPersistentHeader(
+          pinned: true,
+          delegate: _DateHeaderDelegate(
+            label: label,
+            count: group.items.length,
+            collapsed: collapsed,
+            onTap: () => _toggleCollapsed(label),
+          ),
+        ),
+      );
+      if (!collapsed) {
+        slivers.add(
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) => _MessageRow(provider: widget.provider, message: group.items[index]),
+              childCount: group.items.length,
+            ),
+          ),
+        );
+      }
+    }
+
     return RefreshIndicator(
-      onRefresh: provider.refresh,
+      onRefresh: widget.provider.refresh,
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          for (final group in groups) ...[
-            SliverPersistentHeader(
-              pinned: true,
-              delegate: _DateHeaderDelegate(Formatters.dateLabel(group.date)),
-            ),
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) => _MessageRow(provider: provider, message: group.items[index]),
-                childCount: group.items.length,
-              ),
-            ),
-          ],
-        ],
+        slivers: slivers,
       ),
     );
   }
@@ -483,33 +518,61 @@ List<_DateGroup> _groupMessagesByDate(List<SmsMessage> messages) {
 
 class _DateHeaderDelegate extends SliverPersistentHeaderDelegate {
   final String label;
-  const _DateHeaderDelegate(this.label);
+  final int count;
+  final bool collapsed;
+  final VoidCallback onTap;
+
+  const _DateHeaderDelegate({
+    required this.label,
+    required this.count,
+    required this.collapsed,
+    required this.onTap,
+  });
 
   @override
-  double get minExtent => 32;
+  double get minExtent => 40;
   @override
-  double get maxExtent => 32;
+  double get maxExtent => 40;
 
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Container(
-      height: 32,
-      alignment: Alignment.centerLeft,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
       color: Theme.of(context).scaffoldBackgroundColor,
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              Icon(
+                collapsed ? Icons.chevron_right : Icons.expand_more,
+                size: 20,
+                color: scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant),
+              ),
+              if (collapsed) ...[
+                const SizedBox(width: 8),
+                Text(
+                  '$count message${count == 1 ? '' : 's'}',
+                  style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant.withOpacity(0.7)),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );
   }
 
   @override
-  bool shouldRebuild(covariant _DateHeaderDelegate oldDelegate) => oldDelegate.label != label;
+  bool shouldRebuild(covariant _DateHeaderDelegate oldDelegate) =>
+      oldDelegate.label != label || oldDelegate.count != count || oldDelegate.collapsed != collapsed;
 }
 
 class _MessageRow extends StatelessWidget {
