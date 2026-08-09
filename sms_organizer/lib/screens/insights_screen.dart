@@ -958,6 +958,7 @@ class _InstrumentRow extends StatelessWidget {
           '${summary.count} transactions',
           if (lastBalance != null) 'Bal ${Formatters.currency(lastBalance!)}',
         ].join(' · '),
+        style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
       ),
       trailing: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -986,7 +987,10 @@ class _MerchantRow extends StatelessWidget {
       minVerticalPadding: 10,
       leading: const Icon(Icons.storefront_outlined),
       title: Text(summary.displayName),
-      subtitle: Text('${summary.count} transactions'),
+      subtitle: Text(
+        '${summary.count} transactions',
+        style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+      ),
       trailing: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,
@@ -1061,7 +1065,10 @@ class _SpendCategoryRow extends StatelessWidget {
       minVerticalPadding: 10,
       leading: Icon(icon, color: color),
       title: Text(summary.displayName),
-      subtitle: Text('${summary.count} transaction${summary.count == 1 ? '' : 's'}'),
+      subtitle: Text(
+        '${summary.count} transaction${summary.count == 1 ? '' : 's'}',
+        style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+      ),
       trailing: Text(
         '-${Formatters.currency(summary.totalDebit)}',
         style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12, fontWeight: FontWeight.w600),
