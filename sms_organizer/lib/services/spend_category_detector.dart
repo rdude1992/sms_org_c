@@ -18,7 +18,7 @@ class SpendCategoryDetector {
   /// backfill (see _backfillSpendCategories) re-runs over every
   /// still-uncategorised, non-overridden transaction rather than only ever
   /// applying to transactions parsed after the change.
-  static const int version = 1;
+  static const int version = 2;
 
   static SpendCategory? detect(Transaction t) {
     final haystack = [t.merchant, t.walletType, t.rawBody].whereType<String>().join(' ').toLowerCase();
@@ -91,6 +91,16 @@ const _rules = <_Rule>[
   _Rule([
     'school fee', 'college fee', 'tuition fee', 'udemy', 'coursera', 'byju', 'unacademy', 'vedantu',
   ], SpendCategory.education),
+  // Bank-side debit alerts for money moving into an investment — SIP/NAV/
+  // folio-worded SMS get parsed as a dedicated InvestmentEvent well before
+  // this ever runs (see TransactionParserService.parseInvestment), so this
+  // rule only ever fires on the transactions that fall through that: a
+  // broker/PPF/NPS top-up whose SMS is phrased like any other transfer.
+  _Rule([
+    'zerodha', 'groww', 'upstox', 'angel one', 'kite by zerodha', 'icici direct',
+    'hdfc securities', 'motilal oswal', 'sharekhan', '5paisa', 'paytm money',
+    'ppf', 'sukanya samriddhi', 'nps contribution', 'recurring deposit',
+  ], SpendCategory.investment),
   _Rule([
     'electricity bill', 'water bill', 'gas bill', 'dth recharge', 'broadband bill',
     'mobile recharge', 'postpaid bill', 'prepaid recharge', 'airtel', 'jio recharge',

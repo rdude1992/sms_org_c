@@ -71,6 +71,16 @@ class _InboxScreenState extends State<InboxScreen> {
       builder: (context, provider, _) {
         final view = provider.inboxView;
 
+        // Whatever's actually on screen right now for the active view —
+        // already narrowed by the active category tab, search query, and
+        // unread-only toggle the same way the list itself is (see
+        // messagesForCategory/conversationsForCategory) — so "select all"
+        // only ever grabs what's visible, never the whole inbox behind it.
+        final visibleIds = view == InboxView.messages
+            ? provider.messagesForCategory(provider.activeCategoryFilter).map((m) => m.id).toList()
+            : provider.conversationsForCategory(provider.activeCategoryFilter).map((c) => c.latest.id).toList();
+        final allSelected = visibleIds.isNotEmpty && visibleIds.every(provider.selectedIds.contains);
+
         return Scaffold(
           appBar: provider.isSelecting
               ? MultiSelectAppBar(
@@ -79,6 +89,9 @@ class _InboxScreenState extends State<InboxScreen> {
                   onMarkRead: () => provider.markSelectedRead(true),
                   onMarkUnread: () => provider.markSelectedRead(false),
                   onDelete: provider.deleteSelected,
+                  allSelected: allSelected,
+                  onToggleSelectAll: () =>
+                      allSelected ? provider.clearSelection() : provider.selectIds(visibleIds),
                   // Chats-view selection ids are conversation stand-ins
                   // (see ConversationTile's onTap) — bulk-recategorising
                   // just each conversation's latest message would be

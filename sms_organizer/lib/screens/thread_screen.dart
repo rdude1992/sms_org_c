@@ -170,6 +170,9 @@ class _ThreadScreenState extends State<ThreadScreen> {
         _scrollToHighlightIfNeeded(messages);
         _initSelectedSim(provider.activeSims);
 
+        final visibleIds = messages.map((m) => m.id).toList();
+        final allSelected = visibleIds.isNotEmpty && visibleIds.every(provider.selectedIds.contains);
+
         return Scaffold(
           appBar: provider.isSelecting
               ? MultiSelectAppBar(
@@ -178,6 +181,9 @@ class _ThreadScreenState extends State<ThreadScreen> {
                   onMarkRead: () => provider.markSelectedRead(true),
                   onMarkUnread: () => provider.markSelectedRead(false),
                   onDelete: provider.deleteSelected,
+                  allSelected: allSelected,
+                  onToggleSelectAll: () =>
+                      allSelected ? provider.clearSelection() : provider.selectIds(visibleIds),
                 )
               : AppBar(
                   title: Text(provider.displayNameFor(conversation.address)),

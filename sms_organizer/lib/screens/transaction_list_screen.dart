@@ -48,6 +48,14 @@ class _TransactionListScreenState extends State<TransactionListScreen>
 
   void _clearSelection() => setState(_selectedIds.clear);
 
+  void _selectAll(Iterable<int> smsIds) {
+    setState(() {
+      _selectedIds
+        ..clear()
+        ..addAll(smsIds);
+    });
+  }
+
   @override
   void dispose() {
     disposeSearch();
@@ -100,6 +108,13 @@ class _TransactionListScreenState extends State<TransactionListScreen>
 
     final emptyTitle = trimmedQuery.isEmpty ? 'No transactions in this range' : 'No matches for "$trimmedQuery"';
 
+    // "Select all" is scoped to [sorted] — every transaction in this
+    // drilldown regardless of which All/Credited/Debited tab happens to be
+    // showing — rather than tracking the active tab just for this button;
+    // ids selected from another tab still apply correctly to the bulk
+    // action, they just won't show a checked tile until you swipe to them.
+    final allSelected = sorted.isNotEmpty && sorted.every((t) => _selectedIds.contains(t.smsId));
+
     final appBarLeading =
         _selecting ? IconButton(icon: const Icon(Icons.close), onPressed: _clearSelection) : null;
     final appBarTitle = _selecting
@@ -107,6 +122,11 @@ class _TransactionListScreenState extends State<TransactionListScreen>
         : searchAppBarTitle(widget.title, hintText: 'Search transactions');
     final appBarActions = _selecting
         ? [
+            IconButton(
+              icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
+              tooltip: allSelected ? 'Select none' : 'Select all',
+              onPressed: allSelected ? _clearSelection : () => _selectAll(sorted.map((t) => t.smsId)),
+            ),
             IconButton(
               icon: const Icon(Icons.label_outline),
               tooltip: 'Set category',

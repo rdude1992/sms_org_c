@@ -546,6 +546,18 @@ class SmsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The "select all" side of the Inbox multi-select bar's select-all/none
+  /// toggle — replaces the current selection outright with [ids], which the
+  /// caller has already narrowed to whatever's actually visible (the active
+  /// category tab, search query, and unread-only filter), not literally
+  /// every message on device.
+  void selectIds(Iterable<int> ids) {
+    selectedIds
+      ..clear()
+      ..addAll(ids);
+    notifyListeners();
+  }
+
   Future<void> deleteSelected() async {
     await _platform.deleteMessages(selectedIds.toList());
     clearSelection();

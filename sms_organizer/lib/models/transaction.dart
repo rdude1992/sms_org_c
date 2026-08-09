@@ -34,6 +34,7 @@ enum SpendCategory {
   travel,
   housing,
   education,
+  investment,
   transfer,
   income,
   other,
@@ -62,6 +63,8 @@ extension SpendCategoryX on SpendCategory {
         return 'Housing & Rent';
       case SpendCategory.education:
         return 'Education';
+      case SpendCategory.investment:
+        return 'Investment';
       case SpendCategory.transfer:
         return 'Transfer';
       case SpendCategory.income:
@@ -93,6 +96,8 @@ extension SpendCategoryX on SpendCategory {
         return Icons.home_outlined;
       case SpendCategory.education:
         return Icons.school_outlined;
+      case SpendCategory.investment:
+        return Icons.trending_up;
       case SpendCategory.transfer:
         return Icons.swap_horiz;
       case SpendCategory.income:
@@ -124,6 +129,8 @@ extension SpendCategoryX on SpendCategory {
         return const Color(0xFF64748B);
       case SpendCategory.education:
         return const Color(0xFF0EA5E9);
+      case SpendCategory.investment:
+        return const Color(0xFF6366F1);
       case SpendCategory.transfer:
         return const Color(0xFF9CA3AF);
       case SpendCategory.income:
