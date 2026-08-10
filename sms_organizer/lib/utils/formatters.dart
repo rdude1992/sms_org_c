@@ -20,6 +20,19 @@ class Formatters {
   static String dayMonthYear(DateTime date) => _dayMonthYear.format(date);
   static String timeOfDay(DateTime date) => _timeOfDay.format(date);
 
+  /// Short Indian-convention form (₹90K / ₹4.2L / ₹1.1Cr) for spots too
+  /// narrow for the full [currency] format — e.g. TrendBarChart's y-axis
+  /// labels, where "₹88,979" would either overlap the next tick or force
+  /// the reserved axis width absurdly wide.
+  static String compactCurrency(double value) {
+    final abs = value.abs();
+    final sign = value < 0 ? '-' : '';
+    if (abs >= 10000000) return '$sign₹${(abs / 10000000).toStringAsFixed(abs >= 100000000 ? 0 : 1)}Cr';
+    if (abs >= 100000) return '$sign₹${(abs / 100000).toStringAsFixed(abs >= 1000000 ? 0 : 1)}L';
+    if (abs >= 1000) return '$sign₹${(abs / 1000).toStringAsFixed(abs >= 10000 ? 0 : 1)}K';
+    return '$sign₹${abs.toStringAsFixed(0)}';
+  }
+
   /// [includeYear] switches the non-today/non-yesterday fallback from
   /// "d MMM" to "d MMM yy" — used by transaction list items, where a bare
   /// "10 Dec" is ambiguous once the list spans more than one year.
