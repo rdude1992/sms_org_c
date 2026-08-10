@@ -349,6 +349,18 @@ ParsedDirection getTransactionType(String content) {
     return ParsedDirection.debit;
   }
 
+  // Self-transfer into a PPF/SSY (Sukanya Samriddhi) sub-account: "Rs.X
+  // transferred to your PPF/SSY A/c No. ..." reads like an incoming
+  // transfer ("to your ... A/c") but is really money leaving the linked
+  // bank account into a locked scheme, so it needs to be called out ahead
+  // of the generic "credited"/"received" check below.
+  if (contentLower.contains('transferred') &&
+      (contentLower.contains('ppf') ||
+          contentLower.contains('ssy') ||
+          contentLower.contains('sukanya samriddhi'))) {
+    return ParsedDirection.debit;
+  }
+
   // "HDFC Bank : NEFT money transfer ... has been credited to <Recipient
   // Name> on ..." — an outgoing NEFT/IMPS confirmation phrased from the
   // *recipient's* side ("credited to Priya Sharma"), not the user's own

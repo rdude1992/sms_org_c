@@ -11,8 +11,9 @@ import 'transaction_list_screen.dart';
 
 /// Segregated "Cards & Accounts" drilldown for the Insights "by card /
 /// account" list — buckets [InstrumentSummary] rows into Credit Cards /
-/// Debit Cards / Bank Accounts / Wallets / UPI / Other sections instead of
-/// one flat list sorted purely by spend, so the instrument type detected
+/// Debit Cards / Bank Accounts / Investments / Wallets / UPI / Other
+/// sections instead of one flat list sorted purely by spend, so the
+/// instrument type detected
 /// from each SMS's sender shortcode/body is easy to tell apart at a
 /// glance. A row spanning a debit card and its linked bank account (same
 /// issuer + last-4, see [Transaction.instrumentGroupKey]) shows up once,
@@ -129,6 +130,7 @@ class _InstrumentListScreenState extends State<InstrumentListScreen>
     final creditCards = <InstrumentSummary>[];
     final debitCards = <InstrumentSummary>[];
     final bankAccounts = <InstrumentSummary>[];
+    final investments = <InstrumentSummary>[];
     final wallets = <InstrumentSummary>[];
     final other = <InstrumentSummary>[];
 
@@ -141,6 +143,8 @@ class _InstrumentListScreenState extends State<InstrumentListScreen>
         debitCards.add(s);
       } else if (s.isBankAccount) {
         bankAccounts.add(s);
+      } else if (s.isInvestment) {
+        investments.add(s);
       } else {
         other.add(s);
       }
@@ -148,7 +152,7 @@ class _InstrumentListScreenState extends State<InstrumentListScreen>
 
     int byTotal(InstrumentSummary a, InstrumentSummary b) =>
         (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit);
-    for (final list in [creditCards, debitCards, bankAccounts, wallets, other]) {
+    for (final list in [creditCards, debitCards, bankAccounts, investments, wallets, other]) {
       list.sort(byTotal);
     }
 
@@ -157,6 +161,7 @@ class _InstrumentListScreenState extends State<InstrumentListScreen>
       _SectionData(
           'Debit Cards', Icons.credit_card_outlined, Theme.of(context).colorScheme.primary, debitCards),
       _SectionData('Bank Accounts', Icons.account_balance, const Color(0xFF10B981), bankAccounts),
+      _SectionData('Investments', Icons.trending_up, const Color(0xFF6366F1), investments),
       _SectionData(
           'Wallets', Icons.account_balance_wallet_outlined, const Color(0xFFF59E0B), wallets),
       _SectionData('Other', Icons.help_outline, const Color(0xFF9CA3AF), other),

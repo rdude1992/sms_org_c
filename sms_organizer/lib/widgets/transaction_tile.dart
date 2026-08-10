@@ -275,6 +275,8 @@ class TransactionTile extends StatelessWidget {
         return 'Debit Card';
       case InstrumentType.bankAccount:
         return 'Bank';
+      case InstrumentType.investment:
+        return 'Investment';
       case InstrumentType.upi:
         return 'UPI';
       case InstrumentType.unknown:

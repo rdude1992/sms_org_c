@@ -113,6 +113,16 @@ class TransactionParserService {
     if (cardHint == 'credit') return InstrumentType.creditCard;
     if (cardHint == 'debit') return InstrumentType.debitCard;
 
+    // A PPF/SSY/NPS small-savings-scheme sub-account, named explicitly —
+    // checked ahead of the generic bank-account match below since those SMS
+    // also say "A/c" (e.g. "PPF/SSY A/c No. 5685") and would otherwise be
+    // filed as an undifferentiated Bank Account.
+    if (RegExp(r'\bppf\b|\bssy\b|sukanya samriddhi|public provident fund|\bnps\b',
+            caseSensitive: false)
+        .hasMatch(content)) {
+      return InstrumentType.investment;
+    }
+
     if (RegExp(r'\b(a\/c|acc(?:ount)? no|account)\b', caseSensitive: false).hasMatch(content)) {
       return InstrumentType.bankAccount;
     }

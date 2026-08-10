@@ -68,6 +68,7 @@ class InstrumentSummary {
   bool get isCreditCard => types.contains(InstrumentType.creditCard);
   bool get isDebitCard => types.contains(InstrumentType.debitCard);
   bool get isBankAccount => types.contains(InstrumentType.bankAccount);
+  bool get isInvestment => types.contains(InstrumentType.investment);
   bool get isLinkedAccount => types.length > 1;
 
   String get displayName {
@@ -101,6 +102,8 @@ class InstrumentSummary {
         return 'Debit Card';
       case InstrumentType.bankAccount:
         return 'Bank Account';
+      case InstrumentType.investment:
+        return 'Investment';
       case InstrumentType.upi:
         return 'UPI';
       case InstrumentType.unknown:
