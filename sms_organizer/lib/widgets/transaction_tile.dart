@@ -120,7 +120,7 @@ class TransactionTile extends StatelessWidget {
             [
               if (isReversal) 'Reversed' else _instrumentLabel(transaction.instrument),
               if (transaction.instrumentRef != null) _formatRef(transaction.instrumentRef!),
-              Formatters.relativeOrTime(transaction.date),
+              Formatters.relativeOrTime(transaction.date, includeYear: true),
               if (transaction.spendCategory != null) transaction.spendCategory!.label,
             ].join('  ·  '),
             maxLines: 1,

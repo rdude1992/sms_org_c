@@ -6,6 +6,7 @@ class Formatters {
       NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
   static final _dayOnly = DateFormat('d');
   static final _dayMonth = DateFormat('d MMM');
+  static final _dayMonthYearShort = DateFormat('d MMM yy');
   static final _dayMonthYear = DateFormat('d MMM yyyy');
   static final _timeOfDay = DateFormat('h:mm a');
   static final _fullDate = DateFormat('d MMM yyyy, h:mm a');
@@ -19,7 +20,10 @@ class Formatters {
   static String dayMonthYear(DateTime date) => _dayMonthYear.format(date);
   static String timeOfDay(DateTime date) => _timeOfDay.format(date);
 
-  static String relativeOrTime(DateTime date) {
+  /// [includeYear] switches the non-today/non-yesterday fallback from
+  /// "d MMM" to "d MMM yy" — used by transaction list items, where a bare
+  /// "10 Dec" is ambiguous once the list spans more than one year.
+  static String relativeOrTime(DateTime date, {bool includeYear = false}) {
     final now = DateTime.now();
     final isToday = date.year == now.year && date.month == now.month && date.day == now.day;
     if (isToday) return _timeOfDay.format(date);
@@ -27,7 +31,7 @@ class Formatters {
     final isYesterday =
         date.year == yesterday.year && date.month == yesterday.month && date.day == yesterday.day;
     if (isYesterday) return 'Yesterday';
-    return _dayMonth.format(date);
+    return includeYear ? _dayMonthYearShort.format(date) : _dayMonth.format(date);
   }
 
   static String full(DateTime date) => _fullDate.format(date);
