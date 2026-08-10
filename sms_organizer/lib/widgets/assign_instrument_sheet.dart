@@ -4,24 +4,34 @@ import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 
-/// Lets the user manually pin [transaction] — one TransactionParserService
-/// couldn't tie to a specific account (no last-4 in the SMS at all, e.g. an
-/// NEFT debit that only names the recipient: "... has been credited to SK
-/// on ...") — to one of their already-detected bank accounts/cards. After
-/// the pick, offers to apply the same assignment to other still-unassigned
-/// transactions that look like they're from the same real-world sender —
-/// matched by sender address, detected bank name, or (when neither SMS has
-/// one) a shared message template, since the same bank's alerts can arrive
-/// under several different DLT sender codes — see
+/// Lets the user manually pin [transactions] — TransactionParserService
+/// couldn't tie them to a specific account (no last-4 in the SMS at all,
+/// e.g. an NEFT debit that only names the recipient: "... has been credited
+/// to SK on ...") — to one of their already-detected bank accounts/cards.
+/// [transactions] is almost always a single-element list, reached from one
+/// TransactionTile's long-press menu; TransactionListScreen's multi-select
+/// "Assign to account" action is the only caller that passes more than one.
+///
+/// For a single transaction, picking an account also offers to apply the
+/// same assignment to other still-unassigned transactions that look like
+/// they're from the same real-world sender — matched by sender address,
+/// detected bank name, or (when neither SMS has one) a shared message
+/// template, since the same bank's alerts can arrive under several
+/// different DLT sender codes — see
 /// SmsProvider.findSimilarUnassignedTransactions — but only after showing
-/// exactly what would change and getting an explicit Apply tap; nothing
-/// beyond [transaction] itself is ever touched silently.
+/// exactly what would change and getting an explicit Apply tap. That
+/// follow-up is skipped for a multi-transaction call: the caller already
+/// hand-picked the whole batch, so guessing at further "similar" additions
+/// on top of an explicit multi-select would second-guess a choice the user
+/// already made.
 Future<void> showAssignInstrumentSheet(
   BuildContext context,
   SmsProvider provider,
-  Transaction transaction,
-) {
+  List<Transaction> transactions, {
+  VoidCallback? onApplied,
+}) {
   final candidates = provider.assignableInstruments;
+  final count = transactions.length;
   return showModalBottomSheet(
     context: context,
     isScrollControlled: true,
@@ -46,8 +56,11 @@ Future<void> showAssignInstrumentSheet(
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    "This transaction's SMS didn't name a specific account — pick which of "
-                    "your detected accounts it actually belongs to.",
+                    count == 1
+                        ? "This transaction's SMS didn't name a specific account — pick which of "
+                            "your detected accounts it actually belongs to."
+                        : "Pick which of your detected accounts these $count transactions "
+                            "actually belong to.",
                     style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
                   ),
                 ],
@@ -83,7 +96,8 @@ Future<void> showAssignInstrumentSheet(
                       subtitle: Text('${s.typeLabel} · ${s.count} transactions'),
                       onTap: () async {
                         Navigator.pop(sheetContext);
-                        await _assignAndOfferSimilar(context, provider, transaction, s);
+                        await _assignAndOfferSimilar(context, provider, transactions, s);
+                        onApplied?.call();
                       },
                     );
                   },
@@ -100,18 +114,18 @@ Future<void> showAssignInstrumentSheet(
 Future<void> _assignAndOfferSimilar(
   BuildContext context,
   SmsProvider provider,
-  Transaction transaction,
+  List<Transaction> transactions,
   InstrumentSummary target,
 ) async {
   await provider.assignInstrumentToTransactions(
-    [transaction],
+    transactions,
     instrument: target.primaryType,
     issuer: target.issuer,
     instrumentRef: target.ref,
   );
-  if (!context.mounted) return;
+  if (!context.mounted || transactions.length != 1) return;
 
-  final similar = provider.findSimilarUnassignedTransactions(transaction);
+  final similar = provider.findSimilarUnassignedTransactions(transactions.first);
   if (similar.isEmpty) return;
 
   await _showSimilarTransactionsConfirmSheet(context, provider, similar, target);

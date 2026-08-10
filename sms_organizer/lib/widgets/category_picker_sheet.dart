@@ -78,15 +78,22 @@ Future<void> showCategoryPickerSheet(
   );
 }
 
-/// Bulk variant of [showCategoryPickerSheet] for the Inbox's multi-select
-/// "Set category" action — see SmsProvider.setSelectedCategory. Doesn't
-/// show a current-value checkmark since [selectedCount] messages can span
-/// several different categories at once.
+/// Bulk variant of [showCategoryPickerSheet] for a multi-select "Set
+/// category" action. Doesn't show a current-value checkmark since
+/// [selectedCount] items can span several different categories at once.
+/// [onSelect] fires with the tapped category and does the actual
+/// persisting — the Inbox's multi-select routes it to
+/// SmsProvider.setSelectedCategory (which operates on the shared
+/// [SmsProvider.selectedIds]); TransactionListScreen's "Not a transaction?"
+/// bulk action routes it to SmsProvider.setCategoryForTransactions instead,
+/// since that screen deliberately keeps its own local selection rather than
+/// sharing the Inbox's.
 Future<void> showBulkCategoryPickerSheet(
-  BuildContext context,
-  SmsProvider provider,
-  int selectedCount,
-) {
+  BuildContext context, {
+  required int selectedCount,
+  required String itemLabel,
+  required ValueChanged<SmsCategory> onSelect,
+}) {
   return showModalBottomSheet(
     context: context,
     isScrollControlled: true,
@@ -105,7 +112,7 @@ Future<void> showBulkCategoryPickerSheet(
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Set category for $selectedCount message${selectedCount == 1 ? '' : 's'}',
+                  'Set category for $selectedCount $itemLabel${selectedCount == 1 ? '' : 's'}',
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: scheme.onSurface),
                 ),
               ),
@@ -121,7 +128,7 @@ Future<void> showBulkCategoryPickerSheet(
                       title: Text(category.label),
                       onTap: () {
                         Navigator.pop(sheetContext);
-                        provider.setSelectedCategory(category);
+                        onSelect(category);
                       },
                     ),
                 ],

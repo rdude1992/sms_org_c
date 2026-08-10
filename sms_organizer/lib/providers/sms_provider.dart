@@ -22,6 +22,12 @@ enum LoadState { idle, loading, ready, error }
 /// a cold app restart, not just staying alive in widget state.
 enum InboxView { chats, messages }
 
+/// Sentinel default for [SmsProvider.updateTransactionsBulk]'s
+/// [spendCategory] param, so "not passed" (leave each transaction's spend
+/// category as-is) is distinguishable from an explicit `null` ("clear to
+/// Uncategorised").
+const Object keepSpendCategory = Object();
+
 class SmsProvider extends ChangeNotifier {
   final SmsPlatformService _platform = SmsPlatformService.instance;
   final CategorizationService _categorizer = CategorizationService();
@@ -608,6 +614,21 @@ class SmsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Bulk equivalent of [setMessageCategory] for TransactionListScreen's
+  /// multi-select "Not a transaction?" action — moves every transaction in
+  /// [smsIds] to [category] in one pass, the same way the single-item
+  /// TransactionTile action does for one. Kept separate from
+  /// [setSelectedCategory] because that one is hard-wired to
+  /// [selectedIds] (the Inbox's own cross-screen selection state) — the
+  /// transaction list deliberately keeps its selection local (see
+  /// TransactionListScreen), so this takes the id list explicitly instead.
+  Future<void> setCategoryForTransactions(List<int> smsIds, SmsCategory category) async {
+    for (final id in smsIds) {
+      final message = messageById(id);
+      if (message != null) await setMessageCategory(message, category);
+    }
+  }
+
   // ---- Single-item actions (swipe actions, long-press context menu) ----
 
   Future<void> deleteMessage(int id) async {
@@ -780,6 +801,54 @@ class SmsProvider extends ChangeNotifier {
       message.isCategoryOverridden = true;
       notifyListeners();
     }
+  }
+
+  /// Bulk equivalent of [updateTransaction] for TransactionListScreen's
+  /// multi-select "Edit" action. Unlike the single-transaction edit sheet
+  /// (which always writes every field), a batch edit almost never means
+  /// "set every field to this same value" — usually just one, e.g.
+  /// correcting the Instrument for a batch that all landed as "Other" —
+  /// so every param here is optional and only touches what's actually
+  /// passed: [direction]/[instrument] left null keep each transaction's
+  /// existing value, [merchant]/[walletType] left null or blank do the
+  /// same (bulk-*clearing* either isn't supported — too easy to wipe a
+  /// whole batch by leaving a field blank while only meaning to change
+  /// something else), and [spendCategory] defaults to [keepSpendCategory]
+  /// so it takes the same three-state "leave alone / clear / set" as
+  /// [Transaction.copyWith] itself.
+  Future<void> updateTransactionsBulk(
+    List<Transaction> transactions, {
+    TxnDirection? direction,
+    InstrumentType? instrument,
+    String? merchant,
+    String? walletType,
+    Object? spendCategory = keepSpendCategory,
+  }) async {
+    final cleanedMerchant = merchant?.trim();
+    final cleanedWallet = walletType?.trim();
+    for (final t in transactions) {
+      final updated = t.copyWith(
+        direction: direction ?? t.direction,
+        instrument: instrument ?? t.instrument,
+        merchant: (cleanedMerchant == null || cleanedMerchant.isEmpty) ? t.merchant : cleanedMerchant,
+        walletType: (cleanedWallet == null || cleanedWallet.isEmpty) ? t.walletType : cleanedWallet,
+        spendCategory: identical(spendCategory, keepSpendCategory)
+            ? t.spendCategory
+            : spendCategory as SpendCategory?,
+        isOverridden: true,
+      );
+      final index = _transactions.indexWhere((x) => x.smsId == t.smsId);
+      if (index != -1) _transactions[index] = updated;
+      await _db.saveTransaction(updated, isOverride: true);
+      await _db.saveCategory(t.smsId, SmsCategory.transactional, isOverride: true);
+
+      final message = messageById(t.smsId);
+      if (message != null) {
+        message.category = SmsCategory.transactional;
+        message.isCategoryOverridden = true;
+      }
+    }
+    notifyListeners();
   }
 
   /// Detected bank/card accounts a transaction can be manually pinned to —

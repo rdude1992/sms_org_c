@@ -224,7 +224,7 @@ class TransactionTile extends StatelessWidget {
                   subtitle: const Text("SMS didn't name a specific account — pick one of yours"),
                   onTap: () {
                     Navigator.pop(sheetContext);
-                    showAssignInstrumentSheet(context, provider, transaction);
+                    showAssignInstrumentSheet(context, provider, [transaction]);
                   },
                 ),
               ListTile(

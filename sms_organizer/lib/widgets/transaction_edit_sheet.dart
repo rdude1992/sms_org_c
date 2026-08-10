@@ -328,3 +328,174 @@ class _TransactionEditSheetState extends State<_TransactionEditSheet> {
     );
   }
 }
+
+/// Bottom sheet for TransactionListScreen's multi-select "Edit" action —
+/// applies a correction to every transaction in [transactions] at once. See
+/// SmsProvider.updateTransactionsBulk: every field here defaults to "no
+/// change" (an unstarted dropdown / a blank text field) rather than
+/// pre-filling one transaction's values, since a batch rarely shares a
+/// single starting value for every field the way one transaction's own edit
+/// sheet can assume. [onApplied] fires right after the batch is persisted —
+/// TransactionListScreen uses it to clear its selection.
+Future<void> showBulkTransactionEditSheet(
+  BuildContext context,
+  SmsProvider provider,
+  List<Transaction> transactions, {
+  VoidCallback? onApplied,
+}) {
+  return showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (_) => _BulkTransactionEditSheet(
+      provider: provider,
+      transactions: transactions,
+      onApplied: onApplied,
+    ),
+  );
+}
+
+class _BulkTransactionEditSheet extends StatefulWidget {
+  final SmsProvider provider;
+  final List<Transaction> transactions;
+  final VoidCallback? onApplied;
+  const _BulkTransactionEditSheet({
+    required this.provider,
+    required this.transactions,
+    this.onApplied,
+  });
+
+  @override
+  State<_BulkTransactionEditSheet> createState() => _BulkTransactionEditSheetState();
+}
+
+class _BulkTransactionEditSheetState extends State<_BulkTransactionEditSheet> {
+  TxnDirection? _direction;
+  InstrumentType? _instrument;
+  Object? _spendCategory = keepSpendCategory;
+  final _merchantController = TextEditingController();
+  final _walletController = TextEditingController();
+
+  @override
+  void dispose() {
+    _merchantController.dispose();
+    _walletController.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    Navigator.pop(context);
+    widget.provider.updateTransactionsBulk(
+      widget.transactions,
+      direction: _direction,
+      instrument: _instrument,
+      merchant: _merchantController.text,
+      walletType: _walletController.text,
+      spendCategory: _spendCategory,
+    );
+    widget.onApplied?.call();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final count = widget.transactions.length;
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: scheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('Edit $count transaction${count == 1 ? '' : 's'}',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text(
+                "Only fields you change here are applied — anything left as \"No change\" "
+                "or blank is left exactly as it was on each transaction.",
+                style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 20),
+              DropdownButtonFormField<TxnDirection?>(
+                value: _direction,
+                decoration: const InputDecoration(labelText: 'Type'),
+                items: const [
+                  DropdownMenuItem(value: null, child: Text('No change')),
+                  DropdownMenuItem(value: TxnDirection.credit, child: Text('Credit')),
+                  DropdownMenuItem(value: TxnDirection.debit, child: Text('Debit')),
+                  DropdownMenuItem(value: TxnDirection.reversal, child: Text('Reversed')),
+                ],
+                onChanged: (v) => setState(() => _direction = v),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<InstrumentType?>(
+                value: _instrument,
+                decoration: const InputDecoration(labelText: 'Instrument'),
+                items: const [
+                  DropdownMenuItem(value: null, child: Text('No change')),
+                  DropdownMenuItem(value: InstrumentType.debitCard, child: Text('Debit Card')),
+                  DropdownMenuItem(value: InstrumentType.creditCard, child: Text('Credit Card')),
+                  DropdownMenuItem(value: InstrumentType.bankAccount, child: Text('Bank Account')),
+                  DropdownMenuItem(value: InstrumentType.upi, child: Text('UPI')),
+                  DropdownMenuItem(value: InstrumentType.unknown, child: Text('Other')),
+                ],
+                onChanged: (v) => setState(() => _instrument = v),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _merchantController,
+                decoration: const InputDecoration(
+                  labelText: 'Merchant',
+                  hintText: "Leave blank to keep each transaction's existing merchant",
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _walletController,
+                decoration: const InputDecoration(
+                  labelText: 'Wallet name',
+                  hintText: "Leave blank to keep each transaction's existing wallet",
+                ),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<Object?>(
+                value: _spendCategory,
+                decoration: const InputDecoration(labelText: 'Spend category'),
+                items: [
+                  const DropdownMenuItem(value: keepSpendCategory, child: Text('No change')),
+                  const DropdownMenuItem(value: null, child: Text('Uncategorised')),
+                  for (final category in SpendCategory.values)
+                    DropdownMenuItem(value: category, child: Text(category.label)),
+                ],
+                onChanged: (v) => setState(() => _spendCategory = v),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _save,
+                  child: Text('Apply to $count transaction${count == 1 ? '' : 's'}'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
