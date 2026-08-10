@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/category.dart';
 import '../providers/notification_settings_provider.dart';
+import '../providers/security_settings_provider.dart';
 import '../providers/sms_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/sms_platform_service.dart';
@@ -57,6 +58,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     final smsProvider = context.watch<SmsProvider>();
     final themeProvider = context.watch<ThemeProvider>();
     final notificationSettings = context.watch<NotificationSettingsProvider>();
+    final securitySettings = context.watch<SecuritySettingsProvider>();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -123,6 +125,17 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                   },
                   onCustomize: () => context.read<SmsProvider>().openChannelSettingsFor(category),
                 ),
+            ],
+          ),
+          _SectionHeader('Privacy & security'),
+          GroupedCard(
+            children: [
+              SwitchListTile(
+                title: const Text('Lock Insights'),
+                subtitle: const Text('Require fingerprint, face, or device PIN to view Insights'),
+                value: securitySettings.lockEnabled,
+                onChanged: (enabled) => _onToggleInsightsLock(context, enabled),
+              ),
             ],
           ),
           _SectionHeader('Message counts'),
@@ -199,6 +212,46 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         ],
       ),
     );
+  }
+
+  /// Turning the lock off just clears it — nothing to verify. Turning it
+  /// on first checks the device actually has a screen lock or biometric
+  /// enrolled (otherwise the toggle would strand the user with no way to
+  /// ever unlock Insights again), then requires a successful
+  /// authentication right away so the toggle can't end up "on" without
+  /// ever having been tested — see SecuritySettingsProvider.setLockEnabled
+  /// for why that same auth also means the very next Insights visit this
+  /// session doesn't re-prompt redundantly.
+  Future<void> _onToggleInsightsLock(BuildContext context, bool enabled) async {
+    final security = context.read<SecuritySettingsProvider>();
+    if (!enabled) {
+      await security.setLockEnabled(false);
+      return;
+    }
+
+    final supported = await security.isBiometricSupported;
+    if (!supported) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Set a screen lock (PIN, pattern, or biometric) on this device first.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    final authenticated = await security.authenticate();
+    if (!authenticated) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Authentication failed — Insights lock wasn't enabled.")),
+        );
+      }
+      return;
+    }
+
+    await security.setLockEnabled(true);
   }
 
   String _categoryNotificationHint(SmsCategory category) {

@@ -41,7 +41,11 @@ android {
         // Must stay stable once you've set the app as default SMS handler on a
         // test device; changing it later means re-registering the role.
         applicationId "com.smartsms.app"
-        minSdkVersion flutter.minSdkVersion
+        // local_auth (Insights biometric lock) requires API 23+ — its plugin
+        // manifest declares that floor, so building against
+        // flutter.minSdkVersion alone would fail manifest merging if that
+        // resolves lower.
+        minSdkVersion Math.max(flutter.minSdkVersion, 23)
         targetSdkVersion 36
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
