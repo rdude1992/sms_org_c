@@ -50,6 +50,50 @@ object NotificationChannels {
             .build()
         manager.createNotificationChannel(summary)
         created = true
+        // Categories muted in a previous session had their channel created
+        // above at its normal spec importance — apply any already-muted
+        // state on top so the OS's own settings screen doesn't show
+        // "Alert" for a category the user muted before this process
+        // started (e.g. after a fresh app relaunch).
+        syncMuteState(context)
+    }
+
+    /**
+     * Applies [NotificationPrefsRepository]'s mute state to the actual OS
+     * channel importance for every category's parent channel — so system
+     * Settings (reachable via the Settings screen's "tune" button)
+     * reflects "Off" for a muted category instead of continuing to show
+     * its normal importance ("Alert") like nothing changed.
+     *
+     * [IncomingSmsNotifier.notify] already fully suppresses posting a
+     * notification for a muted category on its own — this isn't required
+     * for muting to actually work, it exists purely so the OS's own
+     * settings UI doesn't contradict what the app just did.
+     *
+     * Android has no in-place "change this channel's importance" call —
+     * the only way is to delete and recreate the channel, which as a side
+     * effect also clears anything the user customized for it (a
+     * non-default sound, etc). That's an accepted trade-off: a plain
+     * create-with-lower-importance call (no delete) can only ever *lower*
+     * a channel's importance, never raise it back on unmute, so it can't
+     * make the toggle work in both directions.
+     */
+    fun syncMuteState(context: Context) {
+        val muted = NotificationPrefsRepository.getMuted(context)
+        val manager = NotificationManagerCompat.from(context)
+        for (spec in specs) {
+            val channelId = "sms_${spec.key}"
+            val targetImportance =
+                if (muted.contains(spec.key)) NotificationManagerCompat.IMPORTANCE_NONE else spec.importance
+            val current = manager.getNotificationChannelCompat(channelId)
+            if (current != null && current.importance == targetImportance) continue
+            manager.deleteNotificationChannel(channelId)
+            val channel = NotificationChannelCompat.Builder(channelId, targetImportance)
+                .setName(spec.label)
+                .setDescription("Notifications for ${spec.label.lowercase()} SMS")
+                .build()
+            manager.createNotificationChannel(channel)
+        }
     }
 
     /**

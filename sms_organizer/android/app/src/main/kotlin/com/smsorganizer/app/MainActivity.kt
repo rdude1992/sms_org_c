@@ -61,6 +61,12 @@ class MainActivity : FlutterActivity() {
                 "setMutedCategories" -> {
                     val categories = (call.argument<List<String>>("categories") ?: emptyList()).toSet()
                     NotificationPrefsRepository.setMuted(this, categories)
+                    // Reflects the new mute state onto the actual OS channel
+                    // importance too, so the "tune" button's system settings
+                    // page shows "Off" for a muted category instead of its
+                    // normal "Alert" importance — see
+                    // NotificationChannels.syncMuteState.
+                    NotificationChannels.syncMuteState(this)
                     result.success(null)
                 }
                 "getChannelImportance" -> {

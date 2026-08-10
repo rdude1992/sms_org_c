@@ -111,8 +111,16 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                   muted: notificationSettings.isMuted(category),
                   importance: _channelImportance[category],
                   hint: _categoryNotificationHint(category),
-                  onToggle: (enabled) =>
-                      context.read<NotificationSettingsProvider>().setMuted(category, !enabled),
+                  onToggle: (enabled) async {
+                    await context.read<NotificationSettingsProvider>().setMuted(category, !enabled);
+                    // The native side just applied this to the category's
+                    // actual OS channel importance too (see
+                    // NotificationChannels.syncMuteState) — re-read it so
+                    // the "Silenced in system settings" banner reflects the
+                    // toggle immediately instead of waiting for this screen
+                    // to next resume.
+                    _refreshChannelStatus();
+                  },
                   onCustomize: () => context.read<SmsProvider>().openChannelSettingsFor(category),
                 ),
             ],
@@ -293,9 +301,13 @@ class _SectionHeader extends StatelessWidget {
 /// that deep-links into the OS's own per-channel settings (sound,
 /// vibration, priority conversation) — controls this screen otherwise has
 /// no UI for. When the OS reports the channel itself has been silenced or
-/// blocked (independent of, and possibly out of sync with, this app's own
-/// mute toggle above), a small banner surfaces that directly rather than
-/// leaving notifications silently not showing up with no explanation.
+/// blocked while [muted] is still off (i.e. without the user having asked
+/// for it here — most likely changed by hand in system settings, or an OEM
+/// default), a small banner surfaces that directly rather than leaving
+/// notifications silently not showing up with no explanation. Muting a
+/// category from the switch above silences its OS channel too (see
+/// NotificationChannels.syncMuteState) — that's the expected, intentional
+/// case, so it's excluded here rather than flagged as something to "fix".
 class _NotificationCategoryRow extends StatelessWidget {
   final SmsCategory category;
   final bool muted;
@@ -313,7 +325,8 @@ class _NotificationCategoryRow extends StatelessWidget {
     required this.onCustomize,
   });
 
-  bool get _silencedByOs => importance != null && NotificationImportance.isSilencedByOs(importance!);
+  bool get _silencedByOs =>
+      !muted && importance != null && NotificationImportance.isSilencedByOs(importance!);
 
   @override
   Widget build(BuildContext context) {
