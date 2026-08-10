@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:file_selector/file_selector.dart' show openFile, XTypeGroup;
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import '../models/category.dart';
 import '../providers/notification_settings_provider.dart';
@@ -25,11 +26,20 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   // Absent (not yet loaded) entries are treated as "nothing to flag".
   Map<SmsCategory, int> _channelImportance = {};
 
+  // Read from the platform (which derives it from the installed build's own
+  // version/build number — see android/app/build.gradle's flutterVersionName)
+  // rather than hardcoded, so About always matches whatever's actually
+  // installed instead of drifting from pubspec.yaml on release.
+  PackageInfo? _packageInfo;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _refreshChannelStatus();
+    PackageInfo.fromPlatform().then((info) {
+      if (mounted) setState(() => _packageInfo = info);
+    });
   }
 
   @override
@@ -213,15 +223,14 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
           _SectionHeader('About'),
           GroupedCard(
             children: [
-              const ListTile(
-                leading: Icon(Icons.info_outline),
-                title: Text('SmartSMS'),
-                // Version is a plain string rather than read via
-                // package_info_plus (not a dependency here) — keep it in
-                // sync with pubspec.yaml's `version:` by hand on release.
+              ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: const Text('SmartSMS'),
                 subtitle: Text(
-                  'Version 0.1.0 · Smart SMS organiser with categorisation, '
-                  'expense & investment insights.',
+                  _packageInfo == null
+                      ? 'Smart SMS organiser with categorisation, expense & investment insights.'
+                      : 'Version ${_packageInfo!.version} (${_packageInfo!.buildNumber}) · Smart SMS '
+                          'organiser with categorisation, expense & investment insights.',
                 ),
               ),
               const ListTile(
