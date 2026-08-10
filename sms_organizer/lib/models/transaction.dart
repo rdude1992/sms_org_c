@@ -161,6 +161,16 @@ SpendCategory? parseSpendCategory(String? name) {
   return null;
 }
 
+/// Collapses an SMS body to its underlying template — strips every digit
+/// run (amounts, account/reference numbers, dates, balances) and
+/// normalises whitespace/case, so two alerts generated from the same bank
+/// template collapse to an identical string even though none of their
+/// numbers match. Shared by SmsProvider.findSimilarUnassignedTransactions
+/// and [Transaction.categoryReviewGroupKey].
+String normalizedSmsTemplate(String body) {
+  return body.toLowerCase().replaceAll(RegExp(r'\d+'), '#').replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
 /// Sentinel default for [Transaction.copyWith]'s nullable-field params, so
 /// "not passed" (keep existing value) is distinguishable from "passed
 /// null" (clear the field).
@@ -315,6 +325,18 @@ class Transaction {
     if (trimmed == null || trimmed.isEmpty) return null;
     return trimmed.replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
   }
+
+  /// Best available grouping key for "these are probably the same
+  /// real-world sender" purposes when there's no [merchantGroupKey] to use
+  /// — falls back to [normalizedSmsTemplate], which collapses every digit
+  /// run (amounts, account numbers, dates, references — everything that's
+  /// supposed to differ message-to-message) so two alerts generated from
+  /// the same bank template collapse to an identical string even though
+  /// none of their numbers match. Used by UncategorisedReviewScreen to
+  /// group merchant-less transactions (bare NEFT/IMPS transfers, generic
+  /// bank alerts) that [merchantGroupKey] alone would leave as one
+  /// singleton per transaction.
+  String get categoryReviewGroupKey => merchantGroupKey ?? 'tmpl:${normalizedSmsTemplate(rawBody)}';
 
   Map<String, dynamic> toJson() => {
         'smsId': smsId,

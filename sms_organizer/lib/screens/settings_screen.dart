@@ -9,6 +9,7 @@ import '../providers/sms_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/sms_platform_service.dart';
 import '../widgets/ui/grouped_card.dart';
+import 'uncategorised_review_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -178,6 +179,18 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                   'manually changed are kept as-is.',
                 ),
                 onTap: () => _confirmRecalculate(context),
+              ),
+              ListTile(
+                leading: const Icon(Icons.label_off_outlined),
+                title: const Text('Review uncategorised transactions'),
+                subtitle: Text(
+                  '${smsProvider.transactions.where((t) => t.spendCategory == null).length} '
+                  'transactions grouped by merchant — tag a whole group at once',
+                ),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const UncategorisedReviewScreen()),
+                ),
               ),
             ],
           ),
