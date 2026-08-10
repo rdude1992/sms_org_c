@@ -118,7 +118,27 @@ class _InboxScreenState extends State<InboxScreen> {
                           onChanged:
                               view == InboxView.chats ? provider.setChatSearchQuery : provider.setSearchQuery,
                         )
-                      : const Text('Inbox'),
+                      // The bottom nav bar already labels this tab "Inbox" —
+                      // this is the app's only screen that never otherwise
+                      // shows its own name anywhere, so the app bar carries
+                      // the SmartSMS brand above the tab title instead of
+                      // just repeating it.
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'SmartSMS',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.4,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                            ),
+                            const Text('Inbox'),
+                          ],
+                        ),
                   actions: [
                     if (_isSearching)
                       IconButton(

@@ -214,6 +214,17 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
           GroupedCard(
             children: [
               const ListTile(
+                leading: Icon(Icons.info_outline),
+                title: Text('SmartSMS'),
+                // Version is a plain string rather than read via
+                // package_info_plus (not a dependency here) — keep it in
+                // sync with pubspec.yaml's `version:` by hand on release.
+                subtitle: Text(
+                  'Version 0.1.0 · Smart SMS organiser with categorisation, '
+                  'expense & investment insights.',
+                ),
+              ),
+              const ListTile(
                 leading: Icon(Icons.privacy_tip_outlined),
                 title: Text('Your data stays on-device'),
                 subtitle: Text(
