@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/sms_provider.dart';
+import '../widgets/insights_lock_gate.dart';
 import '../widgets/ui/floating_nav_bar.dart';
 import 'compose_screen.dart';
 import 'inbox_screen.dart';
@@ -23,7 +24,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final _tabs = const [
     InboxScreen(),
-    InsightsScreen(),
+    InsightsLockGate(child: InsightsScreen()),
     SettingsScreen(),
   ];
 

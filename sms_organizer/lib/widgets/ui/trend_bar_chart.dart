@@ -176,7 +176,33 @@ class TrendBarChart extends StatelessWidget {
                       ),
                   ],
                   titlesData: FlTitlesData(
-                    leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 46,
+                        interval: maxY / 4,
+                        getTitlesWidget: (value, meta) {
+                          // The top gridline sits at maxY (== maxVal * 1.2,
+                          // an intentional headroom margin — see maxY above)
+                          // rather than on a "nice" interval boundary, so
+                          // its own auto-generated title would show an
+                          // oddly precise value floating above the last
+                          // real interval tick; fl_chart already omits a
+                          // title exactly at maxY by default, but skip it
+                          // explicitly too in case rounding ever lands one
+                          // on the other side of that check.
+                          if (value >= maxY) return const SizedBox.shrink();
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: Text(
+                              Formatters.compactCurrency(value),
+                              textAlign: TextAlign.right,
+                              style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
                     rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                     topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                     bottomTitles: AxisTitles(
@@ -188,11 +214,33 @@ class TrendBarChart extends StatelessWidget {
                           if (idx < 0 || idx >= dates.length) return const SizedBox.shrink();
                           final isLast = idx == dates.length - 1;
                           if (idx % labelInterval != 0 && !isLast) return const SizedBox.shrink();
+
+                          final text = Text(
+                            _bucketLabel(dates[idx]),
+                            style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+                          );
+                          // fl_chart centers this widget directly on top of
+                          // its tick. That's fine for an interior label, but
+                          // the first/last tick sits right at the plot's own
+                          // edge, so a centered multi-character label (e.g.
+                          // "May 2019") spills half its width past the
+                          // chart's bounds and gets clipped by the Card's
+                          // clipBehavior. Reserve extra width to one side
+                          // and anchor the text to the inward edge of that
+                          // instead, so it grows inward from the tick
+                          // rather than off the edge.
+                          final isFirst = idx == 0;
+                          if (!isFirst && !isLast) {
+                            return Padding(padding: const EdgeInsets.only(top: 6), child: text);
+                          }
                           return Padding(
                             padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              _bucketLabel(dates[idx]),
-                              style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+                            child: SizedBox(
+                              width: 64,
+                              child: Align(
+                                alignment: isFirst ? Alignment.centerLeft : Alignment.centerRight,
+                                child: text,
+                              ),
                             ),
                           );
                         },

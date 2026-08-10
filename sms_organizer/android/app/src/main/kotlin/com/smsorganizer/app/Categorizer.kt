@@ -29,6 +29,12 @@ object Categorizer {
     private val scheduledRegex = Regex("scheduled", RegexOption.IGNORE_CASE)
     private val initiatedRegex = Regex("initiated", RegexOption.IGNORE_CASE)
     private val cardEndingRegex = Regex("card.*(?:ending|xxxx|xx\\d{4})", RegexOption.IGNORE_CASE)
+    // 'nfo' (New Fund Offer) as a bare substring also matches inside the
+    // ordinary word "info"/"Info:" — a field label many routine bank
+    // debit/credit alerts use (e.g. "Info: ACH D-..."). Word-bounded so it
+    // only matches the standalone "NFO" abbreviation — mirrors the fix in
+    // lib/services/categorization_service.dart's isPromotion check.
+    private val nfoWordRegex = Regex("\\bnfo\\b", RegexOption.IGNORE_CASE)
 
     private val otpKeywords = listOf(
         "otp", "verification code", "verify", "code is", "passcode", "pin is",
@@ -130,6 +136,7 @@ object Categorizer {
                 kw == "data" && contentLower.contains("data wallet") -> false
                 (kw == "recharge" || kw == "validity") &&
                     (contentLower.contains("fastag") || senderUpper.contains("FASTAG")) -> false
+                kw == "nfo" -> nfoWordRegex.containsMatchIn(content)
                 else -> contentLower.contains(kw)
             }
         }
@@ -186,7 +193,11 @@ object Categorizer {
 
         // 4. Promotional.
         if (suffixCategory == Category.PROMOTIONAL) return Category.PROMOTIONAL
-        if (promoKeywords.any { contentLower.contains(it) }) return Category.PROMOTIONAL
+        // Same 'nfo'-inside-"info" word-boundary fix as the isPromotion check
+        // above — a separate keyword scan, not a reuse of that result.
+        if (promoKeywords.any { kw -> if (kw == "nfo") nfoWordRegex.containsMatchIn(content) else contentLower.contains(kw) }) {
+            return Category.PROMOTIONAL
+        }
         if (contentLower.contains("unsubscribe") || contentLower.contains("opt-out") || contentLower.contains("t&c")) {
             return Category.PROMOTIONAL
         }

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
+import '../widgets/assign_instrument_sheet.dart';
+import '../widgets/category_picker_sheet.dart';
 import '../widgets/search_toggle_mixin.dart';
 import '../widgets/transaction_edit_sheet.dart';
 import '../widgets/transaction_tile.dart';
@@ -143,6 +145,9 @@ class _TransactionListScreenState extends State<TransactionListScreen>
     // ids selected from another tab still apply correctly to the bulk
     // action, they just won't show a checked tile until you swipe to them.
     final allSelected = sorted.isNotEmpty && sorted.every((t) => _selectedIds.contains(t.smsId));
+    // The actual Transaction objects behind [_selectedIds] — bulk actions
+    // below (edit, assign to account) need the full objects, not just ids.
+    final selectedTransactions = sorted.where((t) => _selectedIds.contains(t.smsId)).toList();
 
     final appBarLeading =
         _selecting ? IconButton(icon: const Icon(Icons.close), onPressed: _clearSelection) : null;
@@ -157,6 +162,26 @@ class _TransactionListScreenState extends State<TransactionListScreen>
               onPressed: allSelected ? _clearSelection : () => _selectAll(sorted.map((t) => t.smsId)),
             ),
             IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Edit',
+              onPressed: () => showBulkTransactionEditSheet(
+                context,
+                context.read<SmsProvider>(),
+                selectedTransactions,
+                onApplied: _clearSelection,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.account_balance_outlined),
+              tooltip: 'Assign to account',
+              onPressed: () => showAssignInstrumentSheet(
+                context,
+                context.read<SmsProvider>(),
+                selectedTransactions,
+                onApplied: _clearSelection,
+              ),
+            ),
+            IconButton(
               icon: const Icon(Icons.label_outline),
               tooltip: 'Set category',
               onPressed: () => showBulkSpendCategorySheet(
@@ -164,6 +189,19 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                 context.read<SmsProvider>(),
                 _selectedIds.toList(),
                 onApplied: _clearSelection,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.remove_circle_outline),
+              tooltip: 'Not a transaction?',
+              onPressed: () => showBulkCategoryPickerSheet(
+                context,
+                selectedCount: _selectedIds.length,
+                itemLabel: 'transaction',
+                onSelect: (category) {
+                  context.read<SmsProvider>().setCategoryForTransactions(_selectedIds.toList(), category);
+                  _clearSelection();
+                },
               ),
             ),
           ]

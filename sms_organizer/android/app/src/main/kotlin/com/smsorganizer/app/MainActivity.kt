@@ -7,12 +7,16 @@ import android.os.Build
 import android.provider.Settings
 import android.provider.Telephony
 import androidx.annotation.NonNull
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+// FlutterFragmentActivity (not plain FlutterActivity) is required by the
+// local_auth plugin's Android implementation — it shows the system
+// biometric prompt via androidx.biometric.BiometricPrompt, which needs a
+// FragmentActivity host.
+class MainActivity : FlutterFragmentActivity() {
 
     companion object {
         const val METHOD_CHANNEL = "com.smsorganizer/sms"
@@ -61,6 +65,12 @@ class MainActivity : FlutterActivity() {
                 "setMutedCategories" -> {
                     val categories = (call.argument<List<String>>("categories") ?: emptyList()).toSet()
                     NotificationPrefsRepository.setMuted(this, categories)
+                    // Reflects the new mute state onto the actual OS channel
+                    // importance too, so the "tune" button's system settings
+                    // page shows "Off" for a muted category instead of its
+                    // normal "Alert" importance — see
+                    // NotificationChannels.syncMuteState.
+                    NotificationChannels.syncMuteState(this)
                     result.success(null)
                 }
                 "getChannelImportance" -> {

@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/category.dart';
 import '../providers/notification_settings_provider.dart';
+import '../providers/security_settings_provider.dart';
 import '../providers/sms_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/sms_platform_service.dart';
 import '../widgets/ui/grouped_card.dart';
+import 'uncategorised_review_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -57,6 +59,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     final smsProvider = context.watch<SmsProvider>();
     final themeProvider = context.watch<ThemeProvider>();
     final notificationSettings = context.watch<NotificationSettingsProvider>();
+    final securitySettings = context.watch<SecuritySettingsProvider>();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -111,10 +114,29 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                   muted: notificationSettings.isMuted(category),
                   importance: _channelImportance[category],
                   hint: _categoryNotificationHint(category),
-                  onToggle: (enabled) =>
-                      context.read<NotificationSettingsProvider>().setMuted(category, !enabled),
+                  onToggle: (enabled) async {
+                    await context.read<NotificationSettingsProvider>().setMuted(category, !enabled);
+                    // The native side just applied this to the category's
+                    // actual OS channel importance too (see
+                    // NotificationChannels.syncMuteState) — re-read it so
+                    // the "Silenced in system settings" banner reflects the
+                    // toggle immediately instead of waiting for this screen
+                    // to next resume.
+                    _refreshChannelStatus();
+                  },
                   onCustomize: () => context.read<SmsProvider>().openChannelSettingsFor(category),
                 ),
+            ],
+          ),
+          _SectionHeader('Privacy & security'),
+          GroupedCard(
+            children: [
+              SwitchListTile(
+                title: const Text('Lock Insights'),
+                subtitle: const Text('Require fingerprint, face, or device PIN to view Insights'),
+                value: securitySettings.lockEnabled,
+                onChanged: (enabled) => _onToggleInsightsLock(context, enabled),
+              ),
             ],
           ),
           _SectionHeader('Message counts'),
@@ -158,6 +180,18 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                 ),
                 onTap: () => _confirmRecalculate(context),
               ),
+              ListTile(
+                leading: const Icon(Icons.label_off_outlined),
+                title: const Text('Review uncategorised transactions'),
+                subtitle: Text(
+                  '${smsProvider.transactions.where((t) => t.spendCategory == null).length} '
+                  'transactions grouped by merchant — tag a whole group at once',
+                ),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const UncategorisedReviewScreen()),
+                ),
+              ),
             ],
           ),
           _SectionHeader('Backup & restore'),
@@ -191,6 +225,46 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         ],
       ),
     );
+  }
+
+  /// Turning the lock off just clears it — nothing to verify. Turning it
+  /// on first checks the device actually has a screen lock or biometric
+  /// enrolled (otherwise the toggle would strand the user with no way to
+  /// ever unlock Insights again), then requires a successful
+  /// authentication right away so the toggle can't end up "on" without
+  /// ever having been tested — see SecuritySettingsProvider.setLockEnabled
+  /// for why that same auth also means the very next Insights visit this
+  /// session doesn't re-prompt redundantly.
+  Future<void> _onToggleInsightsLock(BuildContext context, bool enabled) async {
+    final security = context.read<SecuritySettingsProvider>();
+    if (!enabled) {
+      await security.setLockEnabled(false);
+      return;
+    }
+
+    final supported = await security.isBiometricSupported;
+    if (!supported) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Set a screen lock (PIN, pattern, or biometric) on this device first.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    final authenticated = await security.authenticate();
+    if (!authenticated) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Authentication failed — Insights lock wasn't enabled.")),
+        );
+      }
+      return;
+    }
+
+    await security.setLockEnabled(true);
   }
 
   String _categoryNotificationHint(SmsCategory category) {
@@ -293,9 +367,13 @@ class _SectionHeader extends StatelessWidget {
 /// that deep-links into the OS's own per-channel settings (sound,
 /// vibration, priority conversation) — controls this screen otherwise has
 /// no UI for. When the OS reports the channel itself has been silenced or
-/// blocked (independent of, and possibly out of sync with, this app's own
-/// mute toggle above), a small banner surfaces that directly rather than
-/// leaving notifications silently not showing up with no explanation.
+/// blocked while [muted] is still off (i.e. without the user having asked
+/// for it here — most likely changed by hand in system settings, or an OEM
+/// default), a small banner surfaces that directly rather than leaving
+/// notifications silently not showing up with no explanation. Muting a
+/// category from the switch above silences its OS channel too (see
+/// NotificationChannels.syncMuteState) — that's the expected, intentional
+/// case, so it's excluded here rather than flagged as something to "fix".
 class _NotificationCategoryRow extends StatelessWidget {
   final SmsCategory category;
   final bool muted;
@@ -313,7 +391,8 @@ class _NotificationCategoryRow extends StatelessWidget {
     required this.onCustomize,
   });
 
-  bool get _silencedByOs => importance != null && NotificationImportance.isSilencedByOs(importance!);
+  bool get _silencedByOs =>
+      !muted && importance != null && NotificationImportance.isSilencedByOs(importance!);
 
   @override
   Widget build(BuildContext context) {

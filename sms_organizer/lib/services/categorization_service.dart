@@ -20,7 +20,7 @@ class CategorizationService {
   /// cached categories/transactions from before a logic change would
   /// silently keep being reused forever (incremental sync deliberately
   /// never re-evaluates cached entries on its own).
-  static const int version = 4;
+  static const int version = 6;
 
   SmsCategory categorize(SmsMessage message) {
     final sender = message.address;
@@ -131,6 +131,13 @@ class CategorizationService {
           (contentLower.contains('fastag') || senderUpper.contains('FASTAG'))) {
         return false;
       }
+      // 'nfo' (New Fund Offer) as a bare substring also matches inside the
+      // ordinary word "info"/"Info:" — a field label many routine bank
+      // debit/credit alerts use (e.g. "Info: ACH D-..."). That falsely
+      // flagged plain transaction SMS as promotional and blocked them from
+      // ever being detected as transactions. Require a word boundary so
+      // this only matches the standalone "NFO" abbreviation.
+      if (kw == 'nfo') return RegExp(r'\bnfo\b', caseSensitive: false).hasMatch(content);
       return contentLower.contains(kw);
     });
 
@@ -232,7 +239,13 @@ class CategorizationService {
 
     // 4. Promotional.
     if (suffixCategory == SmsCategory.promotional) return SmsCategory.promotional;
-    if (promoKeywords.any((kw) => contentLower.contains(kw))) return SmsCategory.promotional;
+    // Same 'nfo'-inside-"info" word-boundary fix as the isPromotion check
+    // above — this is a separate keyword scan, not a reuse of that result,
+    // so it needs the same guard rather than inheriting it.
+    if (promoKeywords.any((kw) =>
+        kw == 'nfo' ? RegExp(r'\bnfo\b', caseSensitive: false).hasMatch(content) : contentLower.contains(kw))) {
+      return SmsCategory.promotional;
+    }
 
     if (contentLower.contains('unsubscribe') ||
         contentLower.contains('opt-out') ||

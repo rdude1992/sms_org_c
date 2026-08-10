@@ -22,6 +22,12 @@ enum LoadState { idle, loading, ready, error }
 /// a cold app restart, not just staying alive in widget state.
 enum InboxView { chats, messages }
 
+/// Sentinel default for [SmsProvider.updateTransactionsBulk]'s
+/// [spendCategory] param, so "not passed" (leave each transaction's spend
+/// category as-is) is distinguishable from an explicit `null` ("clear to
+/// Uncategorised").
+const Object keepSpendCategory = Object();
+
 class SmsProvider extends ChangeNotifier {
   final SmsPlatformService _platform = SmsPlatformService.instance;
   final CategorizationService _categorizer = CategorizationService();
@@ -39,6 +45,15 @@ class SmsProvider extends ChangeNotifier {
   List<Transaction> _transactions = [];
   List<InvestmentEvent> _investments = [];
   List<SimInfo> _activeSims = [];
+
+  // Merchant -> SpendCategory associations learned from the user's own
+  // tagging (see _rememberMerchantCategory), keyed by
+  // Transaction.merchantGroupKey. Consulted as a fallback wherever a
+  // transaction gets auto-tagged (SpendCategoryDetector's static rules
+  // come first) and re-applied to every matching still-uncategorised
+  // transaction whenever a rule changes — see
+  // _applyMerchantRulesToUncategorised.
+  Map<String, SpendCategory> _merchantCategoryRules = {};
 
   StreamSubscription? _incomingSub;
 
@@ -254,8 +269,14 @@ class SmsProvider extends ChangeNotifier {
     await contactService.load(_platform);
     await _loadActiveSims();
     await _ensureCacheMatchesCurrentLogic();
+    // Loaded before refresh() so freshly-parsed transactions can already
+    // consult learned merchant rules as a fallback (see refresh()'s
+    // _applyLearnedMerchantCategory calls), not just the one-time backfill
+    // pass below.
+    _merchantCategoryRules = await _db.loadMerchantCategoryRules();
     await refresh();
     await _backfillSpendCategories();
+    await _applyMerchantRulesToUncategorised();
     _listenForIncoming();
   }
 
@@ -392,6 +413,74 @@ class SmsProvider extends ChangeNotifier {
     }
   }
 
+  /// Fills in [t]'s [Transaction.spendCategory] from a learned merchant
+  /// rule when [SpendCategoryDetector]'s static rules didn't already match
+  /// — the parse-time half of "tag one, apply everywhere" (the other half,
+  /// [_applyMerchantRulesToUncategorised], is the retroactive backfill for
+  /// transactions that already existed when the rule was learned). Only
+  /// ever fills a blank category, exactly like SpendCategoryDetector
+  /// itself, so it never overwrites anything and never sets
+  /// [Transaction.isOverridden].
+  Transaction _applyLearnedMerchantCategory(Transaction t) {
+    if (t.spendCategory != null) return t;
+    final key = t.merchantGroupKey;
+    if (key == null) return t;
+    final rule = _merchantCategoryRules[key];
+    if (rule == null) return t;
+    return t.copyWith(spendCategory: rule);
+  }
+
+  /// Records (or forgets) a merchant -> [SpendCategory] association from an
+  /// explicit user tagging — called from every place a user sets a
+  /// transaction's spend category (updateTransaction,
+  /// setSpendCategoryForTransactions, updateTransactionsBulk). Returns
+  /// whether the rule set actually changed, so callers only pay for
+  /// [_applyMerchantRulesToUncategorised]'s retroactive scan when there's
+  /// actually something new to spread.
+  ///
+  /// Clearing back to Uncategorised ([category] null) forgets any existing
+  /// rule for that merchant rather than leaving it in place — the user
+  /// just said this merchant's category isn't obvious/consistent, so
+  /// letting it keep auto-tagging future transactions the same way would
+  /// silence exactly the signal they gave.
+  Future<bool> _rememberMerchantCategory(Transaction t, SpendCategory? category) async {
+    final key = t.merchantGroupKey;
+    if (key == null) return false;
+    if (category == null) {
+      if (_merchantCategoryRules.remove(key) == null) return false;
+      await _db.deleteMerchantCategoryRule(key);
+      return false;
+    }
+    if (_merchantCategoryRules[key] == category) return false;
+    _merchantCategoryRules[key] = category;
+    await _db.saveMerchantCategoryRule(key, category);
+    return true;
+  }
+
+  /// Applies every learned merchant rule to every transaction that's still
+  /// Uncategorised and not user-overridden — see _rememberMerchantCategory
+  /// (which updates [_merchantCategoryRules]) and
+  /// [_applyLearnedMerchantCategory] (the equivalent fallback applied to a
+  /// transaction as it's first parsed, so this backfill only has to cover
+  /// transactions that already existed before the rule did).
+  Future<void> _applyMerchantRulesToUncategorised() async {
+    if (_merchantCategoryRules.isEmpty) return;
+    final updated = <Transaction>[];
+    for (var i = 0; i < _transactions.length; i++) {
+      final t = _transactions[i];
+      if (t.spendCategory != null || t.isOverridden) continue;
+      final rule = _merchantCategoryRules[t.merchantGroupKey];
+      if (rule == null) continue;
+      final withCategory = t.copyWith(spendCategory: rule);
+      _transactions[i] = withCategory;
+      updated.add(withCategory);
+    }
+    if (updated.isNotEmpty) {
+      await _db.saveTransactionsBulk(updated);
+      notifyListeners();
+    }
+  }
+
   Future<bool> requestDefaultSmsRole() async {
     await _platform.requestDefaultSmsApp();
     isDefaultSmsApp = await _platform.isDefaultSmsApp();
@@ -448,7 +537,7 @@ class SmsProvider extends ChangeNotifier {
               newInvestments.add(inv);
             } else {
               final txn = _txnParser.parseTransaction(m);
-              if (txn != null) newTransactions.add(txn);
+              if (txn != null) newTransactions.add(_applyLearnedMerchantCategory(txn));
             }
           }
           continue; // already processed in a previous sync
@@ -475,7 +564,7 @@ class SmsProvider extends ChangeNotifier {
             newInvestments.add(inv);
           } else {
             final txn = _txnParser.parseTransaction(m);
-            if (txn != null) newTransactions.add(txn);
+            if (txn != null) newTransactions.add(_applyLearnedMerchantCategory(txn));
           }
         }
       }
@@ -598,14 +687,32 @@ class SmsProvider extends ChangeNotifier {
   /// tagging a batch of transactions SpendCategoryDetector left
   /// "Uncategorised" (or got wrong) in one pass instead of one at a time.
   Future<void> setSpendCategoryForTransactions(List<int> smsIds, SpendCategory? category) async {
+    var ruleChanged = false;
     for (final id in smsIds) {
       final index = _transactions.indexWhere((t) => t.smsId == id);
       if (index == -1) continue;
       final updated = _transactions[index].copyWith(spendCategory: category, isOverridden: true);
       _transactions[index] = updated;
       await _db.saveTransaction(updated, isOverride: true);
+      if (await _rememberMerchantCategory(updated, category)) ruleChanged = true;
     }
+    if (ruleChanged) await _applyMerchantRulesToUncategorised();
     notifyListeners();
+  }
+
+  /// Bulk equivalent of [setMessageCategory] for TransactionListScreen's
+  /// multi-select "Not a transaction?" action — moves every transaction in
+  /// [smsIds] to [category] in one pass, the same way the single-item
+  /// TransactionTile action does for one. Kept separate from
+  /// [setSelectedCategory] because that one is hard-wired to
+  /// [selectedIds] (the Inbox's own cross-screen selection state) — the
+  /// transaction list deliberately keeps its selection local (see
+  /// TransactionListScreen), so this takes the id list explicitly instead.
+  Future<void> setCategoryForTransactions(List<int> smsIds, SmsCategory category) async {
+    for (final id in smsIds) {
+      final message = messageById(id);
+      if (message != null) await setMessageCategory(message, category);
+    }
   }
 
   // ---- Single-item actions (swipe actions, long-press context menu) ----
@@ -704,8 +811,9 @@ class SmsProvider extends ChangeNotifier {
         await _db.saveInvestmentsBulk([inv]);
         _investments.add(inv);
       } else {
-        final txn = _txnParser.parseTransaction(message);
-        if (txn != null) {
+        final parsed = _txnParser.parseTransaction(message);
+        if (parsed != null) {
+          final txn = _applyLearnedMerchantCategory(parsed);
           await _db.saveTransactionsBulk([txn]);
           _transactions.add(txn);
         }
@@ -778,8 +886,64 @@ class SmsProvider extends ChangeNotifier {
     if (message != null) {
       message.category = SmsCategory.transactional;
       message.isCategoryOverridden = true;
-      notifyListeners();
     }
+
+    if (await _rememberMerchantCategory(updated, spendCategory)) await _applyMerchantRulesToUncategorised();
+    notifyListeners();
+  }
+
+  /// Bulk equivalent of [updateTransaction] for TransactionListScreen's
+  /// multi-select "Edit" action. Unlike the single-transaction edit sheet
+  /// (which always writes every field), a batch edit almost never means
+  /// "set every field to this same value" — usually just one, e.g.
+  /// correcting the Instrument for a batch that all landed as "Other" —
+  /// so every param here is optional and only touches what's actually
+  /// passed: [direction]/[instrument] left null keep each transaction's
+  /// existing value, [merchant]/[walletType] left null or blank do the
+  /// same (bulk-*clearing* either isn't supported — too easy to wipe a
+  /// whole batch by leaving a field blank while only meaning to change
+  /// something else), and [spendCategory] defaults to [keepSpendCategory]
+  /// so it takes the same three-state "leave alone / clear / set" as
+  /// [Transaction.copyWith] itself.
+  Future<void> updateTransactionsBulk(
+    List<Transaction> transactions, {
+    TxnDirection? direction,
+    InstrumentType? instrument,
+    String? merchant,
+    String? walletType,
+    Object? spendCategory = keepSpendCategory,
+  }) async {
+    final cleanedMerchant = merchant?.trim();
+    final cleanedWallet = walletType?.trim();
+    final touchesSpendCategory = !identical(spendCategory, keepSpendCategory);
+    var ruleChanged = false;
+    for (final t in transactions) {
+      final resolvedSpendCategory = touchesSpendCategory ? spendCategory as SpendCategory? : t.spendCategory;
+      final updated = t.copyWith(
+        direction: direction ?? t.direction,
+        instrument: instrument ?? t.instrument,
+        merchant: (cleanedMerchant == null || cleanedMerchant.isEmpty) ? t.merchant : cleanedMerchant,
+        walletType: (cleanedWallet == null || cleanedWallet.isEmpty) ? t.walletType : cleanedWallet,
+        spendCategory: resolvedSpendCategory,
+        isOverridden: true,
+      );
+      final index = _transactions.indexWhere((x) => x.smsId == t.smsId);
+      if (index != -1) _transactions[index] = updated;
+      await _db.saveTransaction(updated, isOverride: true);
+      await _db.saveCategory(t.smsId, SmsCategory.transactional, isOverride: true);
+
+      final message = messageById(t.smsId);
+      if (message != null) {
+        message.category = SmsCategory.transactional;
+        message.isCategoryOverridden = true;
+      }
+
+      if (touchesSpendCategory && await _rememberMerchantCategory(updated, resolvedSpendCategory)) {
+        ruleChanged = true;
+      }
+    }
+    if (ruleChanged) await _applyMerchantRulesToUncategorised();
+    notifyListeners();
   }
 
   /// Detected bank/card accounts a transaction can be manually pinned to —
@@ -813,7 +977,7 @@ class SmsProvider extends ChangeNotifier {
   ///    so it stays the same across those sender-code variants even when
   ///    the raw address doesn't match.
   /// 3. Only when *neither* transaction has a detected issuer: the same
-  ///    normalised body template (see [_normalizedSmsTemplate]) — banks'
+  ///    normalised body template (see [normalizedSmsTemplate]) — banks'
   ///    alert SMS are near-identical apart from the amount/date/reference,
   ///    so two bodies that collapse to the same template are still decent
   ///    evidence of a shared sender. Gated on both issuers being null so a
@@ -823,7 +987,7 @@ class SmsProvider extends ChangeNotifier {
   List<Transaction> findSimilarUnassignedTransactions(Transaction source) {
     final sourceAddress = messageById(source.smsId)?.address;
     final sourceIssuer = source.issuer;
-    final sourceTemplate = _normalizedSmsTemplate(source.rawBody);
+    final sourceTemplate = normalizedSmsTemplate(source.rawBody);
 
     return _transactions.where((t) {
       if (t.smsId == source.smsId) return false;
@@ -833,21 +997,10 @@ class SmsProvider extends ChangeNotifier {
       if (sourceAddress != null && messageById(t.smsId)?.address == sourceAddress) return true;
       if (sourceIssuer != null && t.issuer == sourceIssuer) return true;
       if (sourceIssuer == null && t.issuer == null) {
-        return sourceTemplate.isNotEmpty && _normalizedSmsTemplate(t.rawBody) == sourceTemplate;
+        return sourceTemplate.isNotEmpty && normalizedSmsTemplate(t.rawBody) == sourceTemplate;
       }
       return false;
     }).toList();
-  }
-
-  /// Collapses an SMS body to its underlying template for
-  /// [findSimilarUnassignedTransactions]'s text-similarity fallback —
-  /// strips every digit run (amounts, account/reference numbers, dates,
-  /// balances — everything that's actually supposed to differ
-  /// message-to-message) and normalises whitespace/case, so two alerts
-  /// generated from the same bank template collapse to an identical
-  /// string even though none of their numbers match.
-  static String _normalizedSmsTemplate(String body) {
-    return body.toLowerCase().replaceAll(RegExp(r'\d+'), '#').replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   /// Manually pins every transaction in [transactions] to one specific

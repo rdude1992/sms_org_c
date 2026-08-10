@@ -97,7 +97,12 @@ class _InboxScreenState extends State<InboxScreen> {
                   // just each conversation's latest message would be
                   // misleading, so this action only appears in Messages.
                   onSetCategory: view == InboxView.messages
-                      ? () => showBulkCategoryPickerSheet(context, provider, provider.selectedIds.length)
+                      ? () => showBulkCategoryPickerSheet(
+                            context,
+                            selectedCount: provider.selectedIds.length,
+                            itemLabel: 'message',
+                            onSelect: provider.setSelectedCategory,
+                          )
                       : null,
                 )
               : AppBar(

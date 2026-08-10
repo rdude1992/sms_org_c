@@ -28,7 +28,7 @@ class DatabaseService {
     final path = p.join(dbPath, 'sms_organizer.db');
     return openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE message_categories (
@@ -77,6 +77,12 @@ class DatabaseService {
           CREATE TABLE meta (
             key TEXT PRIMARY KEY,
             value TEXT
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE merchant_category_rules (
+            merchant_key TEXT PRIMARY KEY,
+            spend_category TEXT NOT NULL
           )
         ''');
       },
@@ -133,6 +139,17 @@ class DatabaseService {
           // override flag: it rides along on the transaction row and
           // persists via the same is_override mechanism already in place.
           await db.execute('ALTER TABLE transactions ADD COLUMN spend_category TEXT');
+        }
+        if (oldVersion < 7) {
+          // Merchant → SpendCategory associations learned from the user's
+          // own tagging (see SmsProvider._rememberMerchantCategory) — not
+          // touched by clearAll, same as any other user-set data.
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS merchant_category_rules (
+              merchant_key TEXT PRIMARY KEY,
+              spend_category TEXT NOT NULL
+            )
+          ''');
         }
       },
     );
@@ -346,6 +363,37 @@ class DatabaseService {
               isOverridden: (row['is_override'] as int? ?? 0) == 1,
             ))
         .toList();
+  }
+
+  // ---- Merchant category rules (learned from user tagging) ----
+
+  /// Keyed by [Transaction.merchantGroupKey] — see
+  /// SmsProvider._rememberMerchantCategory for how a rule gets learned and
+  /// SmsProvider._applyMerchantRulesToUncategorised for how it then spreads
+  /// to every other still-uncategorised transaction from that merchant.
+  Future<Map<String, SpendCategory>> loadMerchantCategoryRules() async {
+    final db = await database;
+    final rows = await db.query('merchant_category_rules');
+    final map = <String, SpendCategory>{};
+    for (final row in rows) {
+      final category = SpendCategory.values.where((c) => c.name == row['spend_category']);
+      if (category.isNotEmpty) map[row['merchant_key'] as String] = category.first;
+    }
+    return map;
+  }
+
+  Future<void> saveMerchantCategoryRule(String merchantKey, SpendCategory category) async {
+    final db = await database;
+    await db.insert(
+      'merchant_category_rules',
+      {'merchant_key': merchantKey, 'spend_category': category.name},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> deleteMerchantCategoryRule(String merchantKey) async {
+    final db = await database;
+    await db.delete('merchant_category_rules', where: 'merchant_key = ?', whereArgs: [merchantKey]);
   }
 
   // ---- Meta (small key/value settings, e.g. categorizer cache version) ----
