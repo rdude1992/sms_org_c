@@ -218,6 +218,11 @@ class TransactionTile extends StatelessWidget {
       ),
       MapEntry('Instrument', _instrumentLabel(t.instrument)),
       if (t.instrumentRef != null) MapEntry('Reference', _formatRef(t.instrumentRef!)),
+      // The raw SMS sender ID (e.g. "VM-HDFCBK"), not [Transaction.issuer] —
+      // that's a cleaned-up bank/merchant name parsed out of the message
+      // body, and can differ from (or be null while) the sender still is.
+      // Only available while the underlying message hasn't been deleted.
+      if (message != null) MapEntry('Sender', message.address),
       if (t.issuer != null) MapEntry('Issuer', t.issuer!),
       if (t.merchant != null) MapEntry('Merchant', t.merchant!),
       if (t.walletType != null) MapEntry('Wallet', t.walletType!),
