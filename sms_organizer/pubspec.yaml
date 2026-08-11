@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   provider: ^6.1.2
-  permission_handler: ^12.0.3
+  permission_handler: ^13.0.0
   intl: ^0.20.3
   fl_chart: ^1.2.0
   share_plus: ^13.3.0
