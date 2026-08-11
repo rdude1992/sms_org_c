@@ -378,14 +378,11 @@ class _ExpandedTransactionPanel extends StatelessWidget {
       required VoidCallback onPressed,
       Color? color,
     }) {
-      return TextButton.icon(
-        style: TextButton.styleFrom(
-          visualDensity: VisualDensity.compact,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          foregroundColor: color,
-        ),
-        icon: Icon(icon, size: 16),
-        label: Text(label, overflow: TextOverflow.ellipsis),
+      return IconButton(
+        icon: Icon(icon, size: 18),
+        tooltip: label,
+        color: color,
+        visualDensity: VisualDensity.compact,
         onPressed: onPressed,
       );
     }
