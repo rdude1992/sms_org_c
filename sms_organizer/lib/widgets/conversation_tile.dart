@@ -184,7 +184,7 @@ class ConversationTile extends StatelessWidget {
             curve: Curves.easeOut,
             alignment: Alignment.topCenter,
             child: expanded
-                ? _QuickPreviewPanel(message: latest)
+                ? MessagePreviewPanel(message: latest)
                 : const SizedBox(width: double.infinity),
           ),
         ],
@@ -193,12 +193,14 @@ class ConversationTile extends StatelessWidget {
   }
 }
 
-/// Inline "peek at the last message" panel a ConversationTile expands to
-/// show when its avatar is tapped — lets a user check what a chat was about
-/// without leaving the list to open the full thread.
-class _QuickPreviewPanel extends StatelessWidget {
+/// Inline "peek at a message" panel a row expands to show when its avatar
+/// is tapped — lets a user check what a message was about without leaving
+/// the list to open the full thread. Shared by ConversationTile (peeking at
+/// a chat's latest message) and inbox_screen.dart's flat "All messages"
+/// list (peeking at that specific row's message).
+class MessagePreviewPanel extends StatelessWidget {
   final SmsMessage message;
-  const _QuickPreviewPanel({required this.message});
+  const MessagePreviewPanel({super.key, required this.message});
 
   @override
   Widget build(BuildContext context) {

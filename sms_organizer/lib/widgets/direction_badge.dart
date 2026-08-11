@@ -6,27 +6,34 @@ import 'package:flutter/material.dart';
 class DirectionBadge extends StatelessWidget {
   final bool isIncoming;
 
-  const DirectionBadge({super.key, required this.isIncoming});
+  /// Icon glyph size — padding/border scale to match, so a caller using
+  /// this as a standalone tap target (see inbox_screen.dart's flat message
+  /// list, where it doubles as the avatar-tap-to-expand affordance) can
+  /// size it up without reimplementing the badge's look.
+  final double iconSize;
 
-  static const _incomingColor = Color(0xFF10B981); // emerald
-  static const _outgoingColor = Color(0xFF3B82F6); // blue
+  const DirectionBadge({super.key, required this.isIncoming, this.iconSize = 10});
+
+  static const incomingColor = Color(0xFF10B981); // emerald
+  static const outgoingColor = Color(0xFF3B82F6); // blue
 
   @override
   Widget build(BuildContext context) {
-    final color = isIncoming ? _incomingColor : _outgoingColor;
+    final color = isIncoming ? incomingColor : outgoingColor;
+    final padding = iconSize / 5; // matches the original 10-icon/2-padding ratio
     return Container(
-      padding: const EdgeInsets.all(2),
+      padding: EdgeInsets.all(padding),
       decoration: BoxDecoration(
         color: Theme.of(context).scaffoldBackgroundColor,
         shape: BoxShape.circle,
         border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 1.5),
       ),
       child: Container(
-        padding: const EdgeInsets.all(2),
+        padding: EdgeInsets.all(padding),
         decoration: BoxDecoration(color: color.withOpacity(0.2), shape: BoxShape.circle),
         child: Icon(
           isIncoming ? Icons.south_west : Icons.north_east,
-          size: 10,
+          size: iconSize,
           color: color,
         ),
       ),

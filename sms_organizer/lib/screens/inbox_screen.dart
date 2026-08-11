@@ -503,6 +503,18 @@ class _StickyMessageListState extends State<_StickyMessageList> {
     });
   }
 
+  // Which rows currently have their avatar-tap quick-preview panel open —
+  // keyed by message id, same pattern (and same reasoning: a glance aid for
+  // this visit, not a preference worth persisting) as ConversationTile's
+  // per-thread expanded state in _ConversationListViewState.
+  final Set<int> _expandedIds = {};
+
+  void _toggleExpanded(int messageId) {
+    setState(() {
+      if (!_expandedIds.remove(messageId)) _expandedIds.add(messageId);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final groups = _groupMessagesByDate(widget.messages);
@@ -526,7 +538,15 @@ class _StickyMessageListState extends State<_StickyMessageList> {
         slivers.add(
           SliverList(
             delegate: SliverChildBuilderDelegate(
-              (context, index) => _MessageRow(provider: widget.provider, message: group.items[index]),
+              (context, index) {
+                final m = group.items[index];
+                return _MessageRow(
+                  provider: widget.provider,
+                  message: m,
+                  expanded: _expandedIds.contains(m.id),
+                  onToggleExpand: () => _toggleExpanded(m.id),
+                );
+              },
               childCount: group.items.length,
             ),
           ),
@@ -624,7 +644,22 @@ class _DateHeaderDelegate extends SliverPersistentHeaderDelegate {
 class _MessageRow extends StatelessWidget {
   final SmsProvider provider;
   final SmsMessage message;
-  const _MessageRow({required this.provider, required this.message});
+
+  /// Whether this row's inline quick-preview panel (see MessagePreviewPanel)
+  /// is open — toggled by tapping the leading direction badge, same
+  /// interaction ConversationTile's avatar already offers in the Chats
+  /// view. Lives one level up (in _StickyMessageListState) rather than
+  /// here, since this widget gets torn down and rebuilt on every list
+  /// refresh.
+  final bool expanded;
+  final VoidCallback onToggleExpand;
+
+  const _MessageRow({
+    required this.provider,
+    required this.message,
+    required this.expanded,
+    required this.onToggleExpand,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -632,15 +667,18 @@ class _MessageRow extends StatelessWidget {
     final selected = provider.selectedIds.contains(m.id);
     final unread = !m.read && m.isIncoming;
     final scheme = Theme.of(context).colorScheme;
-    // Dropped the avatar (the single biggest per-row space/weight cost) in
-    // favour of DirectionBadge alone as the leading glyph — small enough on
-    // its own to not need the circle-avatar chrome it used to sit on top
-    // of — and folded the trailing metadata down to one line, matching the
-    // density TransactionTile.compact established. Category is still one
-    // glance away via the badge next to the timestamp; SIM slot and the
-    // "manually set" flag are dropped from this dense row entirely — both
-    // remain visible from the full thread.
-    return ListTile(
+    // Dropped the circle avatar (the single biggest per-row space/weight
+    // cost) in favour of DirectionBadge alone as the leading glyph, and
+    // folded the trailing metadata down to one line, matching the density
+    // TransactionTile.compact established. Category is still one glance
+    // away via the badge next to the timestamp; SIM slot and the "manually
+    // set" flag are dropped from this dense row entirely — both remain
+    // visible from the full thread. DirectionBadge on its own reads small,
+    // so it's sized up here and wrapped in InkWell (with its own padding,
+    // for a properly tappable hit area) doubling as the avatar-tap-to-
+    // expand affordance, with the same expand/collapse chevron overlay
+    // TransactionTile's avatar uses to show it's interactive.
+    final row = ListTile(
       key: ValueKey(m.id),
       selected: selected,
       selectedTileColor: scheme.primary.withOpacity(0.06),
@@ -652,7 +690,32 @@ class _MessageRow extends StatelessWidget {
               selected ? Icons.check_circle : Icons.radio_button_unchecked,
               color: selected ? scheme.primary : scheme.outline,
             )
-          : DirectionBadge(isIncoming: m.isIncoming),
+          : InkWell(
+              customBorder: const CircleBorder(),
+              onTap: onToggleExpand,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    DirectionBadge(isIncoming: m.isIncoming, iconSize: 16),
+                    Positioned(
+                      bottom: -3,
+                      right: -3,
+                      child: Container(
+                        padding: const EdgeInsets.all(1),
+                        decoration: BoxDecoration(color: scheme.surface, shape: BoxShape.circle),
+                        child: Icon(
+                          expanded ? Icons.expand_less : Icons.expand_more,
+                          size: 12,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
       title: Row(
         children: [
           if (unread) ...[
@@ -717,6 +780,18 @@ class _MessageRow extends StatelessWidget {
           _showMessageRowActions(context, provider, m);
         }
       },
+    );
+
+    return Column(
+      children: [
+        row,
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          alignment: Alignment.topCenter,
+          child: expanded ? MessagePreviewPanel(message: m) : const SizedBox(width: double.infinity),
+        ),
+      ],
     );
   }
 }
