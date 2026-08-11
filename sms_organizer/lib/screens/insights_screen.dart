@@ -13,7 +13,6 @@ import 'instrument_list_screen.dart';
 import 'investment_list_screen.dart';
 import 'merchant_list_screen.dart';
 import 'transaction_list_screen.dart';
-import 'uncategorised_review_screen.dart';
 
 /// `custom` covers a user-picked (via showDateRangePicker) arbitrary span —
 /// unlike the other four, it has no fixed formula for its bounds/label/
@@ -339,6 +338,30 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 _UpcomingBillsCard(bills: upcomingBills),
                               ],
                               const SizedBox(height: 20),
+                              // Recent transactions right after the summary, ahead of
+                              // the detailed breakdowns below — "what happened lately"
+                              // is usually what you're checking Insights for; the
+                              // trend/by-card/by-merchant/by-category detail is there
+                              // when you want it; not the first thing to scroll past.
+                              _CollapsibleSection(
+                                title: 'Recent transactions',
+                                trailing: TextButton(
+                                  onPressed: () => _openDrilldown(
+                                    context,
+                                    title: 'All transactions',
+                                    subtitle: _effectiveLabel,
+                                    transactions: filteredTransactions,
+                                  ),
+                                  child: Text('${summary.transactionCount} total · See all'),
+                                ),
+                                child: Column(
+                                  children: [
+                                    for (final t in filteredTransactions.take(15))
+                                      TransactionTile(transaction: t),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 24),
                               Text(_range.trendTitleFor(_effectiveTrendGranularity),
                                   style: Theme.of(context).textTheme.titleMedium),
                               const SizedBox(height: 12),
@@ -352,156 +375,171 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ),
                               ),
                               const SizedBox(height: 24),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text('By card / account',
-                                      style: Theme.of(context).textTheme.titleMedium),
-                                  if (summary.byInstrument.isNotEmpty)
-                                    TextButton(
-                                      onPressed: () => Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => InstrumentListScreen(
-                                            transactions: filteredTransactions,
-                                            subtitle: _effectiveLabel,
-                                          ),
-                                        ),
-                                      ),
-                                      child: const Text('See all'),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              if (summary.byInstrument.isNotEmpty) ...[
-                                _InstrumentDonut(
-                                  instruments: summary.byInstrument,
-                                  filteredTransactions: filteredTransactions,
-                                  rangeLabel: _effectiveLabel,
-                                ),
-                                const SizedBox(height: 16),
-                              ],
-                              if (summary.byInstrument.isEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
-                                  child: Text(
-                                    'No transactions in this range.',
-                                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                  ),
-                                )
-                              else
-                                ...summary.byInstrument.take(6).map(
-                                      (s) => _InstrumentRow(
-                                        summary: s,
-                                        lastBalance: lastBalanceByInstrument[s.key],
-                                        onTap: () => _openDrilldown(
+                              _CollapsibleSection(
+                                title: 'By card / account',
+                                trailing: summary.byInstrument.isEmpty
+                                    ? null
+                                    : TextButton(
+                                        onPressed: () => Navigator.push(
                                           context,
-                                          title: s.displayName,
-                                          subtitle: _effectiveLabel,
-                                          transactions: filteredTransactions
-                                              .where((t) => t.instrumentGroupKey == s.key)
-                                              .toList(),
-                                          matches: (t) => t.instrumentGroupKey == s.key,
-                                        ),
-                                      ),
-                                    ),
-                              const SizedBox(height: 24),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text('By merchant', style: Theme.of(context).textTheme.titleMedium),
-                                  if (summary.byMerchant.isNotEmpty)
-                                    TextButton(
-                                      onPressed: () => Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => MerchantListScreen(
-                                            transactions: filteredTransactions,
-                                            subtitle: _effectiveLabel,
-                                          ),
-                                        ),
-                                      ),
-                                      child: const Text('See all'),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              if (summary.byMerchant.isNotEmpty) ...[
-                                _MerchantDonut(
-                                  merchants: summary.byMerchant,
-                                  filteredTransactions: filteredTransactions,
-                                  rangeLabel: _effectiveLabel,
-                                ),
-                                const SizedBox(height: 16),
-                              ],
-                              if (summary.byMerchant.isEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
-                                  child: Text(
-                                    'No merchants detected in this range.',
-                                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                  ),
-                                )
-                              else
-                                ...summary.byMerchant.take(6).map(
-                                      (s) => _MerchantRow(
-                                        summary: s,
-                                        onTap: () => _openDrilldown(
-                                          context,
-                                          title: s.displayName,
-                                          subtitle: _effectiveLabel,
-                                          transactions: filteredTransactions
-                                              .where((t) => t.merchantGroupKey == s.key)
-                                              .toList(),
-                                          matches: (t) => t.merchantGroupKey == s.key,
-                                        ),
-                                      ),
-                                    ),
-                              const SizedBox(height: 24),
-                              Text('By spend category', style: Theme.of(context).textTheme.titleMedium),
-                              const SizedBox(height: 8),
-                              if (summary.byCategory.isNotEmpty) ...[
-                                _SpendCategoryDonut(
-                                  categories: summary.byCategory,
-                                  filteredTransactions: filteredTransactions,
-                                  rangeLabel: _effectiveLabel,
-                                ),
-                                const SizedBox(height: 16),
-                              ],
-                              if (summary.byCategory.isEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
-                                  child: Text(
-                                    'No spend in this range.',
-                                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                  ),
-                                )
-                              else
-                                // No 6-item cap/"See all" here unlike By card / By
-                                // merchant — there are at most 13 spend categories
-                                // total (see SpendCategory), so the full list is
-                                // always short enough to show inline.
-                                ...summary.byCategory.map(
-                                  (c) => _SpendCategoryRow(
-                                    summary: c,
-                                    onTap: c.category == null
-                                        ? () => Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (_) => const UncategorisedReviewScreen(),
-                                              ),
-                                            )
-                                        : () => _openDrilldown(
-                                              context,
-                                              title: c.displayName,
+                                          MaterialPageRoute(
+                                            builder: (_) => InstrumentListScreen(
+                                              transactions: filteredTransactions,
                                               subtitle: _effectiveLabel,
-                                              transactions: filteredTransactions
-                                                  .where((t) => t.spendCategory == c.category)
-                                                  .toList(),
-                                              matches: (t) => t.spendCategory == c.category,
                                             ),
-                                  ),
+                                          ),
+                                        ),
+                                        child: const Text('See all'),
+                                      ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (summary.byInstrument.isNotEmpty) ...[
+                                      _InstrumentDonut(
+                                        instruments: summary.byInstrument,
+                                        filteredTransactions: filteredTransactions,
+                                        rangeLabel: _effectiveLabel,
+                                      ),
+                                      const SizedBox(height: 16),
+                                    ],
+                                    if (summary.byInstrument.isEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: 8),
+                                        child: Text(
+                                          'No transactions in this range.',
+                                          style:
+                                              TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                        ),
+                                      )
+                                    else
+                                      ...summary.byInstrument.take(6).map(
+                                            (s) => _InstrumentRow(
+                                              summary: s,
+                                              lastBalance: lastBalanceByInstrument[s.key],
+                                              onTap: () => _openDrilldown(
+                                                context,
+                                                title: s.displayName,
+                                                subtitle: _effectiveLabel,
+                                                transactions: filteredTransactions
+                                                    .where((t) => t.instrumentGroupKey == s.key)
+                                                    .toList(),
+                                                matches: (t) => t.instrumentGroupKey == s.key,
+                                              ),
+                                            ),
+                                          ),
+                                  ],
                                 ),
+                              ),
+                              const SizedBox(height: 24),
+                              _CollapsibleSection(
+                                title: 'By merchant',
+                                trailing: summary.byMerchant.isEmpty
+                                    ? null
+                                    : TextButton(
+                                        onPressed: () => Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => MerchantListScreen(
+                                              transactions: filteredTransactions,
+                                              subtitle: _effectiveLabel,
+                                            ),
+                                          ),
+                                        ),
+                                        child: const Text('See all'),
+                                      ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (summary.byMerchant.isNotEmpty) ...[
+                                      _MerchantDonut(
+                                        merchants: summary.byMerchant,
+                                        filteredTransactions: filteredTransactions,
+                                        rangeLabel: _effectiveLabel,
+                                      ),
+                                      const SizedBox(height: 16),
+                                    ],
+                                    if (summary.byMerchant.isEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: 8),
+                                        child: Text(
+                                          'No merchants detected in this range.',
+                                          style:
+                                              TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                        ),
+                                      )
+                                    else
+                                      ...summary.byMerchant.take(6).map(
+                                            (s) => _MerchantRow(
+                                              summary: s,
+                                              onTap: () => _openDrilldown(
+                                                context,
+                                                title: s.displayName,
+                                                subtitle: _effectiveLabel,
+                                                transactions: filteredTransactions
+                                                    .where((t) => t.merchantGroupKey == s.key)
+                                                    .toList(),
+                                                matches: (t) => t.merchantGroupKey == s.key,
+                                              ),
+                                            ),
+                                          ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 24),
+                              _CollapsibleSection(
+                                title: 'By spend category',
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (summary.byCategory.isNotEmpty) ...[
+                                      _SpendCategoryDonut(
+                                        categories: summary.byCategory,
+                                        filteredTransactions: filteredTransactions,
+                                        rangeLabel: _effectiveLabel,
+                                      ),
+                                      const SizedBox(height: 16),
+                                    ],
+                                    if (summary.byCategory.isEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: 8),
+                                        child: Text(
+                                          'No spend in this range.',
+                                          style:
+                                              TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                        ),
+                                      )
+                                    else
+                                      // No 6-item cap/"See all" here unlike By card / By
+                                      // merchant — there are at most 13 spend categories
+                                      // total (see SpendCategory), so the full list is
+                                      // always short enough to show inline.
+                                      // Every row here — Uncategorised included — only ever
+                                      // counts debits (see SpendCategorySummary), so the
+                                      // drilldown filters the same way: tapping a row always
+                                      // lands on exactly the transactions its own count
+                                      // covers, instead of Uncategorised jumping to the
+                                      // full, every-direction backlog in Settings.
+                                      ...summary.byCategory.map(
+                                        (c) => _SpendCategoryRow(
+                                          summary: c,
+                                          onTap: () => _openDrilldown(
+                                            context,
+                                            title: c.displayName,
+                                            subtitle: _effectiveLabel,
+                                            transactions: filteredTransactions
+                                                .where((t) =>
+                                                    t.spendCategory == c.category &&
+                                                    t.direction == TxnDirection.debit)
+                                                .toList(),
+                                            matches: (t) =>
+                                                t.spendCategory == c.category &&
+                                                t.direction == TxnDirection.debit,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
                               const SizedBox(height: 24),
                               _InvestmentCard(
                                 summary: summary,
@@ -518,25 +556,6 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                           ),
                                         ),
                               ),
-                              const SizedBox(height: 24),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text('Recent transactions',
-                                      style: Theme.of(context).textTheme.titleMedium),
-                                  TextButton(
-                                    onPressed: () => _openDrilldown(
-                                      context,
-                                      title: 'All transactions',
-                                      subtitle: _effectiveLabel,
-                                      transactions: filteredTransactions,
-                                    ),
-                                    child: Text('${summary.transactionCount} total · See all'),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              ...filteredTransactions.take(15).map((t) => TransactionTile(transaction: t)),
                             ],
                             ),
                           ),
@@ -600,6 +619,75 @@ class _InsightsScreenState extends State<InsightsScreen> {
       title: title,
       subtitle: _effectiveLabel,
       transactions: transactions.where(matchesBucket).toList(),
+    );
+  }
+}
+
+/// A titled section that can be collapsed to just its header — the page
+/// grew long enough (Recent transactions, By card/account, By merchant, By
+/// spend category, each with its own donut/list) that seeing the whole
+/// thing meant a lot of scrolling even when you only care about one or two
+/// of them. Expanded by default (so nothing looks hidden on first load);
+/// [trailing] — usually a "See all" button — stays outside the
+/// collapse/expand tap target and is always visible regardless of state.
+/// State is local per section rather than lifted to [_InsightsScreenState]:
+/// there's no cross-section behaviour that needs coordinating, and these
+/// sections keep a stable position in a plain (non-builder) ListView, so
+/// Flutter preserves each one's collapsed/expanded state across rebuilds
+/// (range changes, provider refreshes) on its own.
+class _CollapsibleSection extends StatefulWidget {
+  final String title;
+  final Widget? trailing;
+  final Widget child;
+  const _CollapsibleSection({required this.title, this.trailing, required this.child});
+
+  @override
+  State<_CollapsibleSection> createState() => _CollapsibleSectionState();
+}
+
+class _CollapsibleSectionState extends State<_CollapsibleSection> {
+  bool _expanded = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => setState(() => _expanded = !_expanded),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _expanded ? Icons.expand_more : Icons.chevron_right,
+                        size: 20,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(widget.title, style: Theme.of(context).textTheme.titleMedium),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (widget.trailing != null) widget.trailing!,
+          ],
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          alignment: Alignment.topCenter,
+          child: _expanded
+              ? Padding(padding: const EdgeInsets.only(top: 4), child: widget.child)
+              : const SizedBox(width: double.infinity),
+        ),
+      ],
     );
   }
 }
@@ -1054,19 +1142,16 @@ class _SpendCategoryDonut extends StatelessWidget {
       centerLabel: 'spend',
       onTapKey: (key) {
         final match = categories.firstWhere((c) => c.key == key);
-        if (match.category == null) {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => const UncategorisedReviewScreen()));
-          return;
-        }
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) => TransactionListScreen(
               title: match.displayName,
               subtitle: rangeLabel,
-              transactions:
-                  filteredTransactions.where((t) => t.spendCategory == match.category).toList(),
-              matches: (t) => t.spendCategory == match.category,
+              transactions: filteredTransactions
+                  .where((t) => t.spendCategory == match.category && t.direction == TxnDirection.debit)
+                  .toList(),
+              matches: (t) => t.spendCategory == match.category && t.direction == TxnDirection.debit,
             ),
           ),
         );

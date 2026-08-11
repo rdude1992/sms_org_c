@@ -273,6 +273,8 @@ IconData _iconFor(InstrumentType type) {
       return Icons.credit_card_outlined;
     case InstrumentType.bankAccount:
       return Icons.account_balance_outlined;
+    case InstrumentType.investment:
+      return Icons.trending_up;
     case InstrumentType.upi:
       return Icons.qr_code;
     case InstrumentType.unknown:

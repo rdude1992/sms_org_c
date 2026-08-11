@@ -48,7 +48,9 @@ class BackupService {
       transactions: transactions,
       investments: investments,
     );
-    await Share.shareXFiles([XFile(file.path)], text: 'SmartSMS backup');
+    // share_plus 11+ deprecated the static Share.shareXFiles in favor of
+    // this instance-based API — see share_plus's CHANGELOG.
+    await SharePlus.instance.share(ShareParams(files: [XFile(file.path)], text: 'SmartSMS backup'));
   }
 
   Future<BackupBundle> restoreFromFile(File file) async {

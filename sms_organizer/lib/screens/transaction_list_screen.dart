@@ -46,6 +46,36 @@ class TransactionListScreen extends StatefulWidget {
   State<TransactionListScreen> createState() => _TransactionListScreenState();
 }
 
+enum _SortBy { dateDesc, dateAsc, valueDesc, valueAsc }
+
+extension on _SortBy {
+  String get label {
+    switch (this) {
+      case _SortBy.dateDesc:
+        return 'Newest first';
+      case _SortBy.dateAsc:
+        return 'Oldest first';
+      case _SortBy.valueDesc:
+        return 'Highest amount';
+      case _SortBy.valueAsc:
+        return 'Lowest amount';
+    }
+  }
+
+  int compare(Transaction a, Transaction b) {
+    switch (this) {
+      case _SortBy.dateDesc:
+        return b.date.compareTo(a.date);
+      case _SortBy.dateAsc:
+        return a.date.compareTo(b.date);
+      case _SortBy.valueDesc:
+        return b.amount.compareTo(a.amount);
+      case _SortBy.valueAsc:
+        return a.amount.compareTo(b.amount);
+    }
+  }
+}
+
 class _TransactionListScreenState extends State<TransactionListScreen>
     with SearchToggleMixin<TransactionListScreen> {
   // Local to this screen (unlike SmsProvider.selectedIds, which the Inbox's
@@ -56,6 +86,9 @@ class _TransactionListScreenState extends State<TransactionListScreen>
   final Set<int> _selectedIds = {};
   bool get _selecting => _selectedIds.isNotEmpty;
 
+  // Defaults to newest-first, matching this screen's previous fixed order.
+  _SortBy _sortBy = _SortBy.dateDesc;
+
   /// "Expand all" — shows every tile's inline SMS-body/quick-action panel
   /// at once (see TransactionTile.expanded) instead of opening and closing
   /// the detail sheet one row at a time to check what each transaction
@@ -64,6 +97,17 @@ class _TransactionListScreenState extends State<TransactionListScreen>
   /// preference.
   bool _allExpanded = false;
   void _toggleAllExpanded() => setState(() => _allExpanded = !_allExpanded);
+
+  /// Per-row expansion, toggled by tapping a tile's own avatar (see
+  /// TransactionTile.onToggleExpand) — separate from [_allExpanded] so
+  /// fixing one row doesn't require expanding (or collapsing) every other
+  /// row in the list first.
+  final Set<int> _expandedIds = {};
+  void _toggleExpanded(int smsId) {
+    setState(() {
+      if (!_expandedIds.remove(smsId)) _expandedIds.add(smsId);
+    });
+  }
 
   void _toggleSelected(int smsId) {
     setState(() {
@@ -120,7 +164,7 @@ class _TransactionListScreenState extends State<TransactionListScreen>
     final trimmedQuery = query.trim().toLowerCase();
     final searched = trimmedQuery.isEmpty ? live : live.where((t) => _matches(t, trimmedQuery)).toList();
 
-    final sorted = [...searched]..sort((a, b) => b.date.compareTo(a.date));
+    final sorted = [...searched]..sort(_sortBy.compare);
     final credited = sorted.where((t) => t.direction == TxnDirection.credit).toList();
     final debited = sorted.where((t) => t.direction == TxnDirection.debit).toList();
     final creditTotal = credited.fold<double>(0, (a, t) => a + t.amount);
@@ -206,6 +250,28 @@ class _TransactionListScreenState extends State<TransactionListScreen>
             ),
           ]
         : [
+            PopupMenuButton<_SortBy>(
+              icon: const Icon(Icons.sort),
+              tooltip: 'Sort by',
+              initialValue: _sortBy,
+              onSelected: (value) => setState(() => _sortBy = value),
+              itemBuilder: (context) => [
+                for (final option in _SortBy.values)
+                  PopupMenuItem(
+                    value: option,
+                    child: Row(
+                      children: [
+                        if (option == _sortBy)
+                          const Icon(Icons.check, size: 18)
+                        else
+                          const SizedBox(width: 18),
+                        const SizedBox(width: 8),
+                        Text(option.label),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
             IconButton(
               icon: Icon(_allExpanded ? Icons.unfold_less : Icons.unfold_more),
               tooltip: _allExpanded ? 'Collapse all' : 'Expand all',
@@ -263,6 +329,8 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                 selecting: _selecting,
                 onToggleSelected: _toggleSelected,
                 allExpanded: _allExpanded,
+                expandedIds: _expandedIds,
+                onToggleExpanded: _toggleExpanded,
               ),
             ),
           ],
@@ -316,6 +384,8 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                           selecting: _selecting,
                           onToggleSelected: _toggleSelected,
                           allExpanded: _allExpanded,
+                          expandedIds: _expandedIds,
+                          onToggleExpanded: _toggleExpanded,
                         ),
                         _TransactionListView(
                           transactions: credited,
@@ -324,6 +394,8 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                           selecting: _selecting,
                           onToggleSelected: _toggleSelected,
                           allExpanded: _allExpanded,
+                          expandedIds: _expandedIds,
+                          onToggleExpanded: _toggleExpanded,
                         ),
                         _TransactionListView(
                           transactions: debited,
@@ -332,6 +404,8 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                           selecting: _selecting,
                           onToggleSelected: _toggleSelected,
                           allExpanded: _allExpanded,
+                          expandedIds: _expandedIds,
+                          onToggleExpanded: _toggleExpanded,
                         ),
                       ],
                     ),
@@ -350,6 +424,8 @@ class _TransactionListView extends StatelessWidget {
   final bool selecting;
   final ValueChanged<int> onToggleSelected;
   final bool allExpanded;
+  final Set<int> expandedIds;
+  final ValueChanged<int> onToggleExpanded;
 
   const _TransactionListView({
     required this.transactions,
@@ -358,6 +434,8 @@ class _TransactionListView extends StatelessWidget {
     required this.selecting,
     required this.onToggleSelected,
     required this.allExpanded,
+    required this.expandedIds,
+    required this.onToggleExpanded,
   });
 
   @override
@@ -383,7 +461,8 @@ class _TransactionListView extends StatelessWidget {
             onTap: selecting ? () => onToggleSelected(t.smsId) : null,
             onLongPress: selecting ? () => onToggleSelected(t.smsId) : null,
             onSelectStart: () => onToggleSelected(t.smsId),
-            expanded: allExpanded,
+            expanded: allExpanded || expandedIds.contains(t.smsId),
+            onToggleExpand: selecting ? null : () => onToggleExpanded(t.smsId),
           );
         },
       ),

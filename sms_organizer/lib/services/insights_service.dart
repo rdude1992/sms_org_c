@@ -68,6 +68,7 @@ class InstrumentSummary {
   bool get isCreditCard => types.contains(InstrumentType.creditCard);
   bool get isDebitCard => types.contains(InstrumentType.debitCard);
   bool get isBankAccount => types.contains(InstrumentType.bankAccount);
+  bool get isInvestment => types.contains(InstrumentType.investment);
   bool get isLinkedAccount => types.length > 1;
 
   String get displayName {
@@ -101,6 +102,8 @@ class InstrumentSummary {
         return 'Debit Card';
       case InstrumentType.bankAccount:
         return 'Bank Account';
+      case InstrumentType.investment:
+        return 'Investment';
       case InstrumentType.upi:
         return 'UPI';
       case InstrumentType.unknown:
@@ -146,7 +149,12 @@ class SpendCategorySummary {
   /// [InstrumentSummary.key]/[MerchantSummary.key].
   String get key => category?.name ?? '_uncategorised';
 
-  String get displayName => category?.label ?? 'Uncategorised';
+  /// "Uncategorised spend", not just "Uncategorised" — this bucket only
+  /// ever holds debits (see the class doc above), and credits/reversals
+  /// left uncategorised show up in Settings' "Review uncategorised
+  /// transactions" backlog instead, so the two shouldn't read as the same
+  /// count.
+  String get displayName => category?.label ?? 'Uncategorised spend';
 }
 
 class InsightsSummary {

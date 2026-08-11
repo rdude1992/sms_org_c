@@ -2,11 +2,38 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
+import '../screens/thread_screen.dart';
 import '../utils/formatters.dart';
 import 'assign_instrument_sheet.dart';
 import 'category_picker_sheet.dart';
 import 'detected_sms_sheet.dart';
 import 'transaction_edit_sheet.dart';
+
+/// Shared by the detail sheet's delete icon and the inline expanded panel's
+/// options bar — deletes the underlying SMS (with confirmation), which also
+/// drops this transaction out of every list once [SmsProvider.deleteMessage]
+/// refreshes, covering both "duplicate SMS" cleanup and "stop tracking this
+/// transaction" in one action.
+Future<void> _confirmDeleteTransactionSms(BuildContext context, SmsProvider provider, int smsId) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Delete message?'),
+      content: const Text(
+        "Deletes the underlying SMS — this transaction won't be tracked anymore either. "
+        'This cannot be undone.',
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text('Delete', style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true) await provider.deleteMessage(smsId);
+}
 
 class TransactionTile extends StatelessWidget {
   final Transaction transaction;
@@ -29,13 +56,20 @@ class TransactionTile extends StatelessWidget {
   /// selection mode entirely.
   final VoidCallback? onSelectStart;
 
-  /// Shows [_ExpandedTransactionPanel] inline below the row — the raw SMS
-  /// body plus one-tap category/edit shortcuts — without needing a tap to
-  /// open the detail sheet first. Driven by a list-level "expand all"
-  /// toggle (see TransactionListScreen) rather than per-tile state, so
-  /// scanning a whole drilldown for what each entry actually says doesn't
-  /// mean opening and closing the sheet one row at a time.
+  /// Shows [_ExpandedTransactionPanel] inline below the row — every quick
+  /// action (category, edit, assign, thread, delete, ...) on top and the raw
+  /// SMS body below — without needing a tap to open the detail sheet or a
+  /// long-press into multi-select just to fix one row. True either because
+  /// the list-level "expand all" toggle is on (see TransactionListScreen) or
+  /// because [onToggleExpand] was tapped for this row specifically.
   final bool expanded;
+
+  /// Tapping the leading avatar toggles just this row's [expanded] state —
+  /// kept separate from the row's own [onTap] (which opens the full detail
+  /// sheet) so both stay reachable without one shadowing the other. Null in
+  /// contexts that don't track per-row expansion (e.g. Insights' embedded
+  /// transaction previews), which also hides the avatar's arrow badge.
+  final VoidCallback? onToggleExpand;
 
   const TransactionTile({
     super.key,
@@ -46,6 +80,7 @@ class TransactionTile extends StatelessWidget {
     this.onLongPress,
     this.onSelectStart,
     this.expanded = false,
+    this.onToggleExpand,
   });
 
   @override
@@ -85,10 +120,32 @@ class TransactionTile extends StatelessWidget {
                   selected ? Icons.check_circle : Icons.radio_button_unchecked,
                   color: selected ? scheme.primary : scheme.outline,
                 )
-              : CircleAvatar(
-                  radius: 20,
-                  backgroundColor: color.withOpacity(0.12),
-                  child: Icon(icon, color: color, size: 18),
+              : GestureDetector(
+                  onTap: onToggleExpand,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: color.withOpacity(0.12),
+                        child: Icon(icon, color: color, size: 18),
+                      ),
+                      if (onToggleExpand != null)
+                        Positioned(
+                          bottom: -3,
+                          right: -3,
+                          child: Container(
+                            padding: const EdgeInsets.all(1),
+                            decoration: BoxDecoration(color: scheme.surface, shape: BoxShape.circle),
+                            child: Icon(
+                              expanded ? Icons.expand_less : Icons.expand_more,
+                              size: 14,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
           title: Padding(
             padding: const EdgeInsets.only(bottom: 2),
@@ -145,6 +202,8 @@ class TransactionTile extends StatelessWidget {
   }
 
   void _showDetails(BuildContext context) {
+    final provider = context.read<SmsProvider>();
+    final message = provider.messageById(transaction.smsId);
     final t = transaction;
     final details = <MapEntry<String, String>>[
       MapEntry('Amount', Formatters.currency(t.amount)),
@@ -159,6 +218,11 @@ class TransactionTile extends StatelessWidget {
       ),
       MapEntry('Instrument', _instrumentLabel(t.instrument)),
       if (t.instrumentRef != null) MapEntry('Reference', _formatRef(t.instrumentRef!)),
+      // The raw SMS sender ID (e.g. "VM-HDFCBK"), not [Transaction.issuer] —
+      // that's a cleaned-up bank/merchant name parsed out of the message
+      // body, and can differ from (or be null while) the sender still is.
+      // Only available while the underlying message hasn't been deleted.
+      if (message != null) MapEntry('Sender', message.address),
       if (t.issuer != null) MapEntry('Issuer', t.issuer!),
       if (t.merchant != null) MapEntry('Merchant', t.merchant!),
       if (t.walletType != null) MapEntry('Wallet', t.walletType!),
@@ -175,7 +239,17 @@ class TransactionTile extends StatelessWidget {
       date: t.date,
       rawBody: t.rawBody,
       details: details,
-      onEdit: () => showTransactionEditSheet(context, context.read<SmsProvider>(), t),
+      onEdit: () => showTransactionEditSheet(context, provider, t),
+      onViewThread: message == null
+          ? null
+          : () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      ThreadScreen(threadId: message.threadId, highlightMessageId: message.id),
+                ),
+              ),
+      onDelete: () => _confirmDeleteTransactionSms(context, provider, t.smsId),
     );
   }
 
@@ -275,6 +349,8 @@ class TransactionTile extends StatelessWidget {
         return 'Debit Card';
       case InstrumentType.bankAccount:
         return 'Bank';
+      case InstrumentType.investment:
+        return 'Investment';
       case InstrumentType.upi:
         return 'UPI';
       case InstrumentType.unknown:
@@ -283,11 +359,13 @@ class TransactionTile extends StatelessWidget {
   }
 }
 
-/// Inline "peek at the SMS" panel a [TransactionTile] expands to show when
-/// its list's "expand all" toggle is on — the raw message body plus the two
-/// most common corrections (spend category, full edit) one tap away, so
-/// scanning a long drilldown for what actually happened doesn't mean
-/// opening the detail sheet, closing it, and moving to the next row.
+/// Inline "peek at the SMS" panel a [TransactionTile] expands to show —
+/// either because the list's "expand all" toggle is on, or because this
+/// row's avatar was tapped directly. Every quick action sits in the options
+/// bar on top (mirrors TransactionTile._showActions' long-press menu, just
+/// one tap away instead of two) and the raw message sits below it, so
+/// fixing one row — or spotting and deleting a duplicate — doesn't mean
+/// opening the detail sheet or dropping into multi-select first.
 class _ExpandedTransactionPanel extends StatelessWidget {
   final Transaction transaction;
   const _ExpandedTransactionPanel({required this.transaction});
@@ -296,6 +374,24 @@ class _ExpandedTransactionPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final t = transaction;
+    final provider = context.read<SmsProvider>();
+    final message = provider.messageById(t.smsId);
+
+    Widget action({
+      required IconData icon,
+      required String label,
+      required VoidCallback onPressed,
+      Color? color,
+    }) {
+      return IconButton(
+        icon: Icon(icon, size: 18),
+        tooltip: label,
+        color: color,
+        visualDensity: VisualDensity.compact,
+        onPressed: onPressed,
+      );
+    }
+
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -308,6 +404,52 @@ class _ExpandedTransactionPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          Wrap(
+            spacing: 4,
+            children: [
+              action(
+                icon: Icons.sell_outlined,
+                label: t.spendCategory?.label ?? 'Category',
+                onPressed: () => showQuickSpendCategorySheet(context, provider, t),
+              ),
+              action(
+                icon: Icons.edit_outlined,
+                label: 'Edit',
+                onPressed: () => showTransactionEditSheet(context, provider, t),
+              ),
+              if (t.instrumentRef == null)
+                action(
+                  icon: Icons.account_balance_outlined,
+                  label: 'Assign',
+                  onPressed: () => showAssignInstrumentSheet(context, provider, [t]),
+                ),
+              if (message != null)
+                action(
+                  icon: Icons.forum_outlined,
+                  label: 'Thread',
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          ThreadScreen(threadId: message.threadId, highlightMessageId: message.id),
+                    ),
+                  ),
+                ),
+              if (message != null)
+                action(
+                  icon: Icons.label_outline,
+                  label: 'Not a txn',
+                  onPressed: () => showCategoryPickerSheet(context, provider, message),
+                ),
+              action(
+                icon: Icons.delete_outline,
+                label: 'Delete',
+                color: scheme.error,
+                onPressed: () => _confirmDeleteTransactionSms(context, provider, t.smsId),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
           ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 120),
             child: SingleChildScrollView(
@@ -316,33 +458,6 @@ class _ExpandedTransactionPanel extends StatelessWidget {
                 style: TextStyle(fontSize: 13, height: 1.4, color: scheme.onSurface),
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: TextButton.icon(
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    alignment: Alignment.centerLeft,
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  icon: const Icon(Icons.sell_outlined, size: 16),
-                  label: Text(
-                    t.spendCategory?.label ?? 'Set category',
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onPressed: () =>
-                      showQuickSpendCategorySheet(context, context.read<SmsProvider>(), t),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.edit_outlined, size: 18),
-                tooltip: 'Edit transaction',
-                visualDensity: VisualDensity.compact,
-                onPressed: () => showTransactionEditSheet(context, context.read<SmsProvider>(), t),
-              ),
-            ],
           ),
         ],
       ),

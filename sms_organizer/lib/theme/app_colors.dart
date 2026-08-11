@@ -34,6 +34,25 @@ class AppColors {
   static const lightDestructive = Color(0xFFC0152F);
   static const darkDestructive = Color(0xFFE5484D);
 
+  /// Alternate accent seed colors offered in Settings → Appearance, on top
+  /// of the terracotta brand default above. One color per option (unlike
+  /// the default, which has separate light/dark tunings) — Material 3's
+  /// [ColorScheme.fromSeed] contrast-safe tone generation handles adapting
+  /// a single seed to both brightnesses reasonably well, and hand-tuning a
+  /// light/dark pair for every option here isn't worth the upkeep. Reuses
+  /// hues already established elsewhere in the app (category colors,
+  /// direction indicators) so an accent pick still feels consistent with
+  /// the rest of the UI rather than introducing brand-new colors.
+  static const accentOptions = <String, Color>{
+    'Blue': Color(0xFF3B82F6),
+    'Green': Color(0xFF10B981),
+    'Purple': Color(0xFF8B5CF6),
+    'Pink': Color(0xFFEC4899),
+    'Amber': Color(0xFFF59E0B),
+    'Teal': Color(0xFF06B6D4),
+    'Red': Color(0xFFEF4444),
+  };
+
   // Light theme surface tokens — warm cream canvas with white cards, the
   // same "paper" feel as claude.ai's light mode.
   static const lightScaffold = Color(0xFFFAF9F5);

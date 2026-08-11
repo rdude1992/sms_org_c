@@ -5,7 +5,14 @@ import 'package:flutter/material.dart';
 /// shouldn't count toward either credit or debit totals.
 enum TxnDirection { credit, debit, reversal, unknown }
 
-enum InstrumentType { debitCard, creditCard, bankAccount, upi, unknown }
+/// [investment] is for accounts that hold locked-in savings rather than
+/// spendable cash — PPF, Sukanya Samriddhi (SSY), NPS — detected from an
+/// SMS naming that scheme explicitly (see
+/// [TransactionParserService._instrumentType]). Broker/mutual-fund SIP
+/// activity stays [bankAccount] or falls under [EntityType.investment]
+/// instead — this case is specifically for the small-savings-scheme
+/// sub-accounts a self-transfer moves money into.
+enum InstrumentType { debitCard, creditCard, bankAccount, investment, upi, unknown }
 
 /// Ported from extractEntityType in the source regex file — a coarser
 /// classification than [InstrumentType]: is this message from a bank, a

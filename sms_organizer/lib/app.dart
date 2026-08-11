@@ -16,8 +16,8 @@ class SmsOrganizerApp extends StatelessWidget {
       title: 'SmartSMS',
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
-      theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
+      theme: AppTheme.light(accent: themeProvider.accentColor),
+      darkTheme: AppTheme.dark(accent: themeProvider.accentColor),
       themeMode: themeProvider.mode,
       home: const PermissionOnboardingScreen(),
     );

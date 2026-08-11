@@ -33,6 +33,7 @@ class TrendBarChart extends StatelessWidget {
     required this.onTapBucket,
   });
 
+  /// Full-year form — used for the tooltip header, which has room for it.
   String _bucketLabel(DateTime date) {
     switch (granularity) {
       case TrendGranularity.day:
@@ -41,6 +42,22 @@ class TrendBarChart extends StatelessWidget {
         return Formatters.dayMonth(date);
       case TrendGranularity.month:
         return Formatters.monthYear(date);
+    }
+  }
+
+  /// Short-year form for the x-axis tick text itself — day/week are already
+  /// compact ("15", "15 Aug") and unaffected, but month's "MMM yyyy" (e.g.
+  /// "Aug 2025") was wide enough to push the first/last tick's label past
+  /// the chart's own edge on a range spanning several years ("All time").
+  /// "MMM yy" keeps every tick well inside the reserved anchor width below.
+  String _axisLabel(DateTime date) {
+    switch (granularity) {
+      case TrendGranularity.day:
+        return Formatters.dayOnly(date);
+      case TrendGranularity.week:
+        return Formatters.dayMonth(date);
+      case TrendGranularity.month:
+        return Formatters.monthYearShort(date);
     }
   }
 
@@ -127,7 +144,7 @@ class TrendBarChart extends StatelessWidget {
                   barTouchData: BarTouchData(
                     touchCallback: handleTap,
                     touchTooltipData: BarTouchTooltipData(
-                      tooltipRoundedRadius: 8,
+                      tooltipBorderRadius: BorderRadius.circular(8),
                       tooltipPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       getTooltipColor: (_) => scheme.onSurface,
                       getTooltipItem: (group, groupIndex, rod, rodIndex) {
@@ -216,7 +233,7 @@ class TrendBarChart extends StatelessWidget {
                           if (idx % labelInterval != 0 && !isLast) return const SizedBox.shrink();
 
                           final text = Text(
-                            _bucketLabel(dates[idx]),
+                            _axisLabel(dates[idx]),
                             style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
                           );
                           // fl_chart centers this widget directly on top of

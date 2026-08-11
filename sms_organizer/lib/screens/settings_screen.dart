@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:file_selector/file_selector.dart' show openFile, XTypeGroup;
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import '../models/category.dart';
 import '../providers/notification_settings_provider.dart';
@@ -8,6 +9,7 @@ import '../providers/security_settings_provider.dart';
 import '../providers/sms_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/sms_platform_service.dart';
+import '../theme/app_colors.dart';
 import '../widgets/ui/grouped_card.dart';
 import 'uncategorised_review_screen.dart';
 
@@ -25,11 +27,20 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   // Absent (not yet loaded) entries are treated as "nothing to flag".
   Map<SmsCategory, int> _channelImportance = {};
 
+  // Read from the platform (which derives it from the installed build's own
+  // version/build number — see android/app/build.gradle's flutterVersionName)
+  // rather than hardcoded, so About always matches whatever's actually
+  // installed instead of drifting from pubspec.yaml on release.
+  PackageInfo? _packageInfo;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _refreshChannelStatus();
+    PackageInfo.fromPlatform().then((info) {
+      if (mounted) setState(() => _packageInfo = info);
+    });
   }
 
   @override
@@ -79,6 +90,10 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                 leading: const Icon(Icons.brightness_auto_outlined),
                 title: const Text('Use system default'),
                 onTap: themeProvider.useSystemDefault,
+              ),
+              _AccentColorPicker(
+                selected: themeProvider.accentColor,
+                onSelected: (color) => themeProvider.setAccentColor(color),
               ),
             ],
           ),
@@ -213,6 +228,16 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
           _SectionHeader('About'),
           GroupedCard(
             children: [
+              ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: const Text('SmartSMS'),
+                subtitle: Text(
+                  _packageInfo == null
+                      ? 'Smart SMS organiser with categorisation, expense & investment insights.'
+                      : 'Version ${_packageInfo!.version} (${_packageInfo!.buildNumber}) · Smart SMS '
+                          'organiser with categorisation, expense & investment insights.',
+                ),
+              ),
               const ListTile(
                 leading: Icon(Icons.privacy_tip_outlined),
                 title: Text('Your data stays on-device'),
@@ -437,6 +462,102 @@ class _NotificationCategoryRow extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// A "Default" swatch (the tuned terracotta brand color) plus every
+/// [AppColors.accentOptions] entry — [selected] is null for Default, or one
+/// of those option colors. Swatches rather than a full color wheel: an
+/// arbitrary user-picked hue would need its own contrast-safe onPrimary
+/// computed on the fly (fine — see [AppTheme]) but would also drift away
+/// from every other color already used across the app (categories,
+/// direction indicators), so this keeps accent picks visually consistent
+/// with the rest of the UI instead of introducing brand-new colors.
+class _AccentColorPicker extends StatelessWidget {
+  final Color? selected;
+  final ValueChanged<Color?> onSelected;
+  const _AccentColorPicker({required this.selected, required this.onSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final defaultColor = isDark ? AppColors.darkPrimary : AppColors.lightPrimary;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Accent color',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: scheme.onSurface),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Used for buttons, switches, and highlights',
+            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              _Swatch(
+                label: 'Default',
+                color: defaultColor,
+                selected: selected == null,
+                onTap: () => onSelected(null),
+              ),
+              for (final entry in AppColors.accentOptions.entries)
+                _Swatch(
+                  label: entry.key,
+                  color: entry.value,
+                  selected: selected == entry.value,
+                  onTap: () => onSelected(entry.value),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Swatch extends StatelessWidget {
+  final String label;
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+  const _Swatch({
+    required this.label,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final checkColor =
+        ThemeData.estimateBrightnessForColor(color) == Brightness.dark ? Colors.white : Colors.black;
+    return Tooltip(
+      message: label,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: selected ? Border.all(color: scheme.onSurface, width: 2.5) : null,
+          ),
+          child: selected ? Icon(Icons.check, color: checkColor, size: 18) : null,
+        ),
+      ),
     );
   }
 }

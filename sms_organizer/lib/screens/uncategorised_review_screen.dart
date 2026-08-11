@@ -5,6 +5,7 @@ import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
 import '../widgets/transaction_edit_sheet.dart';
 import '../widgets/ui/empty_state.dart';
+import 'transaction_list_screen.dart';
 
 /// Groups every still-Uncategorised transaction by merchant (or, for the
 /// merchant-less ones, by normalised SMS template — see
@@ -48,7 +49,7 @@ class UncategorisedReviewScreen extends StatelessWidget {
     final totalAmount = uncategorised.fold<double>(0, (sum, t) => sum + t.amount);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Review uncategorised')),
+      appBar: AppBar(title: Text('Review uncategorised (${uncategorised.length})')),
       body: Column(
         children: [
           Container(
@@ -87,6 +88,28 @@ class _GroupRow extends StatelessWidget {
     return body.length > 60 ? '${body.substring(0, 60)}…' : body;
   }
 
+  /// Opens the group's transactions in the same drilldown Insights uses —
+  /// [TransactionListScreen] already gives full raw-SMS content per row
+  /// (via the detail sheet / inline expand) plus search, sort, and a
+  /// multi-select "Set category" action, so previewing a group before
+  /// tagging it doesn't need a separate list built just for this screen.
+  /// [matches] is re-checked against live transactions, so a row tagged
+  /// from inside this drilldown drops out immediately instead of lingering.
+  void _viewTransactions(BuildContext context) {
+    final key = group.first.categoryReviewGroupKey;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TransactionListScreen(
+          title: _title,
+          subtitle: 'Uncategorised · tap Select all + Set category to tag them all at once',
+          transactions: group,
+          matches: (t) => t.spendCategory == null && t.categoryReviewGroupKey == key,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final total = group.fold<double>(0, (sum, t) => sum + t.amount);
@@ -97,9 +120,20 @@ class _GroupRow extends StatelessWidget {
         '${group.length} transaction${group.length == 1 ? '' : 's'}',
         style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
       ),
-      trailing: Text(
-        Formatters.currency(total),
-        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            Formatters.currency(total),
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+          IconButton(
+            icon: const Icon(Icons.visibility_outlined, size: 18),
+            tooltip: 'View transactions',
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _viewTransactions(context),
+          ),
+        ],
       ),
       onTap: () => showBulkSpendCategorySheet(
         context,

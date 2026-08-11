@@ -18,10 +18,15 @@ class AppTheme {
   static const _cardRadius = 16.0;
   static const _controlRadius = 12.0;
 
-  static ThemeData light = _build(Brightness.light);
-  static ThemeData dark = _build(Brightness.dark);
+  /// [accent] overrides the brand terracotta with one of
+  /// [AppColors.accentOptions] (see Settings → Appearance) — null keeps the
+  /// tuned default. Built on demand rather than cached statically, since
+  /// the accent can now change at runtime; [SmsOrganizerApp] rebuilds both
+  /// themes from [ThemeProvider.accentColor] on every change.
+  static ThemeData light({Color? accent}) => _build(Brightness.light, accent);
+  static ThemeData dark({Color? accent}) => _build(Brightness.dark, accent);
 
-  static ThemeData _build(Brightness brightness) {
+  static ThemeData _build(Brightness brightness, Color? accentOverride) {
     final isDark = brightness == Brightness.dark;
 
     final scaffold = isDark ? AppColors.darkScaffold : AppColors.lightScaffold;
@@ -31,8 +36,16 @@ class AppTheme {
     final mutedForeground = isDark ? AppColors.darkMutedForeground : AppColors.lightMutedForeground;
     final border = isDark ? AppColors.darkBorder : AppColors.lightBorder;
     final borderStrong = isDark ? AppColors.darkBorderStrong : AppColors.lightBorderStrong;
-    final primary = isDark ? AppColors.darkPrimary : AppColors.lightPrimary;
-    final onPrimary = isDark ? AppColors.darkOnPrimary : AppColors.lightOnPrimary;
+    final primary = accentOverride ?? (isDark ? AppColors.darkPrimary : AppColors.lightPrimary);
+    // The brand default's onPrimary is hand-tuned; an arbitrary accent pick
+    // instead gets a computed black/white based on its own brightness, so
+    // text on FABs/filled buttons/switches stays legible regardless of
+    // which option is picked.
+    final onPrimary = accentOverride == null
+        ? (isDark ? AppColors.darkOnPrimary : AppColors.lightOnPrimary)
+        : (ThemeData.estimateBrightnessForColor(accentOverride) == Brightness.dark
+            ? Colors.white
+            : Colors.black);
     final destructive = isDark ? AppColors.darkDestructive : AppColors.lightDestructive;
 
     final base = ColorScheme.fromSeed(seedColor: primary, brightness: brightness);

@@ -8,7 +8,11 @@ import '../utils/formatters.dart';
 /// or just confirm what the underlying message actually said. [onEdit], when
 /// given, shows a pencil next to the title that jumps straight into editing
 /// (closing this sheet first) — so a correction doesn't require backing out
-/// and long-pressing the tile instead.
+/// and long-pressing the tile instead. [onViewThread] and [onDelete] add an
+/// arrow (jump to the original SMS conversation, e.g. to sanity-check a
+/// suspected duplicate) and a delete icon (remove the underlying SMS
+/// entirely — this transaction stops being tracked along with it) next to
+/// the pencil, both closing this sheet first.
 void showDetectedSmsSheet(
   BuildContext context, {
   required String title,
@@ -16,6 +20,8 @@ void showDetectedSmsSheet(
   required String rawBody,
   required List<MapEntry<String, String>> details,
   VoidCallback? onEdit,
+  VoidCallback? onViewThread,
+  VoidCallback? onDelete,
 }) {
   showModalBottomSheet(
     context: context,
@@ -62,6 +68,15 @@ void showDetectedSmsSheet(
                       ],
                     ),
                   ),
+                  if (onViewThread != null)
+                    IconButton(
+                      icon: const Icon(Icons.forum_outlined),
+                      tooltip: 'View in thread',
+                      onPressed: () {
+                        Navigator.pop(context);
+                        onViewThread();
+                      },
+                    ),
                   if (onEdit != null)
                     IconButton(
                       icon: const Icon(Icons.edit_outlined),
@@ -69,6 +84,15 @@ void showDetectedSmsSheet(
                       onPressed: () {
                         Navigator.pop(context);
                         onEdit();
+                      },
+                    ),
+                  if (onDelete != null)
+                    IconButton(
+                      icon: Icon(Icons.delete_outline, color: scheme.error),
+                      tooltip: 'Delete message',
+                      onPressed: () {
+                        Navigator.pop(context);
+                        onDelete();
                       },
                     ),
                 ],
