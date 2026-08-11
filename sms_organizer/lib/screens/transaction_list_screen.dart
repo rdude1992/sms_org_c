@@ -496,8 +496,8 @@ class _TransactionListView extends StatelessWidget {
     );
   }
 
-  /// Month-grouped, sticky-header rendering of [TransactionTile.compact] —
-  /// mirrors the Inbox's sticky day-header list (see _StickyMessageList in
+  /// Month-grouped header rendering of [TransactionTile.compact] — mirrors
+  /// the Inbox's day-header list (see _StickyMessageList in
   /// inbox_screen.dart), just grouped by month instead of by day since a
   /// bank-statement-style scan benefits from coarser sections. Assumes
   /// [transactions] is already contiguous by month, which holds for the
@@ -511,7 +511,7 @@ class _TransactionListView extends StatelessWidget {
     final slivers = <Widget>[
       for (final group in groups) ...[
         SliverPersistentHeader(
-          pinned: true,
+          pinned: false,
           delegate: _MonthHeaderDelegate(label: Formatters.monthYear(group.month)),
         ),
         SliverList(

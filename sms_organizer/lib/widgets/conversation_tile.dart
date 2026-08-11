@@ -58,7 +58,7 @@ class ConversationTile extends StatelessWidget {
             onTap: onTap,
             onLongPress: onLongPress,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
               child: Row(
                 children: [
                   if (selectionMode)
@@ -78,15 +78,19 @@ class ConversationTile extends StatelessWidget {
                       customBorder: const CircleBorder(),
                       onTap: onAvatarTap,
                       child: CircleAvatar(
-                        radius: 24,
+                        radius: 18,
                         backgroundColor: latest.category.color.withOpacity(0.15),
                         child: Text(
                           displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
-                          style: TextStyle(color: latest.category.color, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            color: latest.category.color,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
                     ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -110,23 +114,25 @@ class ConversationTile extends StatelessWidget {
                                 displayName,
                                 style: TextStyle(
                                   fontWeight: unread ? FontWeight.bold : FontWeight.w600,
-                                  fontSize: 15,
+                                  fontSize: 14,
                                   color: unread ? scheme.onSurface : null,
                                 ),
+                                maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
+                            const SizedBox(width: 6),
                             Text(
                               Formatters.relativeOrTime(latest.date),
                               style: TextStyle(
-                                fontSize: 12,
+                                fontSize: 11,
                                 color: unread ? scheme.primary : scheme.onSurfaceVariant,
                                 fontWeight: unread ? FontWeight.bold : FontWeight.normal,
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 3),
                         Row(
                           children: [
                             Expanded(

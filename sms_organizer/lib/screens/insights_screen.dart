@@ -260,6 +260,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
           return true;
         }).toList()
           ..sort((a, b) => b.date.compareTo(a.date));
+        final recentTransactions = filteredTransactions.take(15).toList();
 
         final filteredInvestments = provider.investments.where((i) {
           if (from != null && i.date.isBefore(from)) return false;
@@ -356,8 +357,15 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ),
                                 child: Column(
                                   children: [
-                                    for (final t in filteredTransactions.take(15))
-                                      TransactionTile(transaction: t),
+                                    for (var i = 0; i < recentTransactions.length; i++) ...[
+                                      TransactionTile(transaction: recentTransactions[i], compact: true),
+                                      if (i != recentTransactions.length - 1)
+                                        Divider(
+                                          height: 1,
+                                          thickness: 1,
+                                          color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.4),
+                                        ),
+                                    ],
                                   ],
                                 ),
                               ),

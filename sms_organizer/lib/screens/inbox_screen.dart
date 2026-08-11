@@ -474,12 +474,12 @@ class _MessagesListView extends StatelessWidget {
   }
 }
 
-/// The flat "all messages" list, grouped by calendar day with a pinned
-/// header per group — like the thread view's date separators, but sticky:
-/// the header for whichever day is on screen stays put instead of
-/// scrolling away with its messages. Each header is also tappable to
-/// collapse/expand that day — with months of history this is a lot faster
-/// than scrolling past every message just to get from one date to another.
+/// The flat "all messages" list, grouped by calendar day with a header per
+/// group — like the thread view's date separators, scrolling away with its
+/// messages rather than staying pinned to the top. Each header is also
+/// tappable to collapse/expand that day — with months of history this is a
+/// lot faster than scrolling past every message just to get from one date
+/// to another.
 class _StickyMessageList extends StatefulWidget {
   final SmsProvider provider;
   final List<SmsMessage> messages;
@@ -513,7 +513,7 @@ class _StickyMessageListState extends State<_StickyMessageList> {
       final collapsed = _collapsedLabels.contains(label);
       slivers.add(
         SliverPersistentHeader(
-          pinned: true,
+          pinned: false,
           delegate: _DateHeaderDelegate(
             label: label,
             count: group.items.length,
@@ -632,31 +632,27 @@ class _MessageRow extends StatelessWidget {
     final selected = provider.selectedIds.contains(m.id);
     final unread = !m.read && m.isIncoming;
     final scheme = Theme.of(context).colorScheme;
+    // Dropped the avatar (the single biggest per-row space/weight cost) in
+    // favour of DirectionBadge alone as the leading glyph — small enough on
+    // its own to not need the circle-avatar chrome it used to sit on top
+    // of — and folded the trailing metadata down to one line, matching the
+    // density TransactionTile.compact established. Category is still one
+    // glance away via the badge next to the timestamp; SIM slot and the
+    // "manually set" flag are dropped from this dense row entirely — both
+    // remain visible from the full thread.
     return ListTile(
       key: ValueKey(m.id),
       selected: selected,
       selectedTileColor: scheme.primary.withOpacity(0.06),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      minVerticalPadding: 10,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      minVerticalPadding: 8,
+      dense: true,
       leading: provider.isSelecting
           ? Icon(
               selected ? Icons.check_circle : Icons.radio_button_unchecked,
               color: selected ? scheme.primary : scheme.outline,
             )
-          : Stack(
-              clipBehavior: Clip.none,
-              children: [
-                CircleAvatar(
-                  backgroundColor: m.category.color.withOpacity(0.15),
-                  child: Icon(m.category.icon, color: m.category.color, size: 18),
-                ),
-                Positioned(
-                  bottom: -2,
-                  right: -2,
-                  child: DirectionBadge(isIncoming: m.isIncoming),
-                ),
-              ],
-            ),
+          : DirectionBadge(isIncoming: m.isIncoming),
       title: Row(
         children: [
           if (unread) ...[
@@ -672,68 +668,35 @@ class _MessageRow extends StatelessWidget {
               provider.displayNameFor(m.address),
               style: TextStyle(
                 fontWeight: unread ? FontWeight.bold : FontWeight.w600,
+                fontSize: 14,
                 color: unread ? scheme.onSurface : null,
               ),
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          CategoryBadge(category: m.category, compact: true, showLabel: false),
+          const SizedBox(width: 6),
+          Text(
+            Formatters.relativeOrTime(m.date),
+            style: TextStyle(
+              fontSize: 11,
+              color: unread ? scheme.primary : scheme.onSurfaceVariant,
+              fontWeight: unread ? FontWeight.bold : FontWeight.normal,
             ),
           ),
         ],
       ),
-      subtitle: Padding(
-        padding: const EdgeInsets.only(top: 3),
-        child: SearchPreviewText(
-          body: m.body,
-          query: provider.searchQuery,
-          baseStyle: TextStyle(
-            color: unread ? scheme.onSurface.withOpacity(0.85) : scheme.onSurfaceVariant,
-            fontWeight: unread ? FontWeight.w600 : FontWeight.normal,
-          ),
-          matchColor: scheme.primary,
+      subtitle: SearchPreviewText(
+        body: m.body,
+        query: provider.searchQuery,
+        baseStyle: TextStyle(
+          color: unread ? scheme.onSurface.withOpacity(0.85) : scheme.onSurfaceVariant,
+          fontWeight: unread ? FontWeight.w600 : FontWeight.normal,
+          fontSize: 12.5,
         ),
-      ),
-      trailing: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (m.simSlot != null) ...[
-                Text(
-                  'SIM ${m.simSlot! + 1}',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(width: 6),
-              ],
-              Text(
-                Formatters.relativeOrTime(m.date),
-                style: TextStyle(
-                  fontSize: 11,
-                  color: unread ? scheme.primary : scheme.onSurfaceVariant,
-                  fontWeight: unread ? FontWeight.bold : FontWeight.normal,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (m.isCategoryOverridden) ...[
-                Tooltip(
-                  message: 'Manually set',
-                  child: Icon(Icons.edit, size: 10, color: scheme.onSurfaceVariant),
-                ),
-                const SizedBox(width: 3),
-              ],
-              CategoryBadge(category: m.category, compact: true, showLabel: false),
-            ],
-          ),
-        ],
+        matchColor: scheme.primary,
       ),
       onTap: () {
         if (provider.isSelecting) {
