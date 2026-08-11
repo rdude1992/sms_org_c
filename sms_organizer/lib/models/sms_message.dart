@@ -21,6 +21,36 @@ SmsBoxType boxTypeFromAndroid(int type) {
   }
 }
 
+/// Mirrors content://sms's STATUS column — Android's own delivery-report
+/// tracking for a message this app *sent* (meaningless for an incoming
+/// one, which is always [none]). Populated by SmsRepository.sendSms's
+/// per-part sent/delivery PendingIntents on the native side (see
+/// SmsSendStatusReceiver.kt) once the carrier/telephony stack reports
+/// back. Many carriers never send a delivery report at all, in which case
+/// this just stays [pending] forever and [SmsMessage.sendState] reads as
+/// "sent" rather than "delivered" — a real SMS limitation, not a bug.
+enum SmsDeliveryStatus { none, pending, delivered, failed }
+
+SmsDeliveryStatus deliveryStatusFromAndroid(int status) {
+  switch (status) {
+    case 0: // Telephony.Sms.STATUS_COMPLETE
+      return SmsDeliveryStatus.delivered;
+    case 32: // Telephony.Sms.STATUS_PENDING
+      return SmsDeliveryStatus.pending;
+    case 64: // Telephony.Sms.STATUS_FAILED
+      return SmsDeliveryStatus.failed;
+    default: // -1 == Telephony.Sms.STATUS_NONE, or unrecognised
+      return SmsDeliveryStatus.none;
+  }
+}
+
+/// Outgoing-only send/delivery state — see [SmsMessage.sendState]. [failed]
+/// means the send itself never reached the radio/carrier (retryable, see
+/// SmsProvider.retrySend); [notDelivered] means it sent fine but the
+/// carrier's delivery report came back negative (not retryable the same
+/// way — resending would risk a duplicate the recipient already got).
+enum OutgoingSendState { sending, sent, delivered, failed, notDelivered }
+
 class SmsMessage {
   final int id;
   final int threadId;
@@ -43,6 +73,9 @@ class SmsMessage {
   /// classifier never re-evaluates or overwrites it after that.
   bool isCategoryOverridden;
 
+  /// See [SmsDeliveryStatus] — only meaningful once [box] is [SmsBoxType.sent].
+  final SmsDeliveryStatus status;
+
   SmsMessage({
     required this.id,
     required this.threadId,
@@ -54,6 +87,7 @@ class SmsMessage {
     this.simSlot,
     this.category = SmsCategory.personal,
     this.isCategoryOverridden = false,
+    this.status = SmsDeliveryStatus.none,
   });
 
   factory SmsMessage.fromPlatformMap(Map<dynamic, dynamic> map) {
@@ -67,6 +101,7 @@ class SmsMessage {
       box: boxTypeFromAndroid((map['type'] ?? 1) as int),
       read: (map['read'] ?? true) as bool,
       simSlot: (rawSlot != null && rawSlot >= 0) ? rawSlot : null,
+      status: deliveryStatusFromAndroid((map['status'] ?? -1) as int),
     );
   }
 
@@ -81,6 +116,7 @@ class SmsMessage {
         'category': category.name,
         'categoryOverridden': isCategoryOverridden,
         'simSlot': simSlot,
+        'status': status.name,
       };
 
   factory SmsMessage.fromJson(Map<String, dynamic> json) {
@@ -96,6 +132,10 @@ class SmsMessage {
       ),
       read: json['read'] as bool,
       simSlot: json['simSlot'] as int?,
+      status: SmsDeliveryStatus.values.firstWhere(
+        (e) => e.name == json['status'],
+        orElse: () => SmsDeliveryStatus.none,
+      ),
     );
     msg.category = SmsCategory.values.firstWhere(
       (e) => e.name == json['category'],
@@ -106,6 +146,27 @@ class SmsMessage {
   }
 
   bool get isIncoming => box == SmsBoxType.inbox;
+
+  /// Null for an incoming message (or a draft) — none of this applies.
+  /// See [OutgoingSendState] for what each value means and drives in
+  /// ThreadScreen's per-bubble status indicator.
+  OutgoingSendState? get sendState {
+    switch (box) {
+      case SmsBoxType.outbox:
+      case SmsBoxType.queued:
+        return OutgoingSendState.sending;
+      case SmsBoxType.failed:
+        return OutgoingSendState.failed;
+      case SmsBoxType.sent:
+        if (status == SmsDeliveryStatus.delivered) return OutgoingSendState.delivered;
+        if (status == SmsDeliveryStatus.failed) return OutgoingSendState.notDelivered;
+        return OutgoingSendState.sent;
+      case SmsBoxType.inbox:
+      case SmsBoxType.draft:
+      case SmsBoxType.unknown:
+        return null;
+    }
+  }
 }
 
 /// A conversation groups all messages sharing a thread/address for the
