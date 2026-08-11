@@ -71,6 +71,13 @@ class TransactionTile extends StatelessWidget {
   /// transaction previews), which also hides the avatar's arrow badge.
   final VoidCallback? onToggleExpand;
 
+  /// Dense "bank statement" row — date, name, colored amount, thin divider,
+  /// nothing else — used by TransactionListScreen's compact view toggle in
+  /// place of the full ListTile below. No avatar, no subtitle line, no
+  /// inline expand panel; [expanded]/[onToggleExpand] are ignored while
+  /// this is true.
+  final bool compact;
+
   const TransactionTile({
     super.key,
     required this.transaction,
@@ -81,6 +88,7 @@ class TransactionTile extends StatelessWidget {
     this.onSelectStart,
     this.expanded = false,
     this.onToggleExpand,
+    this.compact = false,
   });
 
   @override
@@ -106,6 +114,53 @@ class TransactionTile extends StatelessWidget {
             : (isCredit ? Icons.arrow_downward : Icons.arrow_upward);
 
     final scheme = Theme.of(context).colorScheme;
+
+    if (compact) {
+      // Falls back to the direction itself (e.g. "DEBIT") rather than the
+      // instrument label once merchant/wallet/issuer are all unparsed —
+      // matches how a bank's own statement lists a transfer it can't name
+      // either, and reads better at this density than "Bank"/"UPI" would.
+      final title = transaction.merchant ??
+          transaction.walletType ??
+          transaction.issuer ??
+          (isNeutral ? _instrumentLabel(transaction.instrument) : (isCredit ? 'CREDIT' : 'DEBIT'));
+      return Material(
+        color: selected ? scheme.primary.withOpacity(0.08) : Colors.transparent,
+        child: InkWell(
+          onTap: onTap ?? () => _showDetails(context),
+          onLongPress: onLongPress ?? () => _showActions(context),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 48,
+                  child: Text(
+                    Formatters.dayMonth(transaction.date),
+                    style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: scheme.onSurface),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  Formatters.currency(transaction.amount),
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Column(
       children: [
         ListTile(

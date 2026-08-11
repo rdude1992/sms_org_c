@@ -236,16 +236,21 @@ class TrendBarChart extends StatelessWidget {
                             _axisLabel(dates[idx]),
                             style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
                           );
-                          // fl_chart centers this widget directly on top of
-                          // its tick. That's fine for an interior label, but
-                          // the first/last tick sits right at the plot's own
-                          // edge, so a centered multi-character label (e.g.
-                          // "May 2019") spills half its width past the
-                          // chart's bounds and gets clipped by the Card's
-                          // clipBehavior. Reserve extra width to one side
-                          // and anchor the text to the inward edge of that
-                          // instead, so it grows inward from the tick
-                          // rather than off the edge.
+                          // fl_chart centers this widget's reserved box
+                          // directly on top of its tick, not just the text
+                          // inside it — so a 64-wide box always spans
+                          // tick±32 regardless of the Align below. For the
+                          // first/last tick, which sits right at the plot's
+                          // own edge, half of that box (and whichever side
+                          // the text is anchored to) falls outside the
+                          // chart and gets clipped by the Card's
+                          // clipBehavior. The fix is to anchor the text to
+                          // the side of the box that's still inside the
+                          // chart — centerRight (text hugs the tick, grows
+                          // left, inward) for the first label, centerLeft
+                          // (grows right, inward) for the last — so it
+                          // never touches the half of the box that
+                          // overhangs the edge.
                           final isFirst = idx == 0;
                           if (!isFirst && !isLast) {
                             return Padding(padding: const EdgeInsets.only(top: 6), child: text);
@@ -255,7 +260,7 @@ class TrendBarChart extends StatelessWidget {
                             child: SizedBox(
                               width: 64,
                               child: Align(
-                                alignment: isFirst ? Alignment.centerLeft : Alignment.centerRight,
+                                alignment: isFirst ? Alignment.centerRight : Alignment.centerLeft,
                                 child: text,
                               ),
                             ),
