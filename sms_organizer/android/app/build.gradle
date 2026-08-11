@@ -21,9 +21,7 @@ android {
     // resolve correctly. This is independent of applicationId, which stays
     // stable because Android's default-SMS-handler role is bound to it.
     namespace "com.smsorganizer.app"
-    // permission_handler 13.0.0 requires compileSdk 37 (was 35 pre-12.0.0) —
-    // see its CHANGELOG. targetSdk bumped alongside it, as usual.
-    compileSdk 37
+    compileSdk 36
     ndkVersion flutter.ndkVersion
 
     compileOptions {
@@ -48,7 +46,7 @@ android {
         // flutter.minSdkVersion alone would fail manifest merging if that
         // resolves lower.
         minSdkVersion Math.max(flutter.minSdkVersion, 23)
-        targetSdkVersion 37
+        targetSdkVersion 36
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
     }
