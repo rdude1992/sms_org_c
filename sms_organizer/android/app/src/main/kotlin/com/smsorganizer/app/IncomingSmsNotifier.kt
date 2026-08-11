@@ -188,6 +188,12 @@ object IncomingSmsNotifier {
 
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_stat_notify)
+            // Explicit rather than left for the OS/launcher to derive from
+            // somewhere else (some render an inconsistent badge tint
+            // otherwise) — same accent used for the in-notification amount/
+            // OTP highlighting below, so the badge and the highlighted text
+            // read as the one brand color.
+            .setColor(ACCENT_COLOR)
             .setStyle(style)
             .setShortcutId(shortcutId)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
@@ -253,6 +259,7 @@ object IncomingSmsNotifier {
 
             val notification = NotificationCompat.Builder(context, "sms_${category.prefKey}")
                 .setSmallIcon(R.drawable.ic_stat_notify)
+                .setColor(ACCENT_COLOR)
                 .setContentTitle(displayName)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -471,6 +478,7 @@ object IncomingSmsNotifier {
         try {
             val summary = NotificationCompat.Builder(context, NotificationChannels.SUMMARY_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_notify)
+                .setColor(ACCENT_COLOR)
                 .setStyle(NotificationCompat.InboxStyle().setSummaryText("New messages"))
                 .setGroup(GROUP_KEY)
                 .setGroupSummary(true)

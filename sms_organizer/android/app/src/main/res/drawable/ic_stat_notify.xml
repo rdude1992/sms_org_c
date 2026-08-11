@@ -3,16 +3,31 @@
   Monochrome status-bar/notification icon — a solid chat-bubble silhouette
   on a transparent background, per Android's notification icon guidelines
   (the system renders this as a flat white glyph in the status bar and
-  applies its own tint elsewhere, e.g. in the notification shade header).
-  Replaces the launcher icon, which is full-color and doesn't silhouette
-  cleanly.
+  applies its own tint elsewhere, e.g. composited into a colored circular
+  badge in the notification shade). Replaces the launcher icon, which is
+  full-color and doesn't silhouette cleanly.
+
+  The path itself is a 20x20 glyph on a 24x24 canvas (only 2dp of padding
+  a side) — comfortably within Android's bounding box but too tight once
+  a launcher composites it into a round badge: with almost no breathing
+  room the glyph reads as oversized/cramped against the badge's circular
+  edge, and the notification's title/body block ends up looking
+  vertically off-center next to it. The group below scales the glyph down
+  further (~72%) around the canvas center, leaving ~4.8dp of padding a
+  side, matching the more generous safe zone other apps' status icons use.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M20,2H4C2.9,2 2,2.9 2,4v18l4,-4h14c1.1,0 2,-0.9 2,-2V4C22,2.9 21.1,2 20,2z"/>
+    <group
+        android:pivotX="12"
+        android:pivotY="12"
+        android:scaleX="0.72"
+        android:scaleY="0.72">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M20,2H4C2.9,2 2,2.9 2,4v18l4,-4h14c1.1,0 2,-0.9 2,-2V4C22,2.9 21.1,2 20,2z"/>
+    </group>
 </vector>
