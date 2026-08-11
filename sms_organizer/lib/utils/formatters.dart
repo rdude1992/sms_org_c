@@ -11,10 +11,16 @@ class Formatters {
   static final _timeOfDay = DateFormat('h:mm a');
   static final _fullDate = DateFormat('d MMM yyyy, h:mm a');
   static final _monthYear = DateFormat('MMM yyyy');
+  static final _monthYearShort = DateFormat('MMM yy');
 
   static String currency(double value) => _currency.format(value);
   static String currencyPrecise(double value) => _currencyPrecise.format(value);
   static String monthYear(DateTime date) => _monthYear.format(date);
+  /// e.g. "Aug 25" — TrendBarChart's x-axis tick labels, where the full
+  /// 4-digit year (see [monthYear], still used for drilldown titles/
+  /// tooltips where there's room) pushed the first/last tick past the
+  /// chart's edge on a wide date range like "All time".
+  static String monthYearShort(DateTime date) => _monthYearShort.format(date);
   static String dayOnly(DateTime date) => _dayOnly.format(date);
   static String dayMonth(DateTime date) => _dayMonth.format(date);
   static String dayMonthYear(DateTime date) => _dayMonthYear.format(date);
