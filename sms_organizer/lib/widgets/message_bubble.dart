@@ -5,6 +5,7 @@ import '../models/sms_message.dart';
 import '../utils/formatters.dart';
 import '../utils/message_highlighter.dart';
 import '../utils/sms_extractors.dart';
+import 'category_badge.dart';
 import 'sim_picker.dart' show simColor;
 import 'ui/linkified_text.dart';
 
@@ -23,6 +24,21 @@ class MessageBubble extends StatelessWidget {
   /// / the Starred screen for where it's collected across all threads.
   final bool starred;
 
+  /// True the first time this bubble is built for a message ThreadScreen
+  /// hasn't seen before (a fresh send, or one that just arrived) — plays a
+  /// one-shot fade/slide-in (see [_BubbleEntrance]) instead of the plain
+  /// static render every other bubble gets. Never toggles back to false for
+  /// the same message, so scrolling it in and out of view again doesn't
+  /// replay the animation.
+  final bool isNew;
+
+  /// Retries a message whose [SmsMessage.sendState] is
+  /// [OutgoingSendState.failed] — wired to the status indicator's tap
+  /// target below. Null (no retry offered) for every other state,
+  /// including [OutgoingSendState.notDelivered] — see SmsProvider.retrySend
+  /// for why that one's excluded.
+  final VoidCallback? onRetry;
+
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -35,6 +51,8 @@ class MessageBubble extends StatelessWidget {
     required this.onLongPress,
     this.highlighted = false,
     this.starred = false,
+    this.isNew = false,
+    this.onRetry,
   });
 
   @override
@@ -55,8 +73,9 @@ class MessageBubble extends StatelessWidget {
     // account reference in place within the bubble text, rather than
     // requiring a tap into the message details to spot them.
     final highlights = findMessageHighlights(message.body, message.category);
+    final sendState = message.sendState;
 
-    return GestureDetector(
+    final bubble = GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
       child: Container(
@@ -126,6 +145,8 @@ class MessageBubble extends StatelessWidget {
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              CategoryBadge(category: message.category, compact: true, showLabel: false),
+                              const SizedBox(width: 6),
                               Text(
                                 Formatters.timeOfDay(message.date),
                                 style: TextStyle(color: textColor.withOpacity(0.7), fontSize: 10),
@@ -163,6 +184,15 @@ class MessageBubble extends StatelessWidget {
                                 const SizedBox(width: 6),
                                 Icon(Icons.star, size: 11, color: Colors.amber.shade600),
                               ],
+                              if (isOutgoing && sendState != null) ...[
+                                const SizedBox(width: 6),
+                                _SendStatusIndicator(
+                                  state: sendState,
+                                  textColor: textColor,
+                                  scheme: scheme,
+                                  onRetry: onRetry,
+                                ),
+                              ],
                             ],
                           ),
                         ],
@@ -176,6 +206,10 @@ class MessageBubble extends StatelessWidget {
         ),
       ),
     );
+
+    // Only the freshly-appeared bubble pays for an AnimationController —
+    // every other bubble in a long thread renders exactly as before.
+    return isNew ? _BubbleEntrance(child: bubble) : bubble;
   }
 
   /// Style for one highlighted run — bold throughout, plus a size bump for
@@ -257,5 +291,109 @@ class _CopyOtpButton extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// One-shot fade + slide-up entrance for a bubble ThreadScreen has just
+/// decided is new (see MessageBubble.isNew) — plays once via its own
+/// AnimationController rather than TweenAnimationBuilder, so a provider-
+/// driven rebuild while the message is still "new" (e.g. its send status
+/// flipping from sending to sent moments later) can't accidentally
+/// re-trigger it.
+class _BubbleEntrance extends StatefulWidget {
+  final Widget child;
+  const _BubbleEntrance({required this.child});
+
+  @override
+  State<_BubbleEntrance> createState() => _BubbleEntranceState();
+}
+
+class _BubbleEntranceState extends State<_BubbleEntrance> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 260),
+  )..forward();
+  late final Animation<double> _curved = CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _curved,
+      child: SlideTransition(
+        position: Tween<Offset>(begin: const Offset(0, 0.12), end: Offset.zero).animate(_curved),
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+/// Trailing status glyph for an outgoing bubble — a small spinner while
+/// [OutgoingSendState.sending], a single check once [OutgoingSendState.sent],
+/// a double check once [OutgoingSendState.delivered], and an error glyph
+/// (tappable to retry when [onRetry] is set) for [OutgoingSendState.failed]
+/// / [OutgoingSendState.notDelivered].
+class _SendStatusIndicator extends StatelessWidget {
+  final OutgoingSendState state;
+  final Color textColor;
+  final ColorScheme scheme;
+  final VoidCallback? onRetry;
+
+  const _SendStatusIndicator({
+    required this.state,
+    required this.textColor,
+    required this.scheme,
+    this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    switch (state) {
+      case OutgoingSendState.sending:
+        return Tooltip(
+          message: 'Sending…',
+          child: SizedBox(
+            width: 10,
+            height: 10,
+            child: CircularProgressIndicator(strokeWidth: 1.5, color: textColor.withOpacity(0.7)),
+          ),
+        );
+      case OutgoingSendState.sent:
+        return Tooltip(
+          message: 'Sent',
+          child: Icon(Icons.done, size: 13, color: textColor.withOpacity(0.7)),
+        );
+      case OutgoingSendState.delivered:
+        return Tooltip(
+          message: 'Delivered',
+          child: Icon(Icons.done_all, size: 13, color: textColor.withOpacity(0.7)),
+        );
+      case OutgoingSendState.notDelivered:
+        return Tooltip(
+          message: 'Not delivered',
+          child: Icon(Icons.error_outline, size: 13, color: scheme.error),
+        );
+      case OutgoingSendState.failed:
+        return InkWell(
+          borderRadius: BorderRadius.circular(4),
+          onTap: onRetry,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline, size: 13, color: scheme.error),
+              const SizedBox(width: 3),
+              Text(
+                'Failed · Retry',
+                style: TextStyle(fontSize: 10, color: scheme.error, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        );
+    }
   }
 }

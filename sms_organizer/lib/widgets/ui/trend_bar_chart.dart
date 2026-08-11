@@ -220,7 +220,31 @@ class TrendBarChart extends StatelessWidget {
                         },
                       ),
                     ),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    // fl_chart centers every bottom-title widget directly on
+                    // top of its own tick, with no notion of "this tick is
+                    // at the plot's edge, give its label room to overhang."
+                    // Trying to fix that per-label (anchoring the first/last
+                    // label's text to whichever side of a wide reserved box
+                    // stays inward) kept failing in practice — half the
+                    // label's reserved box still extends past the plot's
+                    // actual drawing area regardless of how the text inside
+                    // it is aligned, and *that* half is what the Card's
+                    // clipBehavior was cutting off. Reserving real margin on
+                    // both sides of the plot instead — leftTitles already
+                    // does this incidentally (46, for the y-axis labels);
+                    // rightTitles below does it on purpose, with nothing to
+                    // actually draw there — sidesteps the problem entirely:
+                    // every tick, including the first/last, now sits far
+                    // enough from the Card's edge that a centered label
+                    // never reaches it, so no per-label special-casing is
+                    // needed at all.
+                    rightTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 28,
+                        getTitlesWidget: (value, meta) => const SizedBox.shrink(),
+                      ),
+                    ),
                     topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
@@ -232,32 +256,11 @@ class TrendBarChart extends StatelessWidget {
                           final isLast = idx == dates.length - 1;
                           if (idx % labelInterval != 0 && !isLast) return const SizedBox.shrink();
 
-                          final text = Text(
-                            _axisLabel(dates[idx]),
-                            style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
-                          );
-                          // fl_chart centers this widget directly on top of
-                          // its tick. That's fine for an interior label, but
-                          // the first/last tick sits right at the plot's own
-                          // edge, so a centered multi-character label (e.g.
-                          // "May 2019") spills half its width past the
-                          // chart's bounds and gets clipped by the Card's
-                          // clipBehavior. Reserve extra width to one side
-                          // and anchor the text to the inward edge of that
-                          // instead, so it grows inward from the tick
-                          // rather than off the edge.
-                          final isFirst = idx == 0;
-                          if (!isFirst && !isLast) {
-                            return Padding(padding: const EdgeInsets.only(top: 6), child: text);
-                          }
                           return Padding(
                             padding: const EdgeInsets.only(top: 6),
-                            child: SizedBox(
-                              width: 64,
-                              child: Align(
-                                alignment: isFirst ? Alignment.centerLeft : Alignment.centerRight,
-                                child: text,
-                              ),
+                            child: Text(
+                              _axisLabel(dates[idx]),
+                              style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
                             ),
                           );
                         },

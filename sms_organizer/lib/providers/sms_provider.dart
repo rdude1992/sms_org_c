@@ -775,6 +775,23 @@ class SmsProvider extends ChangeNotifier {
     return ok;
   }
 
+  /// Re-sends a message whose [SmsMessage.sendState] is
+  /// [OutgoingSendState.failed] — the radio never got it in the first place,
+  /// so this is a plain resend rather than something that could double-
+  /// deliver to the recipient (contrast [OutgoingSendState.notDelivered],
+  /// where it did send and a resend risks exactly that — no retry offered
+  /// for that state, see MessageBubble). Drops the failed row first so it
+  /// doesn't linger alongside the new attempt.
+  Future<bool> retrySend(SmsMessage message) async {
+    int? subscriptionId;
+    if (message.simSlot != null) {
+      final sim = _activeSims.where((s) => s.slotIndex == message.simSlot);
+      if (sim.isNotEmpty) subscriptionId = sim.first.subscriptionId;
+    }
+    await _platform.deleteMessages([message.id]);
+    return sendSms(message.address, message.body, subscriptionId: subscriptionId);
+  }
+
   Future<void> saveDraft(String address, String body, {int? existingId}) async {
     await _platform.saveDraft(address, body, existingId: existingId);
     await refresh();

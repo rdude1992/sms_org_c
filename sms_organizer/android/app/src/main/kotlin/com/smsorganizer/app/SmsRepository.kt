@@ -1,5 +1,6 @@
 package com.smsorganizer.app
 
+import android.app.PendingIntent
 import android.app.role.RoleManager
 import android.content.ContentValues
 import android.content.Context
@@ -41,7 +42,8 @@ object SmsRepository {
         Telephony.Sms.DATE_SENT,
         Telephony.Sms.TYPE, // 1=inbox, 2=sent, 3=draft, 4=outbox, 5=failed, 6=queued
         Telephony.Sms.READ,
-        Telephony.Sms.SEEN
+        Telephony.Sms.SEEN,
+        Telephony.Sms.STATUS // -1=none, 0=complete/delivered, 32=pending, 64=failed
     )
 
     /**
@@ -89,6 +91,7 @@ object SmsRepository {
                         "type" to it.getInt(it.getColumnIndexOrThrow(Telephony.Sms.TYPE)),
                         "read" to (it.getInt(it.getColumnIndexOrThrow(Telephony.Sms.READ)) == 1),
                         "seen" to (it.getInt(it.getColumnIndexOrThrow(Telephony.Sms.SEEN)) == 1),
+                        "status" to it.getInt(it.getColumnIndexOrThrow(Telephony.Sms.STATUS)),
                         // 0-based slot index (0="SIM 1", 1="SIM 2"), or -1 if
                         // unknown (permission not granted, single-SIM device,
                         // or the SIM that sent/received this has since been
@@ -103,30 +106,100 @@ object SmsRepository {
 
     /**
      * Sends an SMS and, since a default SMS app is responsible for its own
-     * "Sent" record (the system does not insert it automatically), writes the
-     * sent message into content://sms/sent ourselves.
+     * status in content://sms (the system does not insert or update it
+     * automatically), writes the message ourselves — first as Outbox/
+     * pending, then promotes it to Sent/Failed once SmsSendStatusReceiver
+     * hears back from the radio for every part, and again to Delivered/
+     * (delivery-)Failed if/when the carrier's delivery report arrives. See
+     * SmsSendStatusReceiver.kt for the PendingIntent plumbing.
      *
      * [subscriptionId] picks which SIM sends it on a dual-SIM device — null
      * (or omitted) uses the device's default SmsManager, same as before this
      * parameter existed.
+     *
+     * Returns the inserted row's id (for [SmsSendStatusReceiver] to key its
+     * tracking on), or -1 if the row couldn't be written — the send is still
+     * attempted either way, it just won't have a status to update.
      */
-    fun sendSms(context: Context, address: String, body: String, subscriptionId: Int? = null) {
+    fun sendSms(context: Context, address: String, body: String, subscriptionId: Int? = null): Long {
         val smsManager = SimRepository.smsManagerFor(context, subscriptionId)
-
         val parts = smsManager.divideMessage(body)
-        smsManager.sendMultipartTextMessage(address, null, parts, null, null)
 
+        // Inserted via the base content://sms URI (not /sent, as before) —
+        // unlike the Inbox/Sent/Draft convenience URIs, it doesn't force a
+        // particular TYPE, so the row can start as Outbox/pending and only
+        // become Sent once actually confirmed, while still getting the same
+        // automatic thread_id assignment those convenience URIs give.
         val values = ContentValues().apply {
             put(Telephony.Sms.ADDRESS, address)
             put(Telephony.Sms.BODY, body)
             put(Telephony.Sms.DATE, System.currentTimeMillis())
             put(Telephony.Sms.READ, 1)
-            put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
+            put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_OUTBOX)
+            put(Telephony.Sms.STATUS, Telephony.Sms.STATUS_PENDING)
             if (subscriptionId != null && subscriptionId >= 0) {
                 put(COLUMN_SUB_ID, subscriptionId)
             }
         }
-        context.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
+        val uri = context.contentResolver.insert(Telephony.Sms.CONTENT_URI, values)
+        val rowId = uri?.lastPathSegment?.toLongOrNull() ?: -1L
+
+        if (rowId == -1L) {
+            // Couldn't record the row — still attempt the actual send so the
+            // message goes out; it just won't show up as "Sending..."/get a
+            // status in this app's own list, since there's no row to update.
+            smsManager.sendMultipartTextMessage(address, null, parts, null, null)
+            return rowId
+        }
+
+        try {
+            SmsSendStatusReceiver.beginTracking(rowId, parts.size)
+            val sentIntents = ArrayList<PendingIntent>(parts.size)
+            val deliveryIntents = ArrayList<PendingIntent>(parts.size)
+            for (i in parts.indices) {
+                sentIntents.add(SmsSendStatusReceiver.sentPendingIntent(context, rowId, i))
+                deliveryIntents.add(SmsSendStatusReceiver.deliveredPendingIntent(context, rowId, i))
+            }
+            smsManager.sendMultipartTextMessage(address, null, parts, sentIntents, deliveryIntents)
+        } catch (e: Exception) {
+            // The radio call itself failed synchronously (no SIM, permission
+            // revoked mid-session, etc.) — the async sent-report callback
+            // above will never fire in this case, so mark it failed here
+            // instead of leaving the row stuck showing "Sending..." forever.
+            markSentResult(context, rowId, success = false)
+            throw e
+        }
+        return rowId
+    }
+
+    /** Called by SmsSendStatusReceiver once every part's "handed to radio" report is in. */
+    fun markSentResult(context: Context, rowId: Long, success: Boolean) {
+        val values = ContentValues().apply {
+            put(
+                Telephony.Sms.TYPE,
+                if (success) Telephony.Sms.MESSAGE_TYPE_SENT else Telephony.Sms.MESSAGE_TYPE_FAILED
+            )
+            // A send failure has no later delivery report to wait for.
+            if (!success) put(Telephony.Sms.STATUS, Telephony.Sms.STATUS_FAILED)
+        }
+        context.contentResolver.update(
+            Uri.withAppendedPath(Telephony.Sms.CONTENT_URI, rowId.toString()), values, null, null
+        )
+    }
+
+    /**
+     * Called by SmsSendStatusReceiver once every part's delivery report is
+     * in — only fires at all for carriers that actually send one; otherwise
+     * the row simply stays at STATUS_PENDING (reads as "Sent", not
+     * "Delivered") forever, which is the correct real-world behaviour.
+     */
+    fun markDeliveryResult(context: Context, rowId: Long, delivered: Boolean) {
+        val values = ContentValues().apply {
+            put(Telephony.Sms.STATUS, if (delivered) Telephony.Sms.STATUS_COMPLETE else Telephony.Sms.STATUS_FAILED)
+        }
+        context.contentResolver.update(
+            Uri.withAppendedPath(Telephony.Sms.CONTENT_URI, rowId.toString()), values, null, null
+        )
     }
 
     /** Insert or update a draft. Pass [existingId] to overwrite a previous draft. */

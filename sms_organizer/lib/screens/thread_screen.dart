@@ -47,6 +47,15 @@ class _ThreadScreenState extends State<ThreadScreen> {
   int? _highlightedId;
   bool _didInitialScroll = false;
 
+  // Every message id this screen has already rendered at least once —
+  // seeded with the whole thread on the first build, then grown as new
+  // messages (sent or received) show up. MessageBubble.isNew is driven off
+  // membership here rather than off e.g. "was this created in the last N
+  // seconds", so a message doesn't replay its entrance animation just
+  // because a provider refresh rebuilt this screen while it's still fresh.
+  final Set<int> _seenIds = {};
+  bool _seenInitialized = false;
+
   int? _selectedSubscriptionId;
   bool _simInitialized = false;
 
@@ -165,6 +174,18 @@ class _ThreadScreenState extends State<ThreadScreen> {
         final canReply = isPhoneNumberAddress(conversation.address);
         final messages = conversation.messages.reversed.toList(); // oldest first for chat view
 
+        // Marks every message already in the thread as "seen" the first
+        // time this screen builds, so opening a long conversation doesn't
+        // play an entrance animation for its entire history — only a
+        // message that shows up afterwards (this reply, or one that just
+        // arrived) counts as new. Safe to mutate here (not via setState):
+        // it doesn't need to trigger a rebuild of its own, just be in place
+        // before the itemBuilder below runs for this same build.
+        if (!_seenInitialized) {
+          _seenIds.addAll(messages.map((m) => m.id));
+          _seenInitialized = true;
+        }
+
         _loadDraftIfNeeded(provider);
 
         // Land on the highlighted message if the thread was opened from a
@@ -265,6 +286,11 @@ class _ThreadScreenState extends State<ThreadScreen> {
                     final selected = provider.selectedIds.contains(m.id);
                     final showDateSeparator =
                         index == 0 || !Formatters.isSameDay(messages[index - 1].date, m.date);
+                    // Set.add returns true only the first time an id is
+                    // seen — every later build for the same message (e.g.
+                    // its status changing from sending to sent) reports
+                    // false, so the entrance animation never replays.
+                    final isNew = _seenIds.add(m.id);
                     return Column(
                       children: [
                         if (showDateSeparator) DateSeparator(date: m.date),
@@ -274,6 +300,10 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           selectionMode: provider.isSelecting,
                           highlighted: m.id == _highlightedId,
                           starred: provider.isStarred(m.id),
+                          isNew: isNew,
+                          onRetry: m.sendState == OutgoingSendState.failed
+                              ? () => provider.retrySend(m)
+                              : null,
                           onTap: () {
                             if (provider.isSelecting) provider.toggleSelected(m.id);
                           },

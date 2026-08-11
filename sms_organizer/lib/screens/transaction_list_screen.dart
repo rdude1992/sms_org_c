@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
+import '../utils/formatters.dart';
 import '../widgets/assign_instrument_sheet.dart';
 import '../widgets/category_picker_sheet.dart';
 import '../widgets/search_toggle_mixin.dart';
@@ -97,6 +98,16 @@ class _TransactionListScreenState extends State<TransactionListScreen>
   /// preference.
   bool _allExpanded = false;
   void _toggleAllExpanded() => setState(() => _allExpanded = !_allExpanded);
+
+  /// Dense, bank-statement-style rows (date · name · colored amount,
+  /// grouped under a sticky month header) — the default here since a
+  /// drilldown is usually opened to scan a lot of rows at once; the toggle
+  /// switches to the avatar+subtitle ListTile when a row's extra detail
+  /// (instrument, spend category, "manually edited" flag, ...) is actually
+  /// needed. Local/ephemeral like [_allExpanded], not worth persisting as a
+  /// preference.
+  bool _compact = true;
+  void _toggleCompact() => setState(() => _compact = !_compact);
 
   /// Per-row expansion, toggled by tapping a tile's own avatar (see
   /// TransactionTile.onToggleExpand) — separate from [_allExpanded] so
@@ -273,10 +284,16 @@ class _TransactionListScreenState extends State<TransactionListScreen>
               ],
             ),
             IconButton(
-              icon: Icon(_allExpanded ? Icons.unfold_less : Icons.unfold_more),
-              tooltip: _allExpanded ? 'Collapse all' : 'Expand all',
-              onPressed: _toggleAllExpanded,
+              icon: Icon(_compact ? Icons.view_agenda_outlined : Icons.table_rows_outlined),
+              tooltip: _compact ? 'Detailed view' : 'Compact view',
+              onPressed: _toggleCompact,
             ),
+            if (!_compact)
+              IconButton(
+                icon: Icon(_allExpanded ? Icons.unfold_less : Icons.unfold_more),
+                tooltip: _allExpanded ? 'Collapse all' : 'Expand all',
+                onPressed: _toggleAllExpanded,
+              ),
             ...searchAppBarActions(),
           ];
 
@@ -331,6 +348,7 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                 allExpanded: _allExpanded,
                 expandedIds: _expandedIds,
                 onToggleExpanded: _toggleExpanded,
+                compact: _compact,
               ),
             ),
           ],
@@ -386,6 +404,7 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                           allExpanded: _allExpanded,
                           expandedIds: _expandedIds,
                           onToggleExpanded: _toggleExpanded,
+                          compact: _compact,
                         ),
                         _TransactionListView(
                           transactions: credited,
@@ -396,6 +415,7 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                           allExpanded: _allExpanded,
                           expandedIds: _expandedIds,
                           onToggleExpanded: _toggleExpanded,
+                          compact: _compact,
                         ),
                         _TransactionListView(
                           transactions: debited,
@@ -406,6 +426,7 @@ class _TransactionListScreenState extends State<TransactionListScreen>
                           allExpanded: _allExpanded,
                           expandedIds: _expandedIds,
                           onToggleExpanded: _toggleExpanded,
+                          compact: _compact,
                         ),
                       ],
                     ),
@@ -426,6 +447,7 @@ class _TransactionListView extends StatelessWidget {
   final bool allExpanded;
   final Set<int> expandedIds;
   final ValueChanged<int> onToggleExpanded;
+  final bool compact;
 
   const _TransactionListView({
     required this.transactions,
@@ -436,6 +458,7 @@ class _TransactionListView extends StatelessWidget {
     required this.allExpanded,
     required this.expandedIds,
     required this.onToggleExpanded,
+    required this.compact,
   });
 
   @override
@@ -449,23 +472,117 @@ class _TransactionListView extends StatelessWidget {
     // Inbox/Insights lists — no separate reload needed here.
     return RefreshIndicator(
       onRefresh: context.read<SmsProvider>().refresh,
-      child: ListView.builder(
-        physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: transactions.length,
-        itemBuilder: (context, index) {
-          final t = transactions[index];
-          return TransactionTile(
-            transaction: t,
-            selected: selectedIds.contains(t.smsId),
-            selectionMode: selecting,
-            onTap: selecting ? () => onToggleSelected(t.smsId) : null,
-            onLongPress: selecting ? () => onToggleSelected(t.smsId) : null,
-            onSelectStart: () => onToggleSelected(t.smsId),
-            expanded: allExpanded || expandedIds.contains(t.smsId),
-            onToggleExpand: selecting ? null : () => onToggleExpanded(t.smsId),
-          );
-        },
+      child: compact ? _buildCompact(context) : _buildDetailed(context),
+    );
+  }
+
+  Widget _buildDetailed(BuildContext context) {
+    return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      itemCount: transactions.length,
+      itemBuilder: (context, index) {
+        final t = transactions[index];
+        return TransactionTile(
+          transaction: t,
+          selected: selectedIds.contains(t.smsId),
+          selectionMode: selecting,
+          onTap: selecting ? () => onToggleSelected(t.smsId) : null,
+          onLongPress: selecting ? () => onToggleSelected(t.smsId) : null,
+          onSelectStart: () => onToggleSelected(t.smsId),
+          expanded: allExpanded || expandedIds.contains(t.smsId),
+          onToggleExpand: selecting ? null : () => onToggleExpanded(t.smsId),
+        );
+      },
+    );
+  }
+
+  /// Month-grouped header rendering of [TransactionTile.compact] — mirrors
+  /// the Inbox's day-header list (see _StickyMessageList in
+  /// inbox_screen.dart), just grouped by month instead of by day since a
+  /// bank-statement-style scan benefits from coarser sections. Assumes
+  /// [transactions] is already contiguous by month, which holds for the
+  /// screen's date-based sort orders (newest/oldest first); under a
+  /// value-based sort the same month can recur in more than one group —
+  /// a cosmetic quirk, not a correctness issue, since every transaction
+  /// still appears exactly once.
+  Widget _buildCompact(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final groups = _groupTransactionsByMonth(transactions);
+    final slivers = <Widget>[
+      for (final group in groups) ...[
+        SliverPersistentHeader(
+          pinned: false,
+          delegate: _MonthHeaderDelegate(label: Formatters.monthYear(group.month)),
+        ),
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              final t = group.items[index];
+              return Column(
+                children: [
+                  TransactionTile(
+                    transaction: t,
+                    compact: true,
+                    selected: selectedIds.contains(t.smsId),
+                    selectionMode: selecting,
+                    onTap: selecting ? () => onToggleSelected(t.smsId) : null,
+                    onLongPress: selecting ? () => onToggleSelected(t.smsId) : null,
+                    onSelectStart: () => onToggleSelected(t.smsId),
+                  ),
+                  Divider(height: 1, thickness: 1, color: scheme.outlineVariant.withOpacity(0.4)),
+                ],
+              );
+            },
+            childCount: group.items.length,
+          ),
+        ),
+      ],
+    ];
+    return CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: slivers);
+  }
+}
+
+class _MonthGroup {
+  final DateTime month;
+  final List<Transaction> items;
+  _MonthGroup(this.month, this.items);
+}
+
+List<_MonthGroup> _groupTransactionsByMonth(List<Transaction> transactions) {
+  final groups = <_MonthGroup>[];
+  for (final t in transactions) {
+    if (groups.isNotEmpty && groups.last.month.year == t.date.year && groups.last.month.month == t.date.month) {
+      groups.last.items.add(t);
+    } else {
+      groups.add(_MonthGroup(DateTime(t.date.year, t.date.month), [t]));
+    }
+  }
+  return groups;
+}
+
+class _MonthHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final String label;
+  const _MonthHeaderDelegate({required this.label});
+
+  @override
+  double get minExtent => 40;
+  @override
+  double get maxExtent => 40;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: scheme.onSurface),
       ),
     );
   }
+
+  @override
+  bool shouldRebuild(covariant _MonthHeaderDelegate oldDelegate) => oldDelegate.label != label;
 }
