@@ -1,9 +1,13 @@
-import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 
 /// Thin wrapper around the local_auth plugin — biometric (fingerprint/face)
 /// or device-credential (PIN/pattern/password) authentication, used to gate
 /// the Insights tab when SecuritySettingsProvider.lockEnabled is on.
+///
+/// local_auth 3.x throws [LocalAuthException] (not `PlatformException`) for
+/// failures, and folded the old `AuthenticationOptions` wrapper into direct
+/// named parameters on [authenticate] — `stickyAuth` was also renamed
+/// `persistAcrossBackgrounding`.
 class BiometricAuthService {
   final LocalAuthentication _auth = LocalAuthentication();
 
@@ -16,7 +20,7 @@ class BiometricAuthService {
   Future<bool> get isSupported async {
     try {
       return await _auth.isDeviceSupported();
-    } on PlatformException {
+    } on LocalAuthException {
       return false;
     }
   }
@@ -29,15 +33,13 @@ class BiometricAuthService {
     try {
       return await _auth.authenticate(
         localizedReason: reason,
-        options: const AuthenticationOptions(
-          // Falls back to device PIN/pattern/password when no biometric is
-          // enrolled — Insights would otherwise be permanently inaccessible
-          // on a device with a screen lock but no fingerprint/face set up.
-          biometricOnly: false,
-          stickyAuth: true,
-        ),
+        // Falls back to device PIN/pattern/password when no biometric is
+        // enrolled — Insights would otherwise be permanently inaccessible
+        // on a device with a screen lock but no fingerprint/face set up.
+        biometricOnly: false,
+        persistAcrossBackgrounding: true,
       );
-    } on PlatformException {
+    } on LocalAuthException {
       return false;
     }
   }
