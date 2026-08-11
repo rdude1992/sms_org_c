@@ -19,8 +19,9 @@ there) once `flutter pub get` and Gradle actually run against it.
 ## Setup
 
 1. Install Flutter (stable channel) and Android Studio / an Android SDK.
-2. `cp android/local.properties.example android/local.properties` and edit
-   the paths to match your machine.
+2. Create `android/local.properties` (git-ignored, not checked in) with
+   `sdk.dir=<path to your Android SDK>` and `flutter.sdk=<path to your
+   Flutter SDK>`.
 3. Open the project in Android Studio once (or run `flutter pub get`) — this
    regenerates `gradlew`, `gradlew.bat`, and `gradle-wrapper.jar`, which
    couldn't be included here since they're binary/network-fetched files.
@@ -66,23 +67,31 @@ android/app/src/main/kotlin/com/smsorganizer/app/
   ContactsRepository.kt     Reads device contacts (name + number) for name resolution
 
 lib/
-  models/                  SmsMessage, SmsConversation, Transaction, InvestmentEvent, SmsCategory
+  models/                  SmsMessage, SmsConversation, Transaction, InvestmentEvent,
+                            SmsCategory, SpendCategory, InstrumentType, EntityType
   services/
-    sms_platform_service.dart      Dart-side channel wrapper
-    categorization_service.dart    Regex classifier → personal/promo/txn/otp
+    sms_platform_service.dart       Dart-side channel wrapper
+    categorization_service.dart     Regex classifier → personal/promo/txn/otp/updates
     transaction_parser_service.dart Extracts amount/direction/instrument/issuer/balance
-    insights_service.dart          Aggregates into totals/monthly/per-instrument summaries
-    database_service.dart          sqflite cache of categories + parsed data
-    backup_service.dart            JSON export/share + restore
-    contact_service.dart           Phone-number-to-name lookup, built once from device contacts
-    notification_service.dart      flutter_local_notifications wrapper, one channel per category
-    notification_preferences_service.dart  Persists muted categories
+    spend_category_detector.dart    Best-effort auto-tagging of Transaction.spendCategory
+    insights_service.dart           Aggregates into totals/trend/per-instrument/per-category summaries
+    database_service.dart           sqflite cache of categories + parsed data
+    backup_service.dart             JSON export/share + restore
+    contact_service.dart            Phone-number-to-name lookup, built once from device contacts
+    notification_preferences_service.dart  Persists muted categories (notifications
+                                            themselves are fully native — see below)
+    biometric_auth_service.dart     Fingerprint/face/PIN gate for the Insights tab
   providers/               SmsProvider (app state), ThemeProvider (dark mode),
-                            NotificationSettingsProvider (per-category mute switches)
-  screens/                 Onboarding, Home (bottom nav), Inbox (chat/list toggle),
-                            Thread, Compose, Insights, Settings
-  widgets/                 Conversation tile, message bubble, category badge,
-                            multi-select app bar, transaction tile
+                            NotificationSettingsProvider (per-category mute switches),
+                            SecuritySettingsProvider (Insights biometric lock)
+  screens/                 Onboarding, Home (bottom nav), Inbox (chat/list toggle), Thread,
+                            Compose, Insights (+ instrument/investment/merchant/transaction
+                            drilldowns, uncategorised-transactions review), Settings,
+                            Starred, Drafts
+  widgets/                 Conversation tile, message bubble, category badge, direction badge,
+                            multi-select app bar, transaction tile (+ its edit/assign-account/
+                            detected-SMS sheets), investment tile (+ its edit sheet),
+                            category picker sheet
 ```
 
 ## Contact name resolution
@@ -191,6 +200,16 @@ notes if you're porting further updates from the source later.
   account even though the SMS says "credited" (to the fund, not the
   user's cash), and NPS Tier 1/2 naming.
 
+- **PPF/SSY/NPS self-transfers** get their own `InstrumentType.investment`
+  (`TransactionParserService._instrumentType`), separate from the generic
+  `bankAccount` type, so a small-savings-scheme sub-account shows up as its
+  own row in the Cards & Accounts "Investments" section instead of being
+  lumped in with a regular bank account. The direction detector
+  (`getTransactionType` in `sms_extractors.dart`) also special-cases
+  "Rs.X transferred to your PPF/SSY A/c ..." as a debit — on its own that
+  phrasing reads like an incoming transfer ("to your ... A/c"), even though
+  it's really money leaving the linked bank account into a locked scheme.
+
 - **OTP messages** now also extract the actual code (`extractOtp`) and
   surface a tap-to-copy button in the thread view (`MessageBubble`) —
   computed on demand per rendered message rather than cached, since it's
@@ -200,6 +219,19 @@ notes if you're porting further updates from the source later.
   "Meal Wallet" don't collapse into a generic bucket just because they're
   both wallet-entity transactions with no card number), falling back to
   instrument + issuer + masked reference otherwise.
+
+- **`SpendCategory` (what a transaction was *for* — Food, Shopping,
+  Investment, ...) is a separate axis from `InstrumentType`/`EntityType`
+  above, and Insights' "By spend category" breakdown
+  (`InsightsService.groupBySpendCategory`) is debit-only by design** — it
+  skips credits and reversals before bucketing, so a credit auto-tagged
+  "Income" (salary/interest/dividend keywords, `spend_category_detector.dart`)
+  never appears there. Its "Uncategorised spend" row/slice only ever
+  reflects untagged *debits* within the selected date range; every
+  untagged transaction regardless of direction or range — the full
+  tagging backlog — lives in Settings → "Review uncategorised
+  transactions" instead. The two screens intentionally count different
+  things; don't "fix" one to match the other without re-reading both.
 
 - All of this is still **regex/keyword-based, not ML**. It'll work
   reasonably well on common Indian bank SMS formats out of the box, but
