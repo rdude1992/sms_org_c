@@ -13,7 +13,6 @@ import 'instrument_list_screen.dart';
 import 'investment_list_screen.dart';
 import 'merchant_list_screen.dart';
 import 'transaction_list_screen.dart';
-import 'uncategorised_review_screen.dart';
 
 /// `custom` covers a user-picked (via showDateRangePicker) arbitrary span —
 /// unlike the other four, it has no fixed formula for its bounds/label/
@@ -481,25 +480,27 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 // merchant — there are at most 13 spend categories
                                 // total (see SpendCategory), so the full list is
                                 // always short enough to show inline.
+                                // Every row here — Uncategorised included — only ever
+                                // counts debits (see SpendCategorySummary), so the
+                                // drilldown filters the same way: tapping a row always
+                                // lands on exactly the transactions its own count
+                                // covers, instead of Uncategorised jumping to the
+                                // full, every-direction backlog in Settings.
                                 ...summary.byCategory.map(
                                   (c) => _SpendCategoryRow(
                                     summary: c,
-                                    onTap: c.category == null
-                                        ? () => Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (_) => const UncategorisedReviewScreen(),
-                                              ),
-                                            )
-                                        : () => _openDrilldown(
-                                              context,
-                                              title: c.displayName,
-                                              subtitle: _effectiveLabel,
-                                              transactions: filteredTransactions
-                                                  .where((t) => t.spendCategory == c.category)
-                                                  .toList(),
-                                              matches: (t) => t.spendCategory == c.category,
-                                            ),
+                                    onTap: () => _openDrilldown(
+                                      context,
+                                      title: c.displayName,
+                                      subtitle: _effectiveLabel,
+                                      transactions: filteredTransactions
+                                          .where((t) =>
+                                              t.spendCategory == c.category &&
+                                              t.direction == TxnDirection.debit)
+                                          .toList(),
+                                      matches: (t) =>
+                                          t.spendCategory == c.category && t.direction == TxnDirection.debit,
+                                    ),
                                   ),
                                 ),
                               const SizedBox(height: 24),
@@ -1054,19 +1055,16 @@ class _SpendCategoryDonut extends StatelessWidget {
       centerLabel: 'spend',
       onTapKey: (key) {
         final match = categories.firstWhere((c) => c.key == key);
-        if (match.category == null) {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => const UncategorisedReviewScreen()));
-          return;
-        }
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) => TransactionListScreen(
               title: match.displayName,
               subtitle: rangeLabel,
-              transactions:
-                  filteredTransactions.where((t) => t.spendCategory == match.category).toList(),
-              matches: (t) => t.spendCategory == match.category,
+              transactions: filteredTransactions
+                  .where((t) => t.spendCategory == match.category && t.direction == TxnDirection.debit)
+                  .toList(),
+              matches: (t) => t.spendCategory == match.category && t.direction == TxnDirection.debit,
             ),
           ),
         );

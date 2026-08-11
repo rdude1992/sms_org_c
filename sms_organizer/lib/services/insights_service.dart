@@ -149,7 +149,12 @@ class SpendCategorySummary {
   /// [InstrumentSummary.key]/[MerchantSummary.key].
   String get key => category?.name ?? '_uncategorised';
 
-  String get displayName => category?.label ?? 'Uncategorised';
+  /// "Uncategorised spend", not just "Uncategorised" — this bucket only
+  /// ever holds debits (see the class doc above), and credits/reversals
+  /// left uncategorised show up in Settings' "Review uncategorised
+  /// transactions" backlog instead, so the two shouldn't read as the same
+  /// count.
+  String get displayName => category?.label ?? 'Uncategorised spend';
 }
 
 class InsightsSummary {
