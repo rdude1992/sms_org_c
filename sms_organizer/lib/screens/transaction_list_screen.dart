@@ -100,11 +100,13 @@ class _TransactionListScreenState extends State<TransactionListScreen>
   void _toggleAllExpanded() => setState(() => _allExpanded = !_allExpanded);
 
   /// Dense, bank-statement-style rows (date · name · colored amount,
-  /// grouped under a sticky month header) instead of the default
-  /// avatar+subtitle ListTile — a quick way to scan a long drilldown
-  /// without each row's extra detail. Local/ephemeral like [_allExpanded],
-  /// not worth persisting as a preference.
-  bool _compact = false;
+  /// grouped under a sticky month header) — the default here since a
+  /// drilldown is usually opened to scan a lot of rows at once; the toggle
+  /// switches to the avatar+subtitle ListTile when a row's extra detail
+  /// (instrument, spend category, "manually edited" flag, ...) is actually
+  /// needed. Local/ephemeral like [_allExpanded], not worth persisting as a
+  /// preference.
+  bool _compact = true;
   void _toggleCompact() => setState(() => _compact = !_compact);
 
   /// Per-row expansion, toggled by tapping a tile's own avatar (see
