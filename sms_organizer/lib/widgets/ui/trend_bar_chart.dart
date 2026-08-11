@@ -144,7 +144,7 @@ class TrendBarChart extends StatelessWidget {
                   barTouchData: BarTouchData(
                     touchCallback: handleTap,
                     touchTooltipData: BarTouchTooltipData(
-                      tooltipRoundedRadius: 8,
+                      tooltipBorderRadius: BorderRadius.circular(8),
                       tooltipPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       getTooltipColor: (_) => scheme.onSurface,
                       getTooltipItem: (group, groupIndex, rod, rodIndex) {
