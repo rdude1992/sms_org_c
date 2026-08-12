@@ -468,6 +468,19 @@ class InvestmentEvent {
 
   String get providerDisplayName => (amc ?? fundOrScheme ?? 'Other').trim();
 
+  /// Groups investment events into a single *holding* — same AMC + fund/
+  /// scheme + folio/account — for NAV/units/current-value tracking, which
+  /// [providerGroupKey] is too coarse for: two folios of the same fund (or
+  /// two different funds under one AMC) have different unit counts and can
+  /// carry different NAV histories, so netting them together would produce
+  /// a meaningless "units held" figure. Falls back to [providerGroupKey]
+  /// when nothing distinguishes events further, so a fund with only one
+  /// folio (or none detected) still nets normally.
+  String get holdingGroupKey {
+    final folioPart = (folioOrAccount ?? '').trim().toLowerCase();
+    return '$providerGroupKey|${(fundOrScheme ?? '').trim().toLowerCase()}|$folioPart';
+  }
+
   Map<String, dynamic> toJson() => {
         'smsId': smsId,
         'date': date.millisecondsSinceEpoch,

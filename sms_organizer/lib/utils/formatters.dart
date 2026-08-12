@@ -12,9 +12,14 @@ class Formatters {
   static final _fullDate = DateFormat('d MMM yyyy, h:mm a');
   static final _monthYear = DateFormat('MMM yyyy');
   static final _monthYearShort = DateFormat('MMM yy');
+  static final _units = NumberFormat('#,##0.###', 'en_IN');
 
   static String currency(double value) => _currency.format(value);
   static String currencyPrecise(double value) => _currencyPrecise.format(value);
+
+  /// Plain (non-currency) number with up to 3 decimal places — mutual fund
+  /// unit counts, which are fractional but don't carry a ₹ symbol.
+  static String units(double value) => _units.format(value);
   static String monthYear(DateTime date) => _monthYear.format(date);
   /// e.g. "Aug 25" — TrendBarChart's x-axis tick labels, where the full
   /// 4-digit year (see [monthYear], still used for drilldown titles/

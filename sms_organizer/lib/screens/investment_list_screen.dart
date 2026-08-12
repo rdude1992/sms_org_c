@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
+import '../services/holdings_service.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/category_picker_sheet.dart';
@@ -11,8 +12,11 @@ import '../widgets/search_toggle_mixin.dart';
 import '../widgets/ui/breakdown_donut.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/filter_chip_bar.dart';
+import '../widgets/ui/gain_loss_stat.dart';
 import '../widgets/ui/total_stat.dart';
 import '../widgets/ui/trend_bar_chart.dart';
+import '../widgets/ui/trend_line_chart.dart';
+import 'amc_detail_screen.dart';
 
 /// Sort options for the Invested/Redeemed/All tabs — mirrors
 /// TransactionListScreen's `_SortBy`.
@@ -739,11 +743,10 @@ class _AmcAnalytics extends StatelessWidget {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => InvestmentListScreen(
-            investments: match.events,
+          builder: (_) => AmcDetailScreen(
+            providerKey: match.key,
+            providerName: match.name,
             allInvestments: allInvestments,
-            subtitle: match.name,
-            initialTabIndex: 3,
           ),
         ),
       );
@@ -809,6 +812,40 @@ class _AmcAnalytics extends StatelessWidget {
       );
     }
 
+    // Holdings are reconstructed from the true unscoped dataset (not
+    // [filtered]) so units-held/current-value reflect the real current
+    // position regardless of which range chip is selected above — the range
+    // only zooms the value trend chart's x-axis window, same as
+    // AmcDetailScreen. See holdings_service.dart.
+    final holdings = computeFundHoldings(allInvestments);
+    final totalInvested = holdings.fold<double>(0, (a, h) => a + h.netInvested);
+    final totalValue = holdings.fold<double>(0, (a, h) => a + h.estimatedValue);
+    final totalGain = totalValue - totalInvested;
+    final totalGainPct = totalInvested <= 0 ? null : (totalGain / totalInvested) * 100;
+    final valueTrend = buildValueTrend(holdings, range.trendGranularity, from, to);
+
+    String valueAxisLabel(DateTime date) {
+      switch (range.trendGranularity) {
+        case TrendGranularity.day:
+          return Formatters.dayOnly(date);
+        case TrendGranularity.week:
+          return Formatters.dayMonth(date);
+        case TrendGranularity.month:
+          return Formatters.monthYearShort(date);
+      }
+    }
+
+    String valueTooltipLabel(DateTime date) {
+      switch (range.trendGranularity) {
+        case TrendGranularity.day:
+          return Formatters.dayOnly(date);
+        case TrendGranularity.week:
+          return Formatters.dayMonth(date);
+        case TrendGranularity.month:
+          return Formatters.monthYear(date);
+      }
+    }
+
     return [
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -835,6 +872,50 @@ class _AmcAnalytics extends StatelessWidget {
           primaryColor: scheme.primary,
           secondaryColor: const Color(0xFFF59E0B),
           onTapBucket: openBucket,
+        ),
+      ),
+      const SizedBox(height: 16),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          children: [
+            Expanded(child: TotalStat(label: 'Invested', value: totalInvested, color: scheme.primary)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TotalStat(label: 'Est. current value', value: totalValue, color: scheme.onSurface),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: GainLossStat(gain: totalGain, gainPct: totalGainPct)),
+          ],
+        ),
+      ),
+      const SizedBox(height: 6),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child:
+            Text(kInvestmentEstimateNote, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+      ),
+      const SizedBox(height: 10),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: TrendLineChart(
+          dates: [for (final p in valueTrend) p.date],
+          series: [
+            TrendLineSeries(
+              label: 'Invested',
+              color: scheme.primary,
+              values: [for (final p in valueTrend) p.invested],
+            ),
+            TrendLineSeries(
+              label: 'Est. value',
+              color: kGainColor,
+              values: [for (final p in valueTrend) p.value],
+            ),
+          ],
+          axisLabelBuilder: valueAxisLabel,
+          tooltipDateBuilder: valueTooltipLabel,
+          valueFormatter: Formatters.currency,
+          axisValueFormatter: Formatters.compactCurrency,
         ),
       ),
       const SizedBox(height: 8),
@@ -880,11 +961,10 @@ class _ProviderRow extends StatelessWidget {
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => InvestmentListScreen(
-            investments: p.events,
+          builder: (_) => AmcDetailScreen(
+            providerKey: p.key,
+            providerName: p.name,
             allInvestments: allInvestments,
-            subtitle: p.name,
-            initialTabIndex: 3,
           ),
         ),
       ),

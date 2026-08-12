@@ -205,6 +205,22 @@ notes if you're porting further updates from the source later.
   account even though the SMS says "credited" (to the fund, not the
   user's cash), and NPS Tier 1/2 naming.
 
+- **Estimated fund value, NAV/units trend, and SIP detection**
+  (`holdings_service.dart`) group investment events into per-fund
+  *holdings* — same AMC + fund/scheme + folio/account
+  (`InvestmentEvent.holdingGroupKey`), a finer grouping than the "By AMC"
+  tab's own `providerGroupKey` (AMC only), since two folios of the same
+  fund — or two different funds under one AMC — have independent unit
+  counts and NAV histories. Each holding's units-held and net-invested are
+  reconstructed event-by-event; "estimated current value" is units held ×
+  the most recent NAV any SMS happened to mention (falling back to cost
+  basis when no NAV was ever captured), never a live market quote. The
+  Investments dashboard and the per-AMC drilldown (`AmcDetailScreen`) both
+  chart this — invested vs. estimated value, NAV over time, units over
+  time — and `detectSip` heuristically flags a recurring monthly
+  contribution (same rounded amount recurring across ≥3 distinct months)
+  even when the SMS itself never used the word "SIP".
+
 - **PPF/SSY/NPS self-transfers** get their own `InstrumentType.investment`
   (`TransactionParserService._instrumentType`), separate from the generic
   `bankAccount` type, so a small-savings-scheme sub-account shows up as its
@@ -349,6 +365,14 @@ from the second sync onward.
   it repopulates the app's own cache/insights.
 - **Placeholder app icon.** `res/mipmap-*/ic_launcher.png` are simple
   generated placeholders — swap in real branding before shipping.
+- **"Estimated current value" is only ever as fresh as the last SMS that
+  mentioned a NAV** — there's no live market data feed, so a fund you
+  haven't gotten a purchase/redemption SMS for in months shows a stale NAV
+  with no indication a newer one exists beyond the "as of &lt;date&gt;"
+  label. SIP detection (`detectSip`) is a rounded-amount/≥3-months
+  heuristic, not a flag read from the SMS — a SIP that changed amount
+  partway through, or fewer than 3 installments so far, won't be
+  recognised as recurring.
 - **No release signing config.** `android/app/build.gradle` currently signs
   release builds with the debug key — set up a real `key.properties` /
   keystore before publishing anywhere.
