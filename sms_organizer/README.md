@@ -342,6 +342,22 @@ as a cache now, not just written and ignored:
   under the hood. Bump `CategorizationService.version` yourself if you
   tune the regex enough that old cached results should be considered
   invalid.
+- **`Transaction.spendCategory` has its own, separate version gate** —
+  `SpendCategoryDetector.version`, checked against a `spend_category_version`
+  meta key by `SmsProvider._backfillSpendCategories`, independent of
+  `CategorizationService.version`. This one bit an actual user: a
+  `CategorizationService.version` bump wipes every non-override
+  transaction row (`spend_category` included, since it lives on that row)
+  via `clearAll()`, but `spend_category_version` was untouched by that
+  wipe — so `_backfillSpendCategories` saw its own gate as already
+  satisfied from before and skipped re-tagging the freshly-reparsed
+  transactions, leaving them "Uncategorised" until `SpendCategoryDetector`
+  itself happened to change. `_ensureCacheMatchesCurrentLogic` now also
+  clears `spend_category_version` (via `DatabaseService.deleteMeta`)
+  whenever it wipes for a categorizer bump, and `recalculateAll()` now
+  re-runs the backfill + learned-merchant-rule pass itself instead of just
+  `clearAll()` + `refresh()` — so both the automatic and manual "wipe and
+  redo" paths correctly restore auto-tagged spend categories afterward.
 - Cache entries for messages that no longer exist on-device (deleted since
   the last sync) are pruned during `refresh()` so a stale transaction
   doesn't linger in Insights forever.

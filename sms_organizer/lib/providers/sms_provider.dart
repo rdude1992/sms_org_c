@@ -375,6 +375,17 @@ class SmsProvider extends ChangeNotifier {
 
     await _db.clearAll();
     await _db.setMeta('categorizer_version', currentVersion);
+    // clearAll() just deleted every non-override transaction's
+    // spend_category along with its row. _backfillSpendCategories() below
+    // (called later in initialize()) is the only thing that re-tags those
+    // — but it's gated on its own, unrelated SpendCategoryDetector.version
+    // meta key, which this wipe didn't touch. Left alone, that gate would
+    // still read as "already backfilled" from before this wipe and skip
+    // re-running entirely, leaving every auto-tagged transaction stuck on
+    // "Uncategorised" until SpendCategoryDetector's own logic happens to
+    // change next. Clearing the key forces that pass to treat itself as
+    // never having run, so it actually re-tags the freshly-reparsed data.
+    await _db.deleteMeta('spend_category_version');
   }
 
   /// One-time pass tagging already-cached transactions with a
@@ -617,9 +628,20 @@ class SmsProvider extends ChangeNotifier {
   /// rather than waiting for incremental sync to naturally correct it (it
   /// won't, by design — cached entries are never automatically
   /// re-evaluated once written).
+  ///
+  /// Mirrors initialize()'s post-wipe sequence, not just clearAll()+refresh()
+  /// — clearAll() deletes every non-override transaction's spend_category
+  /// along with its row, and only _backfillSpendCategories/
+  /// _applyMerchantRulesToUncategorised actually refill it. Skipping those
+  /// (as an earlier version of this method did) left every auto-tagged
+  /// transaction stuck "Uncategorised" after a manual recalculate, with no
+  /// way to self-heal short of a full app restart.
   Future<void> recalculateAll() async {
     await _db.clearAll();
+    await _db.deleteMeta('spend_category_version');
     await refresh();
+    await _backfillSpendCategories();
+    await _applyMerchantRulesToUncategorised();
   }
 
   void _listenForIncoming() {

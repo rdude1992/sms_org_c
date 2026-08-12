@@ -414,6 +414,16 @@ class DatabaseService {
     );
   }
 
+  /// Clears a single meta key so the next [getMeta] for it returns null —
+  /// used to force a one-time pass to treat itself as "never run" (see
+  /// SmsProvider._ensureCacheMatchesCurrentLogic forcing
+  /// _backfillSpendCategories to re-run after a wipe) without needing to
+  /// know or fake a specific "stale" version value.
+  Future<void> deleteMeta(String key) async {
+    final db = await database;
+    await db.delete('meta', where: 'key = ?', whereArgs: [key]);
+  }
+
   /// Removes cached derived data for messages that no longer exist on the
   /// device (e.g. deleted since the last sync), so stale transactions don't
   /// linger in Insights forever. Deletes one id at a time via a batch rather
