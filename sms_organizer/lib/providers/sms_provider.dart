@@ -719,6 +719,19 @@ class SmsProvider extends ChangeNotifier {
   /// see TransactionListScreen's multi-select "Set category" action, for
   /// tagging a batch of transactions SpendCategoryDetector left
   /// "Uncategorised" (or got wrong) in one pass instead of one at a time.
+  ///
+  /// Also pins the parent message's category as an override, same as
+  /// [updateTransaction] does — without this, a later
+  /// [DatabaseService.clearAll] wipe (see
+  /// [_ensureCacheMatchesCurrentLogic]) would delete this message's
+  /// `message_categories` row (still `is_override = 0`, since nothing here
+  /// had touched it) even though its `transactions` row correctly survived
+  /// as an override. `refresh()` would then find no cached category for
+  /// it, re-classify and re-parse it from scratch as a brand-new,
+  /// un-tagged `Transaction`, and `saveTransactionsBulk`'s `INSERT OR
+  /// REPLACE` would silently overwrite the still-good override row with
+  /// that blank one — destroying a spend category the user explicitly set,
+  /// not just hiding it.
   Future<void> setSpendCategoryForTransactions(List<int> smsIds, SpendCategory? category) async {
     var ruleChanged = false;
     for (final id in smsIds) {
@@ -727,6 +740,12 @@ class SmsProvider extends ChangeNotifier {
       final updated = _transactions[index].copyWith(spendCategory: category, isOverridden: true);
       _transactions[index] = updated;
       await _db.saveTransaction(updated, isOverride: true);
+      await _db.saveCategory(id, SmsCategory.transactional, isOverride: true);
+      final message = messageById(id);
+      if (message != null) {
+        message.category = SmsCategory.transactional;
+        message.isCategoryOverridden = true;
+      }
       if (await _rememberMerchantCategory(updated, category)) ruleChanged = true;
     }
     if (ruleChanged) await _applyMerchantRulesToUncategorised();
@@ -1062,8 +1081,15 @@ class SmsProvider extends ChangeNotifier {
   /// transaction whose SMS never included an explicit account number, so
   /// TransactionParserService could tell it moved money but not through
   /// which of the user's own accounts. Marks each as overridden, same as
-  /// [updateTransaction], so a later cache wipe or re-sync never silently
-  /// un-links it again.
+  /// [updateTransaction] — including pinning the parent message's category
+  /// as an override too, which this used to skip: without it, a later
+  /// [DatabaseService.clearAll] wipe deletes the message's still-`is_override
+  /// = 0` category row even though the transaction row survived as an
+  /// override, `refresh()` then finds no cached category for it and
+  /// re-parses it from scratch, and that fresh, un-assigned `Transaction`
+  /// silently overwrites the real one via `saveTransactionsBulk`'s `INSERT
+  /// OR REPLACE` — undoing the assignment rather than "never silently
+  /// un-linking it again" as intended.
   Future<void> assignInstrumentToTransactions(
     List<Transaction> transactions, {
     required InstrumentType instrument,
@@ -1080,6 +1106,12 @@ class SmsProvider extends ChangeNotifier {
       final index = _transactions.indexWhere((x) => x.smsId == t.smsId);
       if (index != -1) _transactions[index] = updated;
       await _db.saveTransaction(updated, isOverride: true);
+      await _db.saveCategory(t.smsId, SmsCategory.transactional, isOverride: true);
+      final message = messageById(t.smsId);
+      if (message != null) {
+        message.category = SmsCategory.transactional;
+        message.isCategoryOverridden = true;
+      }
     }
     notifyListeners();
   }

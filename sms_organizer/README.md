@@ -358,6 +358,23 @@ as a cache now, not just written and ignored:
   re-runs the backfill + learned-merchant-rule pass itself instead of just
   `clearAll()` + `refresh()` — so both the automatic and manual "wipe and
   redo" paths correctly restore auto-tagged spend categories afterward.
+- **A related, more serious variant of the same bug hit *manually*-tagged
+  spend categories too — actual permanent data loss, not just a missed
+  restore.** Every manual-edit entry point that marks a `transactions`/
+  `investments` row as an override (`is_override = 1`, safe from
+  `clearAll()`) is supposed to also pin its parent message's
+  `message_categories` row as an override in the same call — otherwise
+  that row stays `is_override = 0`, `clearAll()` deletes it, `refresh()`
+  finds no cached category for the message and re-parses it from scratch
+  as a brand-new un-tagged row, and that fresh row's `INSERT OR REPLACE`
+  (keyed on `sms_id`) **silently overwrites the still-good override row**
+  — not a stale-cache miss, an actual destructive stomp, all within one
+  `refresh()` call. `updateTransaction`/`updateTransactionsBulk`/
+  `updateInvestment`/`updateInvestmentsBulk` always paired the two writes
+  correctly; `setSpendCategoryForTransactions` (the quick per-transaction
+  and bulk "tag uncategorised transactions" pickers) and
+  `assignInstrumentToTransactions` (the "assign to account" picker) didn't
+  — both now do.
 - Cache entries for messages that no longer exist on-device (deleted since
   the last sync) are pruned during `refresh()` so a stale transaction
   doesn't linger in Insights forever.
