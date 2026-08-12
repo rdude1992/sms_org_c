@@ -700,14 +700,18 @@ class SmsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Bulk equivalent of [setMessageCategory] for TransactionListScreen's
-  /// multi-select "Not a transaction?" action — moves every transaction in
-  /// [smsIds] to [category] in one pass, the same way the single-item
-  /// TransactionTile action does for one. Kept separate from
-  /// [setSelectedCategory] because that one is hard-wired to
-  /// [selectedIds] (the Inbox's own cross-screen selection state) — the
-  /// transaction list deliberately keeps its selection local (see
-  /// TransactionListScreen), so this takes the id list explicitly instead.
+  /// Bulk equivalent of [setMessageCategory] for TransactionListScreen's and
+  /// InvestmentListScreen's multi-select "Not a transaction?"/"Not an
+  /// investment?" actions — moves every message in [smsIds] to [category] in
+  /// one pass, the same way the single-item TransactionTile/InvestmentTile
+  /// action does for one. Despite the name, this only ever touches
+  /// [SmsMessage.category] (via [setMessageCategory]), so it works
+  /// identically for a batch of transaction or investment ids. Kept separate
+  /// from [setSelectedCategory] because that one is hard-wired to
+  /// [selectedIds] (the Inbox's own cross-screen selection state) — both
+  /// list screens deliberately keep their selection local (see
+  /// TransactionListScreen/InvestmentListScreen), so this takes the id list
+  /// explicitly instead.
   Future<void> setCategoryForTransactions(List<int> smsIds, SmsCategory category) async {
     for (final id in smsIds) {
       final message = messageById(id);
@@ -1099,6 +1103,51 @@ class SmsProvider extends ChangeNotifier {
       message.isCategoryOverridden = true;
       notifyListeners();
     }
+  }
+
+  /// Bulk equivalent of [updateInvestment] for InvestmentListScreen's
+  /// multi-select "Edit" action — same "only touches what's actually
+  /// passed" design as [updateTransactionsBulk]: [kind] left null keeps
+  /// each event's existing value, [fundOrScheme]/[amc]/[folioOrAccount]
+  /// left null or blank do the same (bulk-*clearing* isn't supported, same
+  /// reasoning as [updateTransactionsBulk] — too easy to wipe a whole batch
+  /// by leaving a field blank while only meaning to change something else).
+  Future<void> updateInvestmentsBulk(
+    List<InvestmentEvent> investments, {
+    InvestmentKind? kind,
+    String? fundOrScheme,
+    String? amc,
+    String? folioOrAccount,
+  }) async {
+    final cleanedFund = fundOrScheme?.trim();
+    final cleanedAmc = amc?.trim();
+    final cleanedFolio = folioOrAccount?.trim();
+    for (final i in investments) {
+      final updated = InvestmentEvent(
+        smsId: i.smsId,
+        date: i.date,
+        amount: i.amount,
+        kind: kind ?? i.kind,
+        rawBody: i.rawBody,
+        fundOrScheme: (cleanedFund == null || cleanedFund.isEmpty) ? i.fundOrScheme : cleanedFund,
+        folioOrAccount: (cleanedFolio == null || cleanedFolio.isEmpty) ? i.folioOrAccount : cleanedFolio,
+        units: i.units,
+        nav: i.nav,
+        amc: (cleanedAmc == null || cleanedAmc.isEmpty) ? i.amc : cleanedAmc,
+        isOverridden: true,
+      );
+      final index = _investments.indexWhere((x) => x.smsId == i.smsId);
+      if (index != -1) _investments[index] = updated;
+      await _db.saveInvestment(updated, isOverride: true);
+      await _db.saveCategory(i.smsId, SmsCategory.transactional, isOverride: true);
+
+      final message = messageById(i.smsId);
+      if (message != null) {
+        message.category = SmsCategory.transactional;
+        message.isCategoryOverridden = true;
+      }
+    }
+    notifyListeners();
   }
 
   void setCategoryFilter(SmsCategory? category) {

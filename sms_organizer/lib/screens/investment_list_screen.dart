@@ -4,6 +4,8 @@ import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
+import '../widgets/category_picker_sheet.dart';
+import '../widgets/investment_edit_sheet.dart';
 import '../widgets/investment_tile.dart';
 import '../widgets/search_toggle_mixin.dart';
 import '../widgets/ui/breakdown_donut.dart';
@@ -11,6 +13,38 @@ import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/filter_chip_bar.dart';
 import '../widgets/ui/total_stat.dart';
 import '../widgets/ui/trend_bar_chart.dart';
+
+/// Sort options for the Invested/Redeemed/All tabs — mirrors
+/// TransactionListScreen's `_SortBy`.
+enum _SortBy { dateDesc, dateAsc, valueDesc, valueAsc }
+
+extension on _SortBy {
+  String get label {
+    switch (this) {
+      case _SortBy.dateDesc:
+        return 'Newest first';
+      case _SortBy.dateAsc:
+        return 'Oldest first';
+      case _SortBy.valueDesc:
+        return 'Highest amount';
+      case _SortBy.valueAsc:
+        return 'Lowest amount';
+    }
+  }
+
+  int compare(InvestmentEvent a, InvestmentEvent b) {
+    switch (this) {
+      case _SortBy.dateDesc:
+        return b.date.compareTo(a.date);
+      case _SortBy.dateAsc:
+        return a.date.compareTo(b.date);
+      case _SortBy.valueDesc:
+        return b.amount.compareTo(a.amount);
+      case _SortBy.valueAsc:
+        return a.amount.compareTo(b.amount);
+    }
+  }
+}
 
 /// How far back the "By AMC" tab's donut/trend chart look — independent of
 /// whatever range brought the caller into this screen, so someone drilled
@@ -112,6 +146,45 @@ class InvestmentListScreen extends StatefulWidget {
 
 class _InvestmentListScreenState extends State<InvestmentListScreen>
     with SearchToggleMixin<InvestmentListScreen> {
+  // Local to this screen (mirrors TransactionListScreen's own local
+  // selection) — an investment drilldown is always opened fresh from
+  // Insights, so there's no cross-screen selection state to stay in sync
+  // with. Shared across the Invested/Redeemed/All tabs (not "By AMC", which
+  // renders provider summary rows rather than individual InvestmentTiles).
+  final Set<int> _selectedIds = {};
+  bool get _selecting => _selectedIds.isNotEmpty;
+
+  _SortBy _sortBy = _SortBy.dateDesc;
+
+  bool _allExpanded = false;
+  void _toggleAllExpanded() => setState(() => _allExpanded = !_allExpanded);
+
+  bool _compact = true;
+  void _toggleCompact() => setState(() => _compact = !_compact);
+
+  final Set<int> _expandedIds = {};
+  void _toggleExpanded(int smsId) {
+    setState(() {
+      if (!_expandedIds.remove(smsId)) _expandedIds.add(smsId);
+    });
+  }
+
+  void _toggleSelected(int smsId) {
+    setState(() {
+      if (!_selectedIds.remove(smsId)) _selectedIds.add(smsId);
+    });
+  }
+
+  void _clearSelection() => setState(_selectedIds.clear);
+
+  void _selectAll(Iterable<int> smsIds) {
+    setState(() {
+      _selectedIds
+        ..clear()
+        ..addAll(smsIds);
+    });
+  }
+
   @override
   void dispose() {
     disposeSearch();
@@ -121,7 +194,8 @@ class _InvestmentListScreenState extends State<InvestmentListScreen>
   bool _matches(InvestmentEvent i, String q) {
     return (i.fundOrScheme?.toLowerCase().contains(q) ?? false) ||
         (i.amc?.toLowerCase().contains(q) ?? false) ||
-        (i.folioOrAccount?.toLowerCase().contains(q) ?? false);
+        (i.folioOrAccount?.toLowerCase().contains(q) ?? false) ||
+        i.rawBody.toLowerCase().contains(q);
   }
 
   @override
@@ -151,25 +225,105 @@ class _InvestmentListScreenState extends State<InvestmentListScreen>
         ? liveAllInvestmentsUnfiltered
         : liveAllInvestmentsUnfiltered.where((i) => _matches(i, trimmedQuery)).toList();
 
-    final sorted = [...liveInvestments]..sort((a, b) => b.date.compareTo(a.date));
+    final sorted = [...liveInvestments]..sort(_sortBy.compare);
     final invested = sorted.where((i) => !i.kind.isRedemption).toList();
     final redeemed = sorted.where((i) => i.kind.isRedemption).toList();
     final investedTotal = invested.fold<double>(0, (a, i) => a + i.amount);
     final redeemedTotal = redeemed.fold<double>(0, (a, i) => a + i.amount);
     final providers = _groupByProvider(sorted);
 
+    // "Select all" is scoped to [sorted] — every investment across the
+    // Invested/Redeemed/All tabs regardless of which one happens to be
+    // showing — rather than tracking the active tab just for this button.
+    final allSelected = sorted.isNotEmpty && sorted.every((i) => _selectedIds.contains(i.smsId));
+    final selectedInvestments = sorted.where((i) => _selectedIds.contains(i.smsId)).toList();
+
+    final appBarLeading =
+        _selecting ? IconButton(icon: const Icon(Icons.close), onPressed: _clearSelection) : null;
+    final appBarTitle = _selecting
+        ? Text('${_selectedIds.length} selected')
+        : searchAppBarTitle('Investments', hintText: 'Search investments');
+    final appBarActions = _selecting
+        ? [
+            IconButton(
+              icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
+              tooltip: allSelected ? 'Select none' : 'Select all',
+              onPressed: allSelected ? _clearSelection : () => _selectAll(sorted.map((i) => i.smsId)),
+            ),
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Edit',
+              onPressed: () => showBulkInvestmentEditSheet(
+                context,
+                context.read<SmsProvider>(),
+                selectedInvestments,
+                onApplied: _clearSelection,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.label_outline),
+              tooltip: 'Not an investment?',
+              onPressed: () => showBulkCategoryPickerSheet(
+                context,
+                selectedCount: _selectedIds.length,
+                itemLabel: 'investment',
+                onSelect: (category) {
+                  context.read<SmsProvider>().setCategoryForTransactions(_selectedIds.toList(), category);
+                  _clearSelection();
+                },
+              ),
+            ),
+          ]
+        : [
+            PopupMenuButton<_SortBy>(
+              icon: const Icon(Icons.sort),
+              tooltip: 'Sort by',
+              initialValue: _sortBy,
+              onSelected: (value) => setState(() => _sortBy = value),
+              itemBuilder: (context) => [
+                for (final option in _SortBy.values)
+                  PopupMenuItem(
+                    value: option,
+                    child: Row(
+                      children: [
+                        if (option == _sortBy)
+                          const Icon(Icons.check, size: 18)
+                        else
+                          const SizedBox(width: 18),
+                        const SizedBox(width: 8),
+                        Text(option.label),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+            IconButton(
+              icon: Icon(_compact ? Icons.view_agenda_outlined : Icons.table_rows_outlined),
+              tooltip: _compact ? 'Detailed view' : 'Compact view',
+              onPressed: _toggleCompact,
+            ),
+            if (!_compact)
+              IconButton(
+                icon: Icon(_allExpanded ? Icons.unfold_less : Icons.unfold_more),
+                tooltip: _allExpanded ? 'Collapse all' : 'Expand all',
+                onPressed: _toggleAllExpanded,
+              ),
+            ...searchAppBarActions(),
+          ];
+
     return DefaultTabController(
       length: 4,
       initialIndex: widget.initialTabIndex,
       child: Scaffold(
         appBar: AppBar(
-          title: searchAppBarTitle('Investments', hintText: 'Search investments'),
-          actions: searchAppBarActions(),
+          leading: appBarLeading,
+          title: appBarTitle,
+          actions: appBarActions,
           bottom: PreferredSize(
             preferredSize: Size.fromHeight(isSearching || widget.subtitle == null ? 48 : 68),
             child: Column(
               children: [
-                if (!isSearching && widget.subtitle != null)
+                if (!_selecting && !isSearching && widget.subtitle != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(widget.subtitle!,
@@ -242,9 +396,39 @@ class _InvestmentListScreenState extends State<InvestmentListScreen>
                     child: TabBarView(
                       children: [
                         _AmcListView(providers: providers, allInvestments: liveAllInvestments),
-                        _InvestmentListView(investments: invested, emptyText: 'Nothing invested.'),
-                        _InvestmentListView(investments: redeemed, emptyText: 'Nothing redeemed.'),
-                        _InvestmentListView(investments: sorted, emptyText: 'No investment activity.'),
+                        _InvestmentListView(
+                          investments: invested,
+                          emptyText: 'Nothing invested.',
+                          selectedIds: _selectedIds,
+                          selecting: _selecting,
+                          onToggleSelected: _toggleSelected,
+                          allExpanded: _allExpanded,
+                          expandedIds: _expandedIds,
+                          onToggleExpanded: _toggleExpanded,
+                          compact: _compact,
+                        ),
+                        _InvestmentListView(
+                          investments: redeemed,
+                          emptyText: 'Nothing redeemed.',
+                          selectedIds: _selectedIds,
+                          selecting: _selecting,
+                          onToggleSelected: _toggleSelected,
+                          allExpanded: _allExpanded,
+                          expandedIds: _expandedIds,
+                          onToggleExpanded: _toggleExpanded,
+                          compact: _compact,
+                        ),
+                        _InvestmentListView(
+                          investments: sorted,
+                          emptyText: 'No investment activity.',
+                          selectedIds: _selectedIds,
+                          selecting: _selecting,
+                          onToggleSelected: _toggleSelected,
+                          allExpanded: _allExpanded,
+                          expandedIds: _expandedIds,
+                          onToggleExpanded: _toggleExpanded,
+                          compact: _compact,
+                        ),
                       ],
                     ),
                   ),
@@ -258,19 +442,147 @@ class _InvestmentListScreenState extends State<InvestmentListScreen>
 class _InvestmentListView extends StatelessWidget {
   final List<InvestmentEvent> investments;
   final String emptyText;
+  final Set<int> selectedIds;
+  final bool selecting;
+  final ValueChanged<int> onToggleSelected;
+  final bool allExpanded;
+  final Set<int> expandedIds;
+  final ValueChanged<int> onToggleExpanded;
+  final bool compact;
 
-  const _InvestmentListView({required this.investments, required this.emptyText});
+  const _InvestmentListView({
+    required this.investments,
+    required this.emptyText,
+    required this.selectedIds,
+    required this.selecting,
+    required this.onToggleSelected,
+    required this.allExpanded,
+    required this.expandedIds,
+    required this.onToggleExpanded,
+    required this.compact,
+  });
 
   @override
   Widget build(BuildContext context) {
     if (investments.isEmpty) {
       return EmptyState(icon: Icons.trending_up, title: emptyText);
     }
-    return ListView.builder(
-      itemCount: investments.length,
-      itemBuilder: (context, index) => InvestmentTile(investment: investments[index]),
+    // [investments] is re-derived from SmsProvider on every rebuild (see
+    // InvestmentListScreen.build), so a pull-triggered refresh() naturally
+    // flows through to this list — mirrors TransactionListScreen's
+    // _TransactionListView.
+    return RefreshIndicator(
+      onRefresh: context.read<SmsProvider>().refresh,
+      child: compact ? _buildCompact(context) : _buildDetailed(context),
     );
   }
+
+  Widget _buildDetailed(BuildContext context) {
+    return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      itemCount: investments.length,
+      itemBuilder: (context, index) {
+        final i = investments[index];
+        return InvestmentTile(
+          investment: i,
+          selected: selectedIds.contains(i.smsId),
+          selectionMode: selecting,
+          onTap: selecting ? () => onToggleSelected(i.smsId) : null,
+          onLongPress: selecting ? () => onToggleSelected(i.smsId) : null,
+          onSelectStart: () => onToggleSelected(i.smsId),
+          expanded: allExpanded || expandedIds.contains(i.smsId),
+          onToggleExpand: selecting ? null : () => onToggleExpanded(i.smsId),
+        );
+      },
+    );
+  }
+
+  /// Month-grouped header rendering of [InvestmentTile.compact] — mirrors
+  /// TransactionListScreen's _buildCompact. Assumes [investments] is already
+  /// contiguous by month, which holds for the screen's date-based sort
+  /// orders; under a value-based sort the same month can recur in more than
+  /// one group — a cosmetic quirk, not a correctness issue, since every
+  /// investment still appears exactly once.
+  Widget _buildCompact(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final groups = _groupInvestmentsByMonth(investments);
+    final slivers = <Widget>[
+      for (final group in groups) ...[
+        SliverPersistentHeader(
+          pinned: false,
+          delegate: _InvestmentMonthHeaderDelegate(label: Formatters.monthYear(group.month)),
+        ),
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              final i = group.items[index];
+              return Column(
+                children: [
+                  InvestmentTile(
+                    investment: i,
+                    compact: true,
+                    selected: selectedIds.contains(i.smsId),
+                    selectionMode: selecting,
+                    onTap: selecting ? () => onToggleSelected(i.smsId) : null,
+                    onLongPress: selecting ? () => onToggleSelected(i.smsId) : null,
+                    onSelectStart: () => onToggleSelected(i.smsId),
+                  ),
+                  Divider(height: 1, thickness: 1, color: scheme.outlineVariant.withOpacity(0.4)),
+                ],
+              );
+            },
+            childCount: group.items.length,
+          ),
+        ),
+      ],
+    ];
+    return CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: slivers);
+  }
+}
+
+class _InvestmentMonthGroup {
+  final DateTime month;
+  final List<InvestmentEvent> items;
+  _InvestmentMonthGroup(this.month, this.items);
+}
+
+List<_InvestmentMonthGroup> _groupInvestmentsByMonth(List<InvestmentEvent> investments) {
+  final groups = <_InvestmentMonthGroup>[];
+  for (final i in investments) {
+    if (groups.isNotEmpty && groups.last.month.year == i.date.year && groups.last.month.month == i.date.month) {
+      groups.last.items.add(i);
+    } else {
+      groups.add(_InvestmentMonthGroup(DateTime(i.date.year, i.date.month), [i]));
+    }
+  }
+  return groups;
+}
+
+class _InvestmentMonthHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final String label;
+  const _InvestmentMonthHeaderDelegate({required this.label});
+
+  @override
+  double get minExtent => 40;
+  @override
+  double get maxExtent => 40;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: scheme.onSurface),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _InvestmentMonthHeaderDelegate oldDelegate) => oldDelegate.label != label;
 }
 
 /// One row per AMC/broker (see [InvestmentEvent.providerGroupKey]) —
