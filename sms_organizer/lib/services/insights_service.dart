@@ -274,6 +274,10 @@ class InsightsService {
     for (final inv in investments) {
       if (from != null && inv.date.isBefore(from)) continue;
       if (to != null && inv.date.isAfter(to)) continue;
+      // A periodic value statement (InvestmentKind.valuationUpdate) states
+      // what a holding is worth, not money moving in or out — it must stay
+      // out of both invested/redeemed totals and the event count.
+      if (inv.kind.isValuationOnly) continue;
       investmentEvents += 1;
       if (inv.kind == InvestmentKind.mutualFundRedemption) {
         redeemed += inv.amount;

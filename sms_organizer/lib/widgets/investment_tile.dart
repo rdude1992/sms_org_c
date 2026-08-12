@@ -89,10 +89,19 @@ class InvestmentTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isRedemption = investment.kind.isRedemption;
-    final color = isRedemption ? const Color(0xFFF59E0B) : Theme.of(context).colorScheme.primary;
-    final sign = isRedemption ? '+' : '-';
-    final icon = isRedemption ? Icons.call_received : Icons.trending_up;
+    final isValuation = investment.kind.isValuationOnly;
     final scheme = Theme.of(context).colorScheme;
+    // A value statement (e.g. NPS "Investment value ... is Rs X") states
+    // what the holding is worth, not money moving in or out — it gets a
+    // neutral look distinct from both invested (-, primary) and redeemed
+    // (+, amber), and no sign at all, so it doesn't read as either.
+    final color = isValuation
+        ? scheme.onSurfaceVariant
+        : (isRedemption ? const Color(0xFFF59E0B) : scheme.primary);
+    final sign = isValuation ? '' : (isRedemption ? '+' : '-');
+    final icon = isValuation
+        ? Icons.info_outline
+        : (isRedemption ? Icons.call_received : Icons.trending_up);
 
     if (compact) {
       final title = investment.fundOrScheme ?? investment.amc ?? investment.kind.label;

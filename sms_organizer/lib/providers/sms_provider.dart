@@ -539,6 +539,14 @@ class SmsProvider extends ChangeNotifier {
               final txn = _txnParser.parseTransaction(m);
               if (txn != null) newTransactions.add(_applyLearnedMerchantCategory(txn));
             }
+          } else if (cached == SmsCategory.updates && !cachedInvIds.contains(m.id)) {
+            // A periodic investment value statement (NPS/Protean's
+            // "Investment value ... as on ... is Rs X") — categorized
+            // updates, not transactional, since no money moved, but still
+            // worth recording as an InvestmentEvent so holdings_service.dart
+            // can use it as a value checkpoint. See parseInvestmentValuation.
+            final valuation = _txnParser.parseInvestmentValuation(m);
+            if (valuation != null) newInvestments.add(valuation);
           }
           continue; // already processed in a previous sync
         }
@@ -566,6 +574,9 @@ class SmsProvider extends ChangeNotifier {
             final txn = _txnParser.parseTransaction(m);
             if (txn != null) newTransactions.add(_applyLearnedMerchantCategory(txn));
           }
+        } else if (m.category == SmsCategory.updates) {
+          final valuation = _txnParser.parseInvestmentValuation(m);
+          if (valuation != null) newInvestments.add(valuation);
         }
       }
 

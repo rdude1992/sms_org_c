@@ -96,6 +96,41 @@ class TransactionParserService {
     );
   }
 
+  /// Only call this on messages tagged [SmsCategory.updates] that match
+  /// [extractors.extractInvestmentValueStatement] — a periodic "here's what
+  /// this holding is worth" statement (NPS/Protean's "Investment value in
+  /// Tier II ... as on ... is Rs X"), not a transaction. These never state
+  /// units/NAV (the NPS "Voluntary contribution" credit SMS that precede
+  /// them don't either), so instead of being silently dropped like every
+  /// other balance-only "updates" message, this records one as
+  /// [InvestmentKind.valuationUpdate] — see holdings_service.dart for how
+  /// the holdings engine treats it as an authoritative "as of" checkpoint
+  /// rather than a cash-flow event. Returns null (not called at all, in
+  /// practice — see SmsProvider.refresh) for every other kind of update.
+  InvestmentEvent? parseInvestmentValuation(SmsMessage message) {
+    final body = message.body;
+    final sender = message.address;
+
+    final statement = extractors.extractInvestmentValueStatement(body);
+    if (statement == null) return null;
+
+    // Reused purely for its folio/PRAN/AMC/fund-name detection — the
+    // amount/NAV/units fields it also tries to fill in stay null for this
+    // message shape (no NAV or unit count in a value statement).
+    final details = extractors.extractInvestmentDetails(body, sender);
+
+    return InvestmentEvent(
+      smsId: message.id,
+      date: statement.asOfDate ?? message.date,
+      amount: statement.value,
+      kind: InvestmentKind.valuationUpdate,
+      fundOrScheme: details.investmentName,
+      folioOrAccount: details.folio,
+      amc: details.amc,
+      rawBody: body,
+    );
+  }
+
   /// [extractCardTypeHint] to pick credit vs debit card first, then a
   /// generic bank-account mention, then UPI (VPA-style address or explicit
   /// "upi"/"vpa" mention) only as a last resort.

@@ -207,19 +207,44 @@ notes if you're porting further updates from the source later.
 
 - **Estimated fund value, NAV/units trend, and SIP detection**
   (`holdings_service.dart`) group investment events into per-fund
-  *holdings* — same AMC + fund/scheme + folio/account
-  (`InvestmentEvent.holdingGroupKey`), a finer grouping than the "By AMC"
-  tab's own `providerGroupKey` (AMC only), since two folios of the same
-  fund — or two different funds under one AMC — have independent unit
-  counts and NAV histories. Each holding's units-held and net-invested are
-  reconstructed event-by-event; "estimated current value" is units held ×
-  the most recent NAV any SMS happened to mention (falling back to cost
-  basis when no NAV was ever captured), never a live market quote. The
-  Investments dashboard and the per-AMC drilldown (`AmcDetailScreen`) both
-  chart this — invested vs. estimated value, NAV over time, units over
-  time — and `detectSip` heuristically flags a recurring monthly
-  contribution (same rounded amount recurring across ≥3 distinct months)
-  even when the SMS itself never used the word "SIP".
+  *holdings* — same AMC + folio/account, or AMC + fund/scheme when no
+  folio was detected (`InvestmentEvent.holdingGroupKey`) — a finer
+  grouping than the "By AMC" tab's own `providerGroupKey` (AMC only),
+  since two folios of the same fund — or two different funds under one
+  AMC — have independent unit counts and NAV histories. Folio/account
+  alone (not combined with fund name) is the identity key when present:
+  the same physical holding can get a slightly different fund-name string
+  depending on which message shape produced it (see the NPS case below),
+  and requiring an exact match would silently split one holding into two.
+  Each holding's units-held and net-invested are reconstructed
+  event-by-event; "estimated current value" prefers units held × the most
+  recent NAV any SMS mentioned, falls back to the most recent confirmed
+  value statement (see below) plus contributions made since, and falls
+  back again to cost basis if neither is available — never a live market
+  quote. The Investments dashboard and the per-AMC drilldown
+  (`AmcDetailScreen`) both chart this — invested vs. estimated value, NAV
+  over time, units over time — and `detectSip` heuristically flags a
+  recurring monthly contribution (same rounded amount recurring across ≥3
+  distinct months) even when the SMS itself never used the word "SIP".
+
+- **NPS/Protean gets two message shapes the holdings engine handles
+  differently.** A contribution SMS ("Units for Voluntary contribution of
+  Rs.X credited with NAV of DD/MM/YY") states neither units nor a NAV —
+  "NAV of DD/MM/YY" is an *allotment date*, not a rupee value, and
+  `extractInvestmentDetails`'s NAV regex has a lookahead specifically
+  rejecting that date shape (it used to parse the date's leading digits as
+  a bogus NAV, e.g. "NAV of 04/04/25" → 4.0, silently corrupting
+  units-derivation and every NAV/value chart for that holding). Separately,
+  a periodic statement ("Investment value in Tier II (PRANXXXX) as on
+  DD.MM.YY is Rs X") states a value directly with no units/NAV at all —
+  `extractInvestmentValueStatement` + `TransactionParserService.
+  parseInvestmentValuation` record this as `InvestmentKind.valuationUpdate`
+  (categorized `SmsCategory.updates`, not `transactional`, since no money
+  moved — see `SmsProvider.refresh`'s `else if (category == updates)`
+  branch), which `holdings_service.dart` treats as an authoritative
+  checkpoint rather than a cash flow: every invested/redeemed total, the
+  SIP detector, and provider/AMC bucketing all skip it via
+  `InvestmentKind.isValuationOnly`.
 
 - **PPF/SSY/NPS self-transfers** get their own `InstrumentType.investment`
   (`TransactionParserService._instrumentType`), separate from the generic

@@ -648,7 +648,9 @@ DateTime? extractBillDueDate(String content) {
 /// `new Date(str)` which happily parses "18-Feb-25" or "05/03/2024". This
 /// is a small hand-written stand-in covering the two formats
 /// [extractBillDueDate] actually produces: "DD-MMM-YY(YY)" and
-/// "DD-MM-YYYY"/"DD/MM/YYYY" (day-first, matching Indian SMS conventions).
+/// "DD-MM-YYYY"/"DD/MM/YYYY"/"DD.MM.YYYY" (day-first, matching Indian SMS
+/// conventions — also reused by [extractInvestmentValueStatement] for
+/// "as on DD.MM.YY" statement dates, which favour dots over slashes).
 DateTime? tryParseFlexibleDate(String raw) {
   final normalized = raw.trim();
 
@@ -663,7 +665,7 @@ DateTime? tryParseFlexibleDate(String raw) {
     }
   }
 
-  final numericMatch = RegExp(r'^(\d{1,2})[-/\s](\d{1,2})[-/\s](\d{2,4})$').firstMatch(normalized);
+  final numericMatch = RegExp(r'^(\d{1,2})[-/.\s](\d{1,2})[-/.\s](\d{2,4})$').firstMatch(normalized);
   if (numericMatch != null) {
     final day = int.tryParse(numericMatch.group(1)!);
     final month = int.tryParse(numericMatch.group(2)!);
@@ -847,9 +849,19 @@ ExtractedInvestmentDetails extractInvestmentDetails(String content, String sende
     if (pranMatch?.group(1) != null) details.folio = pranMatch!.group(1);
   }
 
-  final navMatch =
-      RegExp(r'NAV\s*(?:of|is)?\s*[:\-]?\s*(?:Rs\.?)?\s*([0-9,]+(?:\.\d+)?)', caseSensitive: false)
-          .firstMatch(content);
+  // The negative lookahead rejects "NAV of 04/04/25" (an *allotment date*,
+  // e.g. Protean/NPS "Units ... credited with NAV of 04/04/25") before the
+  // digit capture ever runs — without it, `[0-9,]+` greedily grabs "04",
+  // stops at the "/", and happily parses that lone "04" as NAV=4, wildly
+  // corrupting units-derivation (amount ÷ NAV) and every downstream
+  // NAV/value chart. It has to sit *before* the capture group, not as a
+  // lookahead immediately after it — placing it after is defeated by
+  // backtracking, since the engine just shrinks `[0-9,]+` to "0" (still not
+  // followed by "/") and "succeeds" with an equally bogus NAV=0.
+  final navMatch = RegExp(
+    r'NAV\s*(?:of|is)?\s*[:\-]?\s*(?:Rs\.?)?\s*(?!\d{1,2}\/\d{1,2}\/\d{2,4}\b)([0-9,]+(?:\.\d+)?)',
+    caseSensitive: false,
+  ).firstMatch(content);
   if (navMatch?.group(1) != null) {
     details.nav = double.tryParse(navMatch!.group(1)!.replaceAll(',', ''));
   }
@@ -998,6 +1010,48 @@ ExtractedInvestmentDetails extractInvestmentDetails(String content, String sende
   }
 
   return details;
+}
+
+// ---------------------------------------------------------------------------
+// extractInvestmentValueStatement
+// ---------------------------------------------------------------------------
+
+class ExtractedInvestmentValueStatement {
+  final double value;
+  final DateTime? asOfDate;
+  const ExtractedInvestmentValueStatement({required this.value, required this.asOfDate});
+}
+
+/// A periodic "here's what your holding is worth" statement — e.g. NPS/
+/// Protean's "Investment value in Tier II (PRANXX8324) as on 31.03.25 is
+/// Rs 1,04,683.33" — as opposed to a transaction. These never state
+/// units/NAV (some NPS "Voluntary contribution" credit SMS don't either),
+/// so [TransactionParserService.parseInvestmentValuation] uses this instead
+/// of [extractInvestmentDetails]'s amount/NAV pipeline. Mirrors the keyword
+/// pair categorization_service.dart already uses to route this message
+/// shape to SmsCategory.updates ('investment value'/'total holding'/
+/// 'current value' + 'as on'/'is rs') — this just extracts the amount/date
+/// that categorization itself doesn't need. Returns null if the "is Rs X"
+/// value can't be found, even if the message matched those keywords.
+ExtractedInvestmentValueStatement? extractInvestmentValueStatement(String content) {
+  final contentLower = content.toLowerCase();
+  final hasValueKeyword = contentLower.contains('investment value') ||
+      contentLower.contains('total holding') ||
+      contentLower.contains('current value');
+  if (!hasValueKeyword) return null;
+
+  final valueMatch =
+      RegExp(r'is\s+Rs\.?\s*([\d,]+(?:\.\d+)?)', caseSensitive: false).firstMatch(content);
+  final rawValue = valueMatch?.group(1);
+  if (rawValue == null) return null;
+  final value = double.tryParse(rawValue.replaceAll(',', ''));
+  if (value == null) return null;
+
+  final dateMatch = RegExp(r'as\s+on\s+([\d./\-]+)', caseSensitive: false).firstMatch(content);
+  final rawDate = dateMatch?.group(1);
+  final asOfDate = rawDate != null ? tryParseFlexibleDate(rawDate) : null;
+
+  return ExtractedInvestmentValueStatement(value: value, asOfDate: asOfDate);
 }
 
 // ---------------------------------------------------------------------------

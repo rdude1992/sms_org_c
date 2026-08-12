@@ -185,6 +185,7 @@ class _HoldingSection extends StatelessWidget {
     final sip = detectSip(holding);
     final navPoints = navHistory(holding).where((p) => inRange(p.date)).toList();
     final unitsPoints = unitsHistory(holding).where((p) => inRange(p.date)).toList();
+    final valuationPoints = holding.valuations.where((v) => inRange(v.date)).toList();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -216,12 +217,27 @@ class _HoldingSection extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          Text(
-            '${Formatters.units(holding.unitsHeld)} units held'
-            '${holding.latestNav != null ? ' · NAV ${Formatters.currencyPrecise(holding.latestNav!)}' : ''}'
-            '${holding.latestNavDate != null ? ' as of ${Formatters.dayMonthYear(holding.latestNavDate!)}' : ''}',
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-          ),
+          // Some holdings (NPS Voluntary contribution SMS, notably) never
+          // state units/NAV at all — skip this line rather than showing a
+          // meaningless "0 units held" for them.
+          if (holding.unitsHeld > 0 || holding.latestNav != null)
+            Text(
+              '${Formatters.units(holding.unitsHeld)} units held'
+              '${holding.latestNav != null ? ' · NAV ${Formatters.currencyPrecise(holding.latestNav!)}' : ''}'
+              '${holding.latestNavDate != null ? ' as of ${Formatters.dayMonthYear(holding.latestNavDate!)}' : ''}',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+          // Value statements (e.g. NPS "Investment value ... is Rs X") are
+          // what estimatedValue actually anchors to for a holding like
+          // this — see holdings_service.dart's valueAsOf — so show where
+          // that figure came from rather than leaving it looking like a
+          // plain units×NAV estimate.
+          if (holding.latestValuation != null)
+            Text(
+              'Confirmed value ${Formatters.currency(holding.latestValuation!.value)} '
+              'as on ${Formatters.dayMonthYear(holding.latestValuation!.date)}',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
           const SizedBox(height: 4),
           Text(
             sip != null
@@ -230,6 +246,26 @@ class _HoldingSection extends StatelessWidget {
                 : 'No recurring monthly pattern detected.',
             style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
           ),
+          if (valuationPoints.length >= 2) ...[
+            const SizedBox(height: 12),
+            Text('Confirmed value over time',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: scheme.onSurface)),
+            const SizedBox(height: 6),
+            TrendLineChart(
+              dates: [for (final p in valuationPoints) p.date],
+              series: [
+                TrendLineSeries(
+                  label: 'Value',
+                  color: scheme.primary,
+                  values: [for (final p in valuationPoints) p.value],
+                ),
+              ],
+              axisLabelBuilder: (d) => Formatters.dayMonth(d),
+              tooltipDateBuilder: (d) => Formatters.dayMonthYear(d),
+              valueFormatter: Formatters.currency,
+              emptyMessage: 'No confirmed value history yet.',
+            ),
+          ],
           const SizedBox(height: 12),
           Text('NAV over time', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: scheme.onSurface)),
           const SizedBox(height: 6),

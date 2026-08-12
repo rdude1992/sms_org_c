@@ -393,7 +393,20 @@ class Transaction {
       );
 }
 
-enum InvestmentKind { mutualFundSip, mutualFundPurchase, mutualFundRedemption, stockTrade, other }
+/// [valuationUpdate] is a periodic "here's what your holding is worth"
+/// statement (e.g. NPS/Protean's "Investment value in Tier II ... as on ...
+/// is Rs X") — see TransactionParserService.parseInvestmentValuation. It
+/// states a value as of a date, not money moving in or out, so it must
+/// never be summed into invested/redeemed totals the way every other kind
+/// here is.
+enum InvestmentKind {
+  mutualFundSip,
+  mutualFundPurchase,
+  mutualFundRedemption,
+  stockTrade,
+  valuationUpdate,
+  other,
+}
 
 extension InvestmentKindX on InvestmentKind {
   String get label {
@@ -406,12 +419,20 @@ extension InvestmentKindX on InvestmentKind {
         return 'Redemption';
       case InvestmentKind.stockTrade:
         return 'Stock Trade';
+      case InvestmentKind.valuationUpdate:
+        return 'Value update';
       case InvestmentKind.other:
         return 'Other';
     }
   }
 
   bool get isRedemption => this == InvestmentKind.mutualFundRedemption;
+
+  /// True for [InvestmentKind.valuationUpdate] — every invested/redeemed
+  /// total, SIP-cadence detector, and provider/AMC bucketing across the
+  /// Investments screens must skip these rather than folding a stated
+  /// balance into a cash-flow sum.
+  bool get isValuationOnly => this == InvestmentKind.valuationUpdate;
 }
 
 class InvestmentEvent {
@@ -468,17 +489,29 @@ class InvestmentEvent {
 
   String get providerDisplayName => (amc ?? fundOrScheme ?? 'Other').trim();
 
-  /// Groups investment events into a single *holding* — same AMC + fund/
-  /// scheme + folio/account — for NAV/units/current-value tracking, which
-  /// [providerGroupKey] is too coarse for: two folios of the same fund (or
-  /// two different funds under one AMC) have different unit counts and can
-  /// carry different NAV histories, so netting them together would produce
-  /// a meaningless "units held" figure. Falls back to [providerGroupKey]
-  /// when nothing distinguishes events further, so a fund with only one
-  /// folio (or none detected) still nets normally.
+  /// Groups investment events into a single *holding* — same AMC + folio/
+  /// account, or AMC + fund/scheme when no folio was detected — for NAV/
+  /// units/current-value tracking, which [providerGroupKey] is too coarse
+  /// for: two folios of the same fund (or two different funds under one
+  /// AMC) have different unit counts and can carry different NAV
+  /// histories, so netting them together would produce a meaningless
+  /// "units held" figure.
+  ///
+  /// Folio/account, when present, is used *alone* rather than combined
+  /// with [fundOrScheme] — it's the stronger identity signal, since the
+  /// same physical holding can get a slightly different fund-name string
+  /// depending on which message shape produced it. NPS/Protean is the
+  /// concrete case: a PRAN's tier-agnostic "Voluntary contribution"
+  /// credit SMS never names a tier ([fundOrScheme] defaults to the generic
+  /// "NPS Scheme"), while its periodic "Investment value in Tier II ...
+  /// is Rs X" statement does (fundOrScheme "NPS Tier 2") — same PRAN, same
+  /// real-world holding, but requiring an exact fundOrScheme match would
+  /// have split them into two holdings and left the statement unable to
+  /// inform the contribution-only holding's estimated value at all.
   String get holdingGroupKey {
     final folioPart = (folioOrAccount ?? '').trim().toLowerCase();
-    return '$providerGroupKey|${(fundOrScheme ?? '').trim().toLowerCase()}|$folioPart';
+    if (folioPart.isNotEmpty) return '$providerGroupKey|$folioPart';
+    return '$providerGroupKey|${(fundOrScheme ?? '').trim().toLowerCase()}';
   }
 
   Map<String, dynamic> toJson() => {

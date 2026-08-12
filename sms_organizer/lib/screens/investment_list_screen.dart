@@ -235,7 +235,10 @@ class _InvestmentListScreenState extends State<InvestmentListScreen>
         : liveAllInvestmentsUnfiltered.where((i) => _matches(i, trimmedQuery)).toList();
 
     final sorted = [...liveInvestments]..sort(_sortBy.compare);
-    final invested = sorted.where((i) => !i.kind.isRedemption).toList();
+    // A value statement (InvestmentKind.valuationUpdate) states what a
+    // holding is worth, not money moving in or out, so it belongs in
+    // neither the Invested nor Redeemed tab — only "All".
+    final invested = sorted.where((i) => !i.kind.isRedemption && !i.kind.isValuationOnly).toList();
     final redeemed = sorted.where((i) => i.kind.isRedemption).toList();
     final investedTotal = invested.fold<double>(0, (a, i) => a + i.amount);
     final redeemedTotal = redeemed.fold<double>(0, (a, i) => a + i.amount);
@@ -617,10 +620,17 @@ List<_ProviderSummary> _groupByProvider(List<InvestmentEvent> investments) {
       i.providerGroupKey,
       () => _ProviderSummary(key: i.providerGroupKey, name: i.providerDisplayName),
     );
-    if (i.kind.isRedemption) {
-      summary.redeemed += i.amount;
-    } else {
-      summary.invested += i.amount;
+    // A value statement contributes to neither bucket (see
+    // InvestmentKind.isValuationOnly) — it still joins [summary.events] so
+    // it's visible when drilling into this provider's raw list, it just
+    // shouldn't inflate the donut/total by double-counting a stated worth
+    // on top of the actual cash flows that produced it.
+    if (!i.kind.isValuationOnly) {
+      if (i.kind.isRedemption) {
+        summary.redeemed += i.amount;
+      } else {
+        summary.invested += i.amount;
+      }
     }
     summary.events.add(i);
   }
@@ -762,6 +772,7 @@ class _AmcAnalytics extends StatelessWidget {
     // InsightsRange.trendGranularity), just applied to investment events.
     final buckets = <String, ({DateTime date, double invested, double redeemed})>{};
     for (final i in filtered) {
+      if (i.kind.isValuationOnly) continue; // a stated worth, not a cash flow — see isValuationOnly
       final bucketStart = trendBucketStart(i.date, range.trendGranularity);
       final key = bucketStart.toIso8601String();
       final existing = buckets[key];

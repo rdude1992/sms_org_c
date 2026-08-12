@@ -1,10 +1,14 @@
 import '../models/transaction.dart';
 import 'insights_service.dart' show TrendGranularity, bucketStartsBetween;
 
-/// A holding's state immediately after processing one of its events, in
-/// chronological order — the basis for "as of" reconstruction (no live NAV
-/// feed exists, so every value/units/NAV figure is necessarily a snapshot
-/// of what the last relevant SMS said, not a real-time one).
+/// A holding's state immediately after processing one of its cash-flow
+/// events, in chronological order — the basis for "as of" reconstruction
+/// (no live NAV feed exists, so every value/units/NAV figure is necessarily
+/// a snapshot of what the last relevant SMS said, not a real-time one).
+/// Built only from purchase/SIP/redemption events — see [FundHolding.valuations]
+/// for the separate "here's what this is worth" statement checkpoints
+/// (InvestmentKind.valuationUpdate) that don't belong in this timeline at
+/// all, since they don't move units or cash.
 class HoldingSnapshot {
   final DateTime date;
   final double unitsHeld;
@@ -13,6 +17,12 @@ class HoldingSnapshot {
   /// recent event that stated one, since not every SIP/purchase SMS
   /// repeats it.
   final double? nav;
+
+  /// The date [nav] was actually stated — distinct from [date] once NAV
+  /// stops being carried forward from an older event; used to compare
+  /// freshness against a valuation-statement checkpoint (see
+  /// [FundHolding.valueAsOf]).
+  final DateTime? navDate;
 
   /// Cumulative invested − redeemed as of this point (the running
   /// principal still "in" the holding, as opposed to [unitsHeld] × [nav]
@@ -23,6 +33,7 @@ class HoldingSnapshot {
     required this.date,
     required this.unitsHeld,
     required this.nav,
+    required this.navDate,
     required this.netInvested,
   });
 }
@@ -40,6 +51,16 @@ class FundHolding {
   final List<InvestmentEvent> events;
   final List<HoldingSnapshot> timeline;
 
+  /// Periodic "here's what this holding is worth" statements
+  /// (InvestmentKind.valuationUpdate — e.g. NPS/Protean's "Investment value
+  /// ... as on ... is Rs X"), sorted by date. Some holdings (NPS Voluntary
+  /// contribution SMS state neither units nor NAV) would otherwise be
+  /// stuck valuing at cost basis forever; these give [valueAsOf] a real,
+  /// provider-confirmed figure to anchor to instead. Ordinary mutual funds
+  /// that always state units/NAV typically have none of these at all, in
+  /// which case value tracking behaves exactly as before.
+  final List<({DateTime date, double value})> valuations;
+
   const FundHolding({
     required this.key,
     required this.amc,
@@ -47,6 +68,7 @@ class FundHolding {
     required this.folioOrAccount,
     required this.events,
     required this.timeline,
+    required this.valuations,
   });
 
   String get displayName {
@@ -58,43 +80,65 @@ class FundHolding {
   double get netInvested => timeline.isEmpty ? 0 : timeline.last.netInvested;
   double get unitsHeld => timeline.isEmpty ? 0 : timeline.last.unitsHeld;
   double? get latestNav => timeline.isEmpty ? null : timeline.last.nav;
-  DateTime? get latestNavDate {
-    for (var i = timeline.length - 1; i >= 0; i--) {
-      if (timeline[i].nav != null) return timeline[i].date;
-    }
-    return null;
-  }
+  DateTime? get latestNavDate => timeline.isEmpty ? null : timeline.last.navDate;
 
-  /// Units still held × the most recently seen NAV — "estimated" because
-  /// it's only ever as fresh as the last SMS that mentioned a NAV, not a
-  /// live market quote. Falls back to net invested (cost basis) when no
-  /// NAV was ever captured for this holding (e.g. some NPS contribution
-  /// SMS never state one), so it still contributes *something* to a value
-  /// total instead of silently reading as zero.
-  double get estimatedValue {
-    if (unitsHeld <= 0) return 0;
-    final nav = latestNav;
-    return nav != null ? unitsHeld * nav : netInvested;
-  }
+  /// The most recent value statement received for this holding, if any.
+  ({DateTime date, double value})? get latestValuation =>
+      valuations.isEmpty ? null : valuations.last;
+
+  /// Units still held × the most recently seen NAV, a provider-confirmed
+  /// value statement plus contributions since it arrived, or net invested
+  /// (cost basis) as a last resort — see [valueAsOf], which this is just
+  /// evaluated as of now.
+  double get estimatedValue => valueAsOf(DateTime.now());
 
   double get estimatedGain => estimatedValue - netInvested;
   double? get estimatedGainPct => netInvested <= 0 ? null : (estimatedGain / netInvested) * 100;
 
-  /// The last timeline snapshot at or before [asOf], or a zeroed one if
-  /// [asOf] predates this holding's first event.
+  /// The last cash-flow timeline snapshot at or before [asOf], or a zeroed
+  /// one if [asOf] predates this holding's first event.
   HoldingSnapshot snapshotAsOf(DateTime asOf) {
     HoldingSnapshot? last;
     for (final s in timeline) {
       if (s.date.isAfter(asOf)) break;
       last = s;
     }
-    return last ?? HoldingSnapshot(date: asOf, unitsHeld: 0, nav: null, netInvested: 0);
+    return last ?? HoldingSnapshot(date: asOf, unitsHeld: 0, nav: null, navDate: null, netInvested: 0);
   }
 
+  /// The most recent value statement at or before [asOf], if any.
+  ({DateTime date, double value})? _valuationAsOf(DateTime asOf) {
+    ({DateTime date, double value})? last;
+    for (final v in valuations) {
+      if (v.date.isAfter(asOf)) break;
+      last = v;
+    }
+    return last;
+  }
+
+  /// Estimated worth of this holding as of [asOf] — SMS-derived, never a
+  /// live quote. Preference order:
+  /// 1. Units held × NAV, when both are known *and* the NAV is newer than
+  ///    the latest applicable value statement — real transaction-level data
+  ///    beats a periodic snapshot when both are available.
+  /// 2. The latest value statement at or before [asOf], plus any net
+  ///    contribution made since that statement was issued (assumed to add
+  ///    ₹-for-₹, since there's no way to attribute subsequent growth vs.
+  ///    principal without another NAV) — the only real handle on "current
+  ///    value" for a holding whose purchase SMS never states units/NAV
+  ///    (NPS Voluntary contributions, notably).
+  /// 3. Net invested (cost basis), when neither of the above is available.
   double valueAsOf(DateTime asOf) {
     final s = snapshotAsOf(asOf);
-    if (s.unitsHeld <= 0) return 0;
-    return s.nav != null ? s.unitsHeld * s.nav! : s.netInvested;
+    final unitsBased = (s.unitsHeld > 0 && s.nav != null) ? s.unitsHeld * s.nav! : null;
+    final valuation = _valuationAsOf(asOf);
+
+    if (valuation == null) return unitsBased ?? s.netInvested;
+    if (unitsBased != null && s.navDate != null && s.navDate!.isAfter(valuation.date)) {
+      return unitsBased;
+    }
+    final contributedSince = s.netInvested - snapshotAsOf(valuation.date).netInvested;
+    return valuation.value + contributedSince;
   }
 }
 
@@ -113,10 +157,19 @@ List<FundHolding> computeFundHoldings(List<InvestmentEvent> events) {
   for (final entry in byKey.entries) {
     final sorted = [...entry.value]..sort((a, b) => a.date.compareTo(b.date));
     final timeline = <HoldingSnapshot>[];
+    final valuations = <({DateTime date, double value})>[];
     var units = 0.0;
     var net = 0.0;
     double? nav;
+    DateTime? navDate;
     for (final e in sorted) {
+      // A value statement states what the holding is worth, not a
+      // purchase/redemption — it moves neither units nor cash, so it's
+      // recorded separately rather than folded into the cash-flow timeline.
+      if (e.kind.isValuationOnly) {
+        valuations.add((date: e.date, value: e.amount));
+        continue;
+      }
       if (e.kind.isRedemption) {
         net -= e.amount;
         if (e.units != null) units -= e.units!;
@@ -124,8 +177,11 @@ List<FundHolding> computeFundHoldings(List<InvestmentEvent> events) {
         net += e.amount;
         if (e.units != null) units += e.units!;
       }
-      if (e.nav != null) nav = e.nav;
-      timeline.add(HoldingSnapshot(date: e.date, unitsHeld: units, nav: nav, netInvested: net));
+      if (e.nav != null) {
+        nav = e.nav;
+        navDate = e.date;
+      }
+      timeline.add(HoldingSnapshot(date: e.date, unitsHeld: units, nav: nav, navDate: navDate, netInvested: net));
     }
     final first = sorted.first;
     holdings.add(FundHolding(
@@ -135,6 +191,7 @@ List<FundHolding> computeFundHoldings(List<InvestmentEvent> events) {
       folioOrAccount: first.folioOrAccount,
       events: sorted,
       timeline: timeline,
+      valuations: valuations,
     ));
   }
   return holdings..sort((a, b) => b.estimatedValue.compareTo(a.estimatedValue));
@@ -194,8 +251,8 @@ List<({DateTime date, double nav})> navHistory(FundHolding holding) => [
         if (e.nav != null) (date: e.date, nav: e.nav!),
     ];
 
-/// Cumulative units held after each event — like [navHistory], plotted at
-/// the real event dates rather than bucketed.
+/// Cumulative units held after each cash-flow event — like [navHistory],
+/// plotted at the real event dates rather than bucketed.
 List<({DateTime date, double units})> unitsHistory(FundHolding holding) => [
       for (final s in holding.timeline) (date: s.date, units: s.unitsHeld),
     ];
@@ -216,9 +273,13 @@ class SipInfo {
 /// recurs across at least 3 distinct calendar months is treated as the
 /// SIP amount; ties go to whichever recurs most often. Returns null when
 /// no amount clears that bar — a one-off lump-sum purchase, or too few
-/// purchase events to tell a pattern from coincidence.
+/// purchase events to tell a pattern from coincidence. Value statements
+/// (InvestmentKind.valuationUpdate) are excluded — they're not a
+/// contribution at all, so counting a recurring statement amount as a
+/// "SIP" would be nonsense.
 SipInfo? detectSip(FundHolding holding) {
-  final purchases = holding.events.where((e) => !e.kind.isRedemption).toList();
+  final purchases =
+      holding.events.where((e) => !e.kind.isRedemption && !e.kind.isValuationOnly).toList();
   if (purchases.length < 3) return null;
 
   final byAmount = <int, List<InvestmentEvent>>{};
