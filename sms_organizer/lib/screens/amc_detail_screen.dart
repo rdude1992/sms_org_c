@@ -7,7 +7,7 @@ import '../widgets/ui/filter_chip_bar.dart';
 import '../widgets/ui/gain_loss_stat.dart';
 import '../widgets/ui/total_stat.dart';
 import '../widgets/ui/trend_line_chart.dart';
-import 'investment_list_screen.dart' show InvestmentListScreen, InvestmentRange;
+import 'investment_list_screen.dart';
 
 /// One AMC/broker's own drilldown — reached by tapping a provider row or
 /// donut slice in the "By AMC" tab. Unlike that tab (which just filters a
