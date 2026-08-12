@@ -147,7 +147,7 @@ class MessageBubble extends StatelessWidget {
                             const SizedBox(height: 8),
                             _CopyOtpButton(code: otpCode, outgoingTint: isOutgoing, textColor: textColor),
                           ],
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 10),
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
