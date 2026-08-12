@@ -7,7 +7,6 @@ import '../widgets/ui/floating_nav_bar.dart';
 import 'compose_screen.dart';
 import 'inbox_screen.dart';
 import 'insights_screen.dart';
-import 'instrument_list_screen.dart';
 import 'settings_screen.dart';
 import 'thread_screen.dart';
 
@@ -26,7 +25,6 @@ class _HomeScreenState extends State<HomeScreen> {
   final _tabs = const [
     InboxScreen(),
     InsightsLockGate(child: InsightsScreen()),
-    InsightsLockGate(label: 'Accounts', child: InstrumentListScreen()),
     SettingsScreen(),
   ];
 
@@ -119,8 +117,6 @@ class _HomeScreenState extends State<HomeScreen> {
         items: const [
           FloatingNavItem(icon: Icons.inbox_outlined, selectedIcon: Icons.inbox, label: 'Inbox'),
           FloatingNavItem(icon: Icons.insights_outlined, selectedIcon: Icons.insights, label: 'Insights'),
-          FloatingNavItem(
-              icon: Icons.account_balance_outlined, selectedIcon: Icons.account_balance, label: 'Accounts'),
           FloatingNavItem(icon: Icons.settings_outlined, selectedIcon: Icons.settings, label: 'Settings'),
         ],
       ),

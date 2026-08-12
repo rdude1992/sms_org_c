@@ -83,16 +83,15 @@ lib/
     contact_service.dart            Phone-number-to-name lookup, built once from device contacts
     notification_preferences_service.dart  Persists muted categories (notifications
                                             themselves are fully native — see below)
-    biometric_auth_service.dart     Fingerprint/face/PIN gate for the Insights/Accounts tabs
+    biometric_auth_service.dart     Fingerprint/face/PIN gate for the Insights tab
   providers/               SmsProvider (app state), ThemeProvider (dark mode),
                             NotificationSettingsProvider (per-category mute switches),
-                            SecuritySettingsProvider (Insights/Accounts biometric lock)
-  screens/                 Onboarding, Home (bottom nav: Inbox/Insights/Accounts/Settings),
+                            SecuritySettingsProvider (Insights biometric lock)
+  screens/                 Onboarding, Home (bottom nav: Inbox/Insights/Settings),
                             Inbox (chat/list toggle), Thread, Compose, Insights (+
                             instrument/investment/merchant/transaction drilldowns,
-                            uncategorised-transactions review), Accounts (the same
-                            "Cards & Accounts" screen as Insights' drilldown, promoted
-                            to a top-level tab), Settings, Starred, Drafts
+                            uncategorised-transactions review, "Cards & Accounts"
+                            drilldown), Settings, Starred, Drafts
   widgets/                 Conversation tile, message bubble, category badge, direction badge,
                             multi-select app bar, transaction tile (+ its edit/assign-account/
                             detected-SMS sheets), investment tile (+ its edit sheet),

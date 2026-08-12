@@ -20,17 +20,15 @@ import 'transaction_list_screen.dart';
 /// issuer + last-4, see [Transaction.instrumentGroupKey]) shows up once,
 /// under Debit Cards, with a "Debit Card + Bank Account" badge.
 ///
-/// [transactions] is an optional pre-filtered snapshot from whichever
-/// screen pushed this route (e.g. the Insights "See all" drilldown); when
-/// null (the standalone Accounts tab entry point), every live transaction
-/// is shown unfiltered.
+/// [transactions] is a pre-filtered snapshot from whichever screen pushed
+/// this route (e.g. the Insights "See all" drilldown).
 class InstrumentListScreen extends StatefulWidget {
-  final List<Transaction>? transactions;
+  final List<Transaction> transactions;
   final String? subtitle;
 
   const InstrumentListScreen({
     super.key,
-    this.transactions,
+    required this.transactions,
     this.subtitle,
   });
 
@@ -49,16 +47,15 @@ class _InstrumentListScreenState extends State<InstrumentListScreen>
   @override
   Widget build(BuildContext context) {
     // [transactions] is a one-off snapshot from whichever Insights screen
-    // pushed this route, or null when opened as the standalone Accounts tab
-    // (see the class doc). Re-deriving a live copy from SmsProvider (matched
-    // by id when a snapshot was given) and re-grouping it into instrument
-    // summaries means a correction made to a transaction deeper in a
-    // drilldown (see TransactionTile's "Edit transaction"/"Not a
-    // transaction?" actions) is reflected here too, instead of this screen
-    // staying stale until it's popped and re-opened.
-    final ids = widget.transactions?.map((t) => t.smsId).toSet();
+    // pushed this route. Re-deriving a live copy from SmsProvider (matched
+    // by id) and re-grouping it into instrument summaries means a
+    // correction made to a transaction deeper in a drilldown (see
+    // TransactionTile's "Edit transaction"/"Not a transaction?" actions) is
+    // reflected here too, instead of this screen staying stale until it's
+    // popped and re-opened.
+    final ids = widget.transactions.map((t) => t.smsId).toSet();
     final allLive = context.watch<SmsProvider>().transactions;
-    final liveTransactions = ids == null ? allLive : allLive.where((t) => ids.contains(t.smsId)).toList();
+    final liveTransactions = allLive.where((t) => ids.contains(t.smsId)).toList();
     final duplicateIds = findDuplicateTransactionIds(liveTransactions);
     final grouped = groupByInstrument(liveTransactions, duplicateIds: duplicateIds);
 
