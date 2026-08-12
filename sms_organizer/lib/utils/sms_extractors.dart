@@ -99,6 +99,23 @@ String? extractOtp(String content) {
 // ---------------------------------------------------------------------------
 
 double? extractAmount(String content) {
+  // EPFO passbook SMS state both a passbook balance and a contribution
+  // amount in the same message ("your passbook balance ... is Rs.
+  // 1,75,975/-. Contribution of Rs. 2,350/- ... has been received.") — the
+  // generic first-Rs.-match scan below would grab the balance (mentioned
+  // first, and typically the larger figure) instead of the contribution
+  // that's actually this transaction's amount. Checked ahead of the
+  // generic patterns so "contribution of Rs. X" phrasing always wins
+  // whenever both appear together, regardless of which comes first.
+  final contributionMatch =
+      RegExp(r'contribution\s+of\s+(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)', caseSensitive: false)
+          .firstMatch(content);
+  final contributionRaw = contributionMatch?.group(1);
+  if (contributionRaw != null) {
+    final contributionAmount = double.tryParse(contributionRaw.replaceAll(',', ''));
+    if (contributionAmount != null && contributionAmount > 0) return contributionAmount;
+  }
+
   final patterns = [
     RegExp(r'(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)', caseSensitive: false),
     RegExp(r'([\d,]+(?:\.\d{1,2})?)\s*(?:rs|rupees|inr)', caseSensitive: false),
@@ -225,6 +242,14 @@ String? extractMerchant(String content) {
 
 String? extractAccountNumber(String content) {
   final explicitPatterns = [
+    // EPFO passbook SMS: "your passbook balance against KRMAL...0085 is
+    // Rs. X." — the establishment+member code after "against" is the
+    // actual PF account reference. Checked first: a masked number earlier
+    // in the same message (e.g. "Dear XXXXXXXX1745,", the user's own
+    // masked UAN/mobile prefix) would otherwise win via the generic
+    // mask-scan below just by appearing first in the text, even though
+    // it isn't the scheme-account identifier.
+    RegExp(r'balance\s+against\s+\S*?(\d{4})\b', caseSensitive: false),
     // Mask length varies by bank — some use a single "*" ("A/C *6020"),
     // others "XX"/"xxxx"/multiple asterisks. Widened from requiring 2+
     // mask characters to 1+ so a lone "*" or "x" still matches.
@@ -295,6 +320,16 @@ String? extractAccountNumber(String content) {
 
 double? extractBalance(String content) {
   final balancePatterns = [
+    // EPFO passbook SMS: "your passbook balance against KRMAL...0085 is
+    // Rs. 1,75,975/-." — the account reference sits between "balance" and
+    // the actual Rs. figure, which the generic "balance ... Rs. X" pattern
+    // below can't bridge (its `[:;\s-]*` gap doesn't allow the letters/
+    // digits/asterisks of an account number in between). Checked first so
+    // it wins over the generic pattern for this specific phrasing.
+    RegExp(
+      r'passbook\s+balance\s+against\s+.*?\s+is\s+(?:rs\.?|inr|₹)?\s*([0-9,]+(?:\.\d{1,2})?)',
+      caseSensitive: false,
+    ),
     RegExp(
       r'(?:avl\.?\s*bal\.?|available\s+balance|bal\.?|balance)[:;\s-]*(?:rs\.?|inr|₹)?\s*([0-9,]+(?:\.\d{1,2})?)',
       caseSensitive: false,
@@ -493,12 +528,22 @@ String? extractBankName(String sender) {
 String? extractBankNameFromContent(String content) {
   final match = RegExp(r'([A-Za-z]+)\s+Gift\s+Card', caseSensitive: false).firstMatch(content);
   final brand = match?.group(1);
-  if (brand == null) return null;
+  if (brand != null) {
+    const generics = ['my', 'your', 'the', 'a', 'an', 'new', 'free'];
+    if (!generics.contains(brand.toLowerCase())) {
+      return brand[0].toUpperCase() + brand.substring(1);
+    }
+  }
 
-  const generics = ['my', 'your', 'the', 'a', 'an', 'new', 'free'];
-  if (generics.contains(brand.toLowerCase())) return null;
+  // EPFO passbook SMS don't always name "EPFO"/"Provident Fund" in the
+  // sender ID the way a bank's DLT header would — "passbook balance" is
+  // the one consistently EPFO-specific phrase available, so it's used
+  // here rather than in _bankNamesBySenderKeyword above.
+  if (RegExp(r'\bepfo\b|provident fund|passbook balance', caseSensitive: false).hasMatch(content)) {
+    return 'EPFO';
+  }
 
-  return brand[0].toUpperCase() + brand.substring(1);
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -542,10 +587,21 @@ ParsedEntityType extractEntityType(String sender, String content) {
     'UPSTOX', 'ANGEL', 'ANGELONE', 'SHAREKHAN', 'MOTILAL', 'IIFL',
     'ICICI-PRU', 'ICICIPRU', 'IPRUMF', 'HDFC-MF', 'SBI-MF', 'AXIS-MF',
     'ABCAMC', 'MIRAEI', 'NIPPON', 'KOTAK-MF', 'DSP-MF', 'UTI-MF',
-    'QNTAMC', 'BOIAMC',
+    'QNTAMC', 'BOIAMC', 'EPFO',
   ];
   for (final investment in investmentProviders) {
     if (senderUpper.contains(investment)) return ParsedEntityType.investment;
+  }
+
+  // EPFO passbook SMS ("your passbook balance against KRMAL...0085 is
+  // Rs. X. Contribution of Rs. Y ... has been received.") don't always
+  // name "EPFO" in the sender ID the way a bank's DLT header does —
+  // "passbook balance" is the one consistently EPFO-specific phrase
+  // available, so it's checked by content here too, not just sender.
+  if (contentLower.contains('epfo') ||
+      contentLower.contains('provident fund') ||
+      contentLower.contains('passbook balance')) {
+    return ParsedEntityType.investment;
   }
 
   if ((senderUpper.contains('MF') ||

@@ -295,7 +295,7 @@ notes if you're porting further updates from the source later.
   to how many of the widest label actually fit in the real available
   width for the current period granularity.
 
-- **PPF/SSY/NPS self-transfers** get their own `InstrumentType.investment`
+- **PPF/SSY/NPS/EPFO self-transfers** get their own `InstrumentType.investment`
   (`TransactionParserService._instrumentType`), separate from the generic
   `bankAccount` type, so a small-savings-scheme sub-account shows up as its
   own row in the Cards & Accounts "Investments" section instead of being
@@ -304,6 +304,28 @@ notes if you're porting further updates from the source later.
   "Rs.X transferred to your PPF/SSY A/c ..." as a debit — on its own that
   phrasing reads like an incoming transfer ("to your ... A/c"), even though
   it's really money leaving the linked bank account into a locked scheme.
+  EPFO passbook SMS ("your passbook balance against KRMAL...0085 is Rs.
+  X. Contribution of Rs. Y for due month Feb-26 has been received.") don't
+  say "EPFO"/"provident fund" outright and never name an "A/c", so
+  `passbook balance` is the one consistently EPFO-specific phrase that
+  `_instrumentType`, `extractEntityType`, and `extractBankNameFromContent`
+  (issuer label "EPFO") all key off instead. Two message-shape quirks needed
+  their own fixes rather than falling out of the existing patterns: (1)
+  the message names the contribution's *due period* ("due month Feb-26"),
+  which used to trip `isBillNotification` (`categorization_service.dart` /
+  `Categorizer.kt`, kept in sync) the same way an actual unpaid-bill
+  reminder does and get the whole message dropped into `updates` instead
+  of `transactional`; (2) the message states *two* rupee amounts (the
+  passbook balance, then the contribution), so `extractAmount`'s generic
+  first-match scan grabbed the larger balance figure instead of the
+  contribution that's actually the transaction amount, and `extractBalance`
+  couldn't bridge the account-reference clause sitting between "balance"
+  and its own Rs. figure — both extractors now have an EPFO-specific
+  pattern checked ahead of their generic ones. `extractAccountNumber`
+  similarly needed its own EPFO pattern (`balance against <code> is`) so
+  the actual PF establishment+member code becomes the account reference,
+  rather than an unrelated masked number (the user's own masked UAN/mobile
+  prefix) that happens to appear earlier in the message text.
 
 - **OTP messages** now also extract the actual code (`extractOtp`) and
   surface a tap-to-copy button in the thread view (`MessageBubble`) —

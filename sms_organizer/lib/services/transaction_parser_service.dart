@@ -149,11 +149,16 @@ class TransactionParserService {
     if (cardHint == 'credit') return InstrumentType.creditCard;
     if (cardHint == 'debit') return InstrumentType.debitCard;
 
-    // A PPF/SSY/NPS small-savings-scheme sub-account, named explicitly —
-    // checked ahead of the generic bank-account match below since those SMS
-    // also say "A/c" (e.g. "PPF/SSY A/c No. 5685") and would otherwise be
-    // filed as an undifferentiated Bank Account.
-    if (RegExp(r'\bppf\b|\bssy\b|sukanya samriddhi|public provident fund|\bnps\b',
+    // A PPF/SSY/NPS/EPFO small-savings-or-retirement-scheme sub-account,
+    // named explicitly — checked ahead of the generic bank-account match
+    // below since those SMS also say "A/c"/"account" (e.g. "PPF/SSY A/c
+    // No. 5685") and would otherwise be filed as an undifferentiated Bank
+    // Account. EPFO passbook SMS don't always say "EPFO"/"provident fund"
+    // outright (e.g. "your passbook balance against KRMAL...0085 is Rs.
+    // X. Contribution of Rs. Y ... has been received.") — "passbook
+    // balance" is the one consistently EPFO-specific phrase available.
+    if (RegExp(
+            r'\bppf\b|\bssy\b|sukanya samriddhi|public provident fund|\bnps\b|\bepfo\b|provident fund|passbook balance',
             caseSensitive: false)
         .hasMatch(content)) {
       return InstrumentType.investment;
