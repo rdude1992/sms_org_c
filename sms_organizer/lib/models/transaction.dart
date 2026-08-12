@@ -489,29 +489,27 @@ class InvestmentEvent {
 
   String get providerDisplayName => (amc ?? fundOrScheme ?? 'Other').trim();
 
-  /// Groups investment events into a single *holding* — same AMC + folio/
-  /// account, or AMC + fund/scheme when no folio was detected — for NAV/
-  /// units/current-value tracking, which [providerGroupKey] is too coarse
-  /// for: two folios of the same fund (or two different funds under one
-  /// AMC) have different unit counts and can carry different NAV
-  /// histories, so netting them together would produce a meaningless
-  /// "units held" figure.
+  /// Groups investment events into a single *holding* — same AMC + fund/
+  /// scheme + folio/account — for NAV/units/current-value tracking, which
+  /// [providerGroupKey] is too coarse for: two folios of the same fund (or
+  /// two different funds under one AMC) have different unit counts and can
+  /// carry different NAV histories, so netting them together would produce
+  /// a meaningless "units held" figure.
   ///
-  /// Folio/account, when present, is used *alone* rather than combined
-  /// with [fundOrScheme] — it's the stronger identity signal, since the
-  /// same physical holding can get a slightly different fund-name string
-  /// depending on which message shape produced it. NPS/Protean is the
-  /// concrete case: a PRAN's tier-agnostic "Voluntary contribution"
-  /// credit SMS never names a tier ([fundOrScheme] defaults to the generic
-  /// "NPS Scheme"), while its periodic "Investment value in Tier II ...
-  /// is Rs X" statement does (fundOrScheme "NPS Tier 2") — same PRAN, same
-  /// real-world holding, but requiring an exact fundOrScheme match would
-  /// have split them into two holdings and left the statement unable to
-  /// inform the contribution-only holding's estimated value at all.
+  /// [fundOrScheme] has to stay part of the key even though [folioOrAccount]
+  /// is already a strong identity signal on its own — NPS/Protean is the
+  /// concrete reason: Tier I and Tier II are two genuinely distinct
+  /// sub-accounts (different units, different value) that routinely share
+  /// one PRAN, so keying on folio alone would blend them into one
+  /// meaningless blended holding. A tier-agnostic "Voluntary contribution"
+  /// credit SMS that never names a tier at all (extractInvestmentDetails
+  /// falls back to the generic "NPS Scheme") ends up as its own third
+  /// bucket under that PRAN rather than guessed into either tier — not
+  /// perfect, but safer than silently merging two accounts that might not
+  /// be the same one.
   String get holdingGroupKey {
     final folioPart = (folioOrAccount ?? '').trim().toLowerCase();
-    if (folioPart.isNotEmpty) return '$providerGroupKey|$folioPart';
-    return '$providerGroupKey|${(fundOrScheme ?? '').trim().toLowerCase()}';
+    return '$providerGroupKey|${(fundOrScheme ?? '').trim().toLowerCase()}|$folioPart';
   }
 
   Map<String, dynamic> toJson() => {

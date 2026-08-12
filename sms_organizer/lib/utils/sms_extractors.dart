@@ -878,12 +878,21 @@ ExtractedInvestmentDetails extractInvestmentDetails(String content, String sende
   }
 
   final contentLower = content.toLowerCase();
-  if (contentLower.contains('nps') && (contentLower.contains('tier 1') || contentLower.contains('tier i'))) {
-    details.investmentName = 'NPS Tier 1';
-    details.amc = 'NPS';
-  } else if (contentLower.contains('nps') &&
-      (contentLower.contains('tier 2') || contentLower.contains('tier ii'))) {
+  // Word-boundary matching matters here: a plain `.contains('tier i')`
+  // check is also a substring match against "tier ii" ("tier i" is
+  // literally the first 6 characters of "tier ii"), so the Tier 1 branch
+  // used to fire for *every* Tier II message too — and since it was
+  // checked first, Tier II never actually got a chance to be detected.
+  // `\b` after the numeral requires a non-word character (or end of
+  // string) right after it, which the second "i" in "ii" isn't, so this
+  // correctly stops "tier i" from matching inside "tier ii".
+  final isTier1 = RegExp(r'\btier\s+(?:1|i)\b').hasMatch(contentLower);
+  final isTier2 = RegExp(r'\btier\s+(?:2|ii)\b').hasMatch(contentLower);
+  if (contentLower.contains('nps') && isTier2) {
     details.investmentName = 'NPS Tier 2';
+    details.amc = 'NPS';
+  } else if (contentLower.contains('nps') && isTier1) {
+    details.investmentName = 'NPS Tier 1';
     details.amc = 'NPS';
   }
 

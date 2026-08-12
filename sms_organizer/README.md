@@ -206,16 +206,16 @@ notes if you're porting further updates from the source later.
 
 - **Estimated fund value, NAV/units trend, and SIP detection**
   (`holdings_service.dart`) group investment events into per-fund
-  *holdings* — same AMC + folio/account, or AMC + fund/scheme when no
-  folio was detected (`InvestmentEvent.holdingGroupKey`) — a finer
-  grouping than the "By AMC" tab's own `providerGroupKey` (AMC only),
-  since two folios of the same fund — or two different funds under one
-  AMC — have independent unit counts and NAV histories. Folio/account
-  alone (not combined with fund name) is the identity key when present:
-  the same physical holding can get a slightly different fund-name string
-  depending on which message shape produced it (see the NPS case below),
-  and requiring an exact match would silently split one holding into two.
-  Each holding's units-held and net-invested are reconstructed
+  *holdings* — same AMC + fund/scheme + folio/account
+  (`InvestmentEvent.holdingGroupKey`) — a finer grouping than the "By AMC"
+  tab's own `providerGroupKey` (AMC only), since two folios of the same
+  fund, or two different funds/tiers under one AMC (NPS Tier I and Tier II
+  routinely share one PRAN — see below), have independent unit counts and
+  NAV histories that would produce a meaningless blended figure if netted
+  together. A tier-agnostic NPS contribution SMS that never names a tier
+  at all ends up its own third bucket under that PRAN rather than guessed
+  into either tier's holding. Each holding's units-held and net-invested
+  are reconstructed
   event-by-event; "estimated current value" prefers units held × the most
   recent NAV any SMS mentioned, falls back to the most recent confirmed
   value statement (see below) plus contributions made since, and falls
@@ -244,6 +244,16 @@ notes if you're porting further updates from the source later.
   checkpoint rather than a cash flow: every invested/redeemed total, the
   SIP detector, and provider/AMC bucketing all skip it via
   `InvestmentKind.isValuationOnly`.
+
+- **Tier I/Tier II detection had a substring bug.** `extractInvestment
+  Details`'s tier check used to be a plain `contentLower.contains('tier
+  i')` — which also matches inside "tier ii" (`"tier i"` is literally the
+  first 6 characters of `"tier ii"`), and since the Tier I branch was
+  checked first, every Tier II message got mislabeled "NPS Tier 1", never
+  reaching the Tier II branch at all. Fixed with `\b`-bounded regex
+  (`\btier\s+(?:1|i)\b` / `\btier\s+(?:2|ii)\b`) — a word boundary can't
+  land between the two `i`s in "ii", so "tier i" genuinely stops matching
+  inside "tier ii".
 
 - **PPF/SSY/NPS self-transfers** get their own `InstrumentType.investment`
   (`TransactionParserService._instrumentType`), separate from the generic
