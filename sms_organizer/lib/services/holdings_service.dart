@@ -172,10 +172,19 @@ List<FundHolding> computeFundHoldings(List<InvestmentEvent> events) {
       }
       if (e.kind.isRedemption) {
         net -= e.amount;
-        if (e.units != null) units -= e.units!;
       } else {
         net += e.amount;
-        if (e.units != null) units += e.units!;
+      }
+      // A stated running balance (e.g. "Balance Units 205.177") already
+      // reflects every prior installment plus this one — set the running
+      // total directly rather than summing it on top of what's already
+      // there, which would double-count everything before it. Only fall
+      // back to treating `units` as a per-installment delta when no
+      // balance figure was given.
+      if (e.unitsBalance != null) {
+        units = e.unitsBalance!;
+      } else if (e.units != null) {
+        units += e.kind.isRedemption ? -e.units! : e.units!;
       }
       if (e.nav != null) {
         nav = e.nav;
@@ -266,7 +275,25 @@ class SipInfo {
   final double amount;
   final DateTime since;
   final int installments;
-  const SipInfo({required this.amount, required this.since, required this.installments});
+
+  /// Date of the most recent installment at the detected amount/cadence —
+  /// distinct from [since] (the *first* one), used by [isDiscontinued] to
+  /// tell "still running" apart from "stopped a while ago".
+  final DateTime lastInstallment;
+
+  const SipInfo({
+    required this.amount,
+    required this.since,
+    required this.installments,
+    required this.lastInstallment,
+  });
+
+  /// True once ~3 months have passed since [lastInstallment] with no
+  /// further installment at this amount/cadence detected — there's no SMS
+  /// that explicitly says "SIP cancelled", so a long enough gap since the
+  /// last one is the only signal available that it's probably been paused
+  /// or stopped, rather than still quietly running every month.
+  bool get isDiscontinued => DateTime.now().difference(lastInstallment).inDays >= 90;
 }
 
 /// Heuristic: the purchase amount (rounded to the nearest rupee) that
@@ -296,5 +323,10 @@ SipInfo? detectSip(FundHolding holding) {
   if (best == null) return null;
 
   final sorted = [...best]..sort((a, b) => a.date.compareTo(b.date));
-  return SipInfo(amount: sorted.first.amount, since: sorted.first.date, installments: sorted.length);
+  return SipInfo(
+    amount: sorted.first.amount,
+    since: sorted.first.date,
+    installments: sorted.length,
+    lastInstallment: sorted.last.date,
+  );
 }

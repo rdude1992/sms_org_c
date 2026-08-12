@@ -255,6 +255,46 @@ notes if you're porting further updates from the source later.
   land between the two `i`s in "ii", so "tier i" genuinely stops matching
   inside "tier ii".
 
+- **"Balance Units" was being summed as if it were a per-installment
+  delta.** Regular AMC purchase/SIP confirmations (e.g. ABSL MF's "...
+  Purchase-SIP ... is processed. Balance Units 205.177.") often report a
+  *running total* units balance, not the units allotted by that one
+  installment — but `extractInvestmentDetails`'s units regex treated
+  "Units 205.177" the same either way, and `holdings_service.dart` summed
+  every event's `units` on top of the running total. Two ₹4,999.75
+  installments a month apart, reporting balances of 205.177 then 211.947
+  units, were being recorded as ~417 units held instead of the ~212 the
+  second statement actually reported — a holding whose SMS reports a
+  balance this way never converges to the right unit count, it just keeps
+  compounding the error every installment. Fixed with a dedicated "balance
+  units" regex (`ExtractedInvestmentDetails.balanceUnits`,
+  `InvestmentEvent.unitsBalance` — new `units_balance` column, DB version
+  9) that `computeFundHoldings` *sets* the running total to rather than
+  adding on top of it, falling back to the old delta-summing behavior only
+  when a message states a plain per-installment count instead.
+
+- **SIP-discontinued detection.** `SipInfo.isDiscontinued` (holdings_
+  service.dart) flags a detected SIP once ~3 months have passed with no
+  further installment at its cadence/amount — there's no SMS that
+  explicitly says "SIP cancelled", so a long gap since the last one is the
+  only signal available. Surfaced in `AmcDetailScreen` as a
+  "DISCONTINUED" badge next to the fund name plus a note under the SIP
+  line; tapping the fund name itself now opens that holding's own filtered
+  transaction list (previously only the whole AMC's list was reachable).
+
+- **Trend chart axis sizing is now content-aware, not a fixed guess.**
+  `TrendBarChart`/`TrendLineChart` used to reserve a fixed 46px for the
+  y-axis and thin x-axis labels to a flat "6 max" regardless of what was
+  actually being displayed — clipping a precise NAV value like
+  "₹1,234.56" in the same space a compact "₹4.9K" fit fine, and applying
+  the same label count whether the x-axis was showing "15" (day
+  granularity) or "Aug 25" (month granularity). `chart_label_sizing.dart`'s
+  `measureTextWidth` (a `TextPainter` layout) now sizes the reserved
+  y-axis column to the widest tick label actually reachable at the
+  current amount scale, and a `LayoutBuilder` sizes x-axis label thinning
+  to how many of the widest label actually fit in the real available
+  width for the current period granularity.
+
 - **PPF/SSY/NPS self-transfers** get their own `InstrumentType.investment`
   (`TransactionParserService._instrumentType`), separate from the generic
   `bankAccount` type, so a small-savings-scheme sub-account shows up as its

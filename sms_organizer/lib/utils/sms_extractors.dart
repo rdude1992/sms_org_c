@@ -830,7 +830,19 @@ String _capitalizeWords(String input) =>
 
 class ExtractedInvestmentDetails {
   String? investmentName;
+
+  /// This *installment's own* unit count (e.g. "155.248 units ... have
+  /// been allotted") — a delta to add to a holding's running total, not
+  /// the total itself. Mutually exclusive with [balanceUnits]; see there.
   double? units;
+
+  /// A stated running/cumulative unit balance (e.g. "Balance Units
+  /// 205.177") — the folio's total units *after* this transaction, not
+  /// this installment's own allotment. Kept separate from [units]
+  /// specifically so callers never accidentally sum it across installments
+  /// the way a real per-installment delta should be summed.
+  double? balanceUnits;
+
   double? nav;
   String? folio;
   String? amc;
@@ -871,10 +883,26 @@ ExtractedInvestmentDetails extractInvestmentDetails(String content, String sende
     details.amc = 'NPS';
   }
 
-  final unitsMatch = RegExp(r'(\d+(?:\.\d+)?)\s*units', caseSensitive: false).firstMatch(content) ??
-      RegExp(r'units\s*[:\-]?\s*(\d+(?:\.\d+)?)', caseSensitive: false).firstMatch(content);
-  if (unitsMatch?.group(1) != null) {
-    details.units = double.tryParse(unitsMatch!.group(1)!.replaceAll(',', ''));
+  // "Balance Units X" (common in AMC purchase/SIP confirmations, e.g.
+  // ABSL MF's "... is processed. Balance Units 205.177.") states the
+  // folio's *running total* after this transaction, not this installment's
+  // own allotment — checked first and, when it matches, deliberately skips
+  // the generic `unitsMatch` fallback below (which would otherwise also
+  // match the same "Units 205.177" text and misfile it as a delta). Mixing
+  // the two up meant every installment's *cumulative* balance got summed
+  // as if each one were a fresh allotment on top of the last — a 205-unit
+  // balance followed by a 212-unit balance next month was being recorded
+  // as ~417 units held, not the ~212 the statement actually reported.
+  final balanceUnitsMatch =
+      RegExp(r'balance\s+units\s*[:\-]?\s*([\d,]+(?:\.\d+)?)', caseSensitive: false).firstMatch(content);
+  if (balanceUnitsMatch?.group(1) != null) {
+    details.balanceUnits = double.tryParse(balanceUnitsMatch!.group(1)!.replaceAll(',', ''));
+  } else {
+    final unitsMatch = RegExp(r'(\d+(?:\.\d+)?)\s*units', caseSensitive: false).firstMatch(content) ??
+        RegExp(r'units\s*[:\-]?\s*(\d+(?:\.\d+)?)', caseSensitive: false).firstMatch(content);
+    if (unitsMatch?.group(1) != null) {
+      details.units = double.tryParse(unitsMatch!.group(1)!.replaceAll(',', ''));
+    }
   }
 
   final contentLower = content.toLowerCase();

@@ -139,7 +139,12 @@ class _AmcDetailScreenState extends State<AmcDetailScreen> {
           ),
           const SizedBox(height: 8),
           for (final holding in holdings)
-            _HoldingSection(key: ValueKey(holding.key), holding: holding, inRange: inRange),
+            _HoldingSection(
+              key: ValueKey(holding.key),
+              holding: holding,
+              inRange: inRange,
+              allInvestments: widget.allInvestments,
+            ),
         ],
       ),
     );
@@ -177,7 +182,17 @@ class _HoldingSection extends StatelessWidget {
   final FundHolding holding;
   final bool Function(DateTime) inRange;
 
-  const _HoldingSection({super.key, required this.holding, required this.inRange});
+  /// Passed straight through to the pushed screen (see
+  /// InvestmentListScreen.allInvestments) when the fund name is tapped, so
+  /// its own "By AMC" tab keeps access to the true unscoped dataset.
+  final List<InvestmentEvent> allInvestments;
+
+  const _HoldingSection({
+    super.key,
+    required this.holding,
+    required this.inRange,
+    required this.allInvestments,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -187,6 +202,18 @@ class _HoldingSection extends StatelessWidget {
     final unitsPoints = unitsHistory(holding).where((p) => inRange(p.date)).toList();
     final valuationPoints = holding.valuations.where((v) => inRange(v.date)).toList();
 
+    void openHoldingTransactions() => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => InvestmentListScreen(
+              investments: holding.events,
+              allInvestments: allInvestments,
+              subtitle: holding.displayName,
+              initialTabIndex: 3,
+            ),
+          ),
+        );
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: Column(
@@ -194,7 +221,36 @@ class _HoldingSection extends StatelessWidget {
         children: [
           Divider(color: scheme.outlineVariant.withOpacity(0.5)),
           const SizedBox(height: 8),
-          Text(holding.displayName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+          InkWell(
+            onTap: openHoldingTransactions,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    holding.displayName,
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                  ),
+                ),
+                if (sip?.isDiscontinued ?? false) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: kLossColor.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'DISCONTINUED',
+                      style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: kLossColor),
+                    ),
+                  ),
+                ],
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right, size: 18, color: scheme.onSurfaceVariant),
+              ],
+            ),
+          ),
           if (holding.folioOrAccount != null && holding.folioOrAccount!.trim().isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 2),
@@ -239,13 +295,34 @@ class _HoldingSection extends StatelessWidget {
               style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
             ),
           const SizedBox(height: 4),
-          Text(
-            sip != null
-                ? 'Monthly SIP ${Formatters.currency(sip.amount)} · live since ${Formatters.dayMonthYear(sip.since)} '
-                    '(${sip.installments} installments)'
-                : 'No recurring monthly pattern detected.',
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-          ),
+          if (sip == null)
+            Text(
+              'No recurring monthly pattern detected.',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            )
+          else ...[
+            Text(
+              'Monthly SIP ${Formatters.currency(sip.amount)} · live since ${Formatters.dayMonthYear(sip.since)} '
+              '(${sip.installments} installments)',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+            if (sip.isDiscontinued)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.pause_circle_outline, size: 13, color: kLossColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      'SIP likely discontinued — no installment since '
+                      '${Formatters.dayMonthYear(sip.lastInstallment)}',
+                      style: TextStyle(fontSize: 12, color: kLossColor, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+          ],
           if (valuationPoints.length >= 2) ...[
             const SizedBox(height: 12),
             Text('Confirmed value over time',

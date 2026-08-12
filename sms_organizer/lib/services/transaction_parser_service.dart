@@ -90,6 +90,7 @@ class TransactionParserService {
       fundOrScheme: details.investmentName,
       folioOrAccount: details.folio,
       units: details.units,
+      unitsBalance: details.balanceUnits,
       nav: details.nav,
       amc: amc,
       rawBody: body,

@@ -1,5 +1,7 @@
+import 'dart:math' as math;
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'chart_label_sizing.dart';
 
 /// One line's worth of data for [TrendLineChart] — index-aligned with the
 /// chart's shared [TrendLineChart.dates].
@@ -43,6 +45,9 @@ class TrendLineChart extends StatelessWidget {
     this.emptyMessage = 'Not enough data yet.',
   });
 
+  static const _axisLabelStyle = TextStyle(fontSize: 10);
+  static const _rightReservedSize = 28.0;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -66,8 +71,21 @@ class TrendLineChart extends StatelessWidget {
     final minY = minVal >= 0 ? 0.0 : minVal * 1.15;
     final yInterval = (maxY - minY) <= 0 ? 1.0 : (maxY - minY) / 4;
 
-    const maxLabels = 6;
-    final labelInterval = (dates.length / maxLabels).ceil().clamp(1, dates.length);
+    // Widest y-axis tick label actually reachable at this interval — sizes
+    // the reserved left column to the real content (a precise "₹1,234.56"
+    // needs much more room than a compact "₹4.9K") instead of a single
+    // fixed guess that clips one and wastes space for the other.
+    final yTickWidth = [for (var v = minY; v <= maxY + 0.001; v += yInterval) axisFormatter(v)]
+        .fold<double>(0, (w, label) => math.max(w, measureTextWidth(label, _axisLabelStyle)));
+    final leftReservedSize = (yTickWidth + 12).clamp(32.0, 84.0);
+
+    // Widest x-axis label across every bucket, used below to figure out how
+    // many labels can actually fit side by side without overlapping — a
+    // "month" granularity's "Aug 25" needs more horizontal room per label
+    // than a "day" granularity's "15", so the same fixed label count would
+    // either cram the wide ones or under-use the room short ones leave free.
+    final xLabelWidth =
+        dates.fold<double>(0, (w, d) => math.max(w, measureTextWidth(axisLabelBuilder(d), _axisLabelStyle)));
 
     void handleTap(FlTouchEvent event, LineTouchResponse? response) {
       if (event is! FlTapUpEvent) return;
@@ -98,116 +116,130 @@ class TrendLineChart extends StatelessWidget {
             ],
             SizedBox(
               height: 200,
-              child: LineChart(
-                LineChartData(
-                  minY: minY,
-                  maxY: maxY,
-                  lineTouchData: LineTouchData(
-                    touchCallback: handleTap,
-                    touchTooltipData: LineTouchTooltipData(
-                      tooltipBorderRadius: BorderRadius.circular(8),
-                      tooltipPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      getTooltipColor: (_) => scheme.onSurface,
-                      getTooltipItems: (touchedSpots) {
-                        if (touchedSpots.isEmpty) return [];
-                        final idx = touchedSpots.first.spotIndex;
-                        if (idx < 0 || idx >= dates.length) {
-                          return [for (final _ in touchedSpots) null];
-                        }
-                        return [
-                          for (var i = 0; i < touchedSpots.length; i++)
-                            LineTooltipItem(
-                              i == 0 ? '${tooltipDateBuilder(dates[idx])}\n' : '',
-                              TextStyle(
-                                color: scheme.surface,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                fontFamily: 'Inter',
-                              ),
-                              children: [
-                                TextSpan(
-                                  text:
-                                      '${series[touchedSpots[i].barIndex].label} ${valueFormatter(touchedSpots[i].y)}',
-                                  style: TextStyle(
-                                    color: series[touchedSpots[i].barIndex].color,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // Available width for x-axis labels, once the (now
+                  // dynamically-sized) left/right axis columns are spoken
+                  // for — the actual budget label-thinning has to fit into,
+                  // rather than a plot-width guess baked in beforehand.
+                  final plotWidth =
+                      (constraints.maxWidth - leftReservedSize - _rightReservedSize).clamp(1.0, double.infinity);
+                  final labelSlot = xLabelWidth + 14;
+                  final maxLabels = (plotWidth / labelSlot).floor().clamp(2, dates.length);
+                  final labelInterval = (dates.length / maxLabels).ceil().clamp(1, dates.length);
+
+                  return LineChart(
+                    LineChartData(
+                      minY: minY,
+                      maxY: maxY,
+                      lineTouchData: LineTouchData(
+                        touchCallback: handleTap,
+                        touchTooltipData: LineTouchTooltipData(
+                          tooltipBorderRadius: BorderRadius.circular(8),
+                          tooltipPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          getTooltipColor: (_) => scheme.onSurface,
+                          getTooltipItems: (touchedSpots) {
+                            if (touchedSpots.isEmpty) return [];
+                            final idx = touchedSpots.first.spotIndex;
+                            if (idx < 0 || idx >= dates.length) {
+                              return [for (final _ in touchedSpots) null];
+                            }
+                            return [
+                              for (var i = 0; i < touchedSpots.length; i++)
+                                LineTooltipItem(
+                                  i == 0 ? '${tooltipDateBuilder(dates[idx])}\n' : '',
+                                  TextStyle(
+                                    color: scheme.surface,
                                     fontSize: 11,
+                                    fontWeight: FontWeight.w700,
                                     fontFamily: 'Inter',
-                                    fontWeight: FontWeight.w400,
                                   ),
+                                  children: [
+                                    TextSpan(
+                                      text:
+                                          '${series[touchedSpots[i].barIndex].label} ${valueFormatter(touchedSpots[i].y)}',
+                                      style: TextStyle(
+                                        color: series[touchedSpots[i].barIndex].color,
+                                        fontSize: 11,
+                                        fontFamily: 'Inter',
+                                        fontWeight: FontWeight.w400,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
-                        ];
-                      },
-                    ),
-                  ),
-                  lineBarsData: [
-                    for (final s in series)
-                      LineChartBarData(
-                        spots: [for (var i = 0; i < dates.length; i++) FlSpot(i.toDouble(), s.values[i])],
-                        isCurved: false,
-                        color: s.color,
-                        barWidth: 2.5,
-                        dotData: FlDotData(show: dates.length <= 20),
-                        belowBarData: BarAreaData(show: false),
+                            ];
+                          },
+                        ),
                       ),
-                  ],
-                  titlesData: FlTitlesData(
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 46,
-                        interval: yInterval,
-                        getTitlesWidget: (value, meta) {
-                          if (value >= maxY) return const SizedBox.shrink();
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: Text(
-                              axisFormatter(value),
-                              textAlign: TextAlign.right,
-                              style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
-                            ),
-                          );
-                        },
+                      lineBarsData: [
+                        for (final s in series)
+                          LineChartBarData(
+                            spots: [for (var i = 0; i < dates.length; i++) FlSpot(i.toDouble(), s.values[i])],
+                            isCurved: false,
+                            color: s.color,
+                            barWidth: 2.5,
+                            dotData: FlDotData(show: dates.length <= 20),
+                            belowBarData: BarAreaData(show: false),
+                          ),
+                      ],
+                      titlesData: FlTitlesData(
+                        leftTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: leftReservedSize,
+                            interval: yInterval,
+                            getTitlesWidget: (value, meta) {
+                              if (value >= maxY) return const SizedBox.shrink();
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: Text(
+                                  axisFormatter(value),
+                                  textAlign: TextAlign.right,
+                                  style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        rightTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: _rightReservedSize,
+                            getTitlesWidget: (value, meta) => const SizedBox.shrink(),
+                          ),
+                        ),
+                        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 28,
+                            getTitlesWidget: (value, meta) {
+                              final idx = value.toInt();
+                              if (idx < 0 || idx >= dates.length) return const SizedBox.shrink();
+                              final isLast = idx == dates.length - 1;
+                              if (idx % labelInterval != 0 && !isLast) return const SizedBox.shrink();
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(
+                                  axisLabelBuilder(dates[idx]),
+                                  style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
                       ),
-                    ),
-                    rightTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 28,
-                        getTitlesWidget: (value, meta) => const SizedBox.shrink(),
+                      gridData: FlGridData(
+                        show: true,
+                        drawVerticalLine: false,
+                        horizontalInterval: yInterval,
+                        getDrawingHorizontalLine: (_) =>
+                            FlLine(color: scheme.outlineVariant.withOpacity(0.5), strokeWidth: 1),
                       ),
+                      borderData: FlBorderData(show: false),
                     ),
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 28,
-                        getTitlesWidget: (value, meta) {
-                          final idx = value.toInt();
-                          if (idx < 0 || idx >= dates.length) return const SizedBox.shrink();
-                          final isLast = idx == dates.length - 1;
-                          if (idx % labelInterval != 0 && !isLast) return const SizedBox.shrink();
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              axisLabelBuilder(dates[idx]),
-                              style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  gridData: FlGridData(
-                    show: true,
-                    drawVerticalLine: false,
-                    horizontalInterval: yInterval,
-                    getDrawingHorizontalLine: (_) =>
-                        FlLine(color: scheme.outlineVariant.withOpacity(0.5), strokeWidth: 1),
-                  ),
-                  borderData: FlBorderData(show: false),
-                ),
+                  );
+                },
               ),
             ),
           ],

@@ -443,9 +443,21 @@ class InvestmentEvent {
   final String? fundOrScheme;
   final String? folioOrAccount;
 
-  /// Number of units allotted/redeemed, if the SMS stated it or it could be
-  /// derived from amount ÷ NAV.
+  /// Number of units allotted/redeemed *by this installment specifically*,
+  /// if the SMS stated it that way or it could be derived from amount ÷
+  /// NAV — a delta to add to (or, for a redemption, subtract from) a
+  /// holding's running unit total. Mutually exclusive with [unitsBalance];
+  /// see there for the other, non-delta shape a unit count can take.
   final double? units;
+
+  /// A stated running/cumulative unit balance — e.g. "Balance Units
+  /// 205.177" in an AMC's purchase/SIP confirmation — the folio's *total*
+  /// units after this transaction, not this installment's own allotment.
+  /// holdings_service.dart treats this as authoritative and *sets* a
+  /// holding's unit count to it rather than adding it on top of the
+  /// running total the way [units] is summed, since it already includes
+  /// every prior installment.
+  final double? unitsBalance;
 
   /// Net asset value per unit at the time of this event, if stated.
   final double? nav;
@@ -470,6 +482,7 @@ class InvestmentEvent {
     this.fundOrScheme,
     this.folioOrAccount,
     this.units,
+    this.unitsBalance,
     this.nav,
     this.amc,
     this.isOverridden = false,
@@ -520,6 +533,7 @@ class InvestmentEvent {
         'fundOrScheme': fundOrScheme,
         'folioOrAccount': folioOrAccount,
         'units': units,
+        'unitsBalance': unitsBalance,
         'nav': nav,
         'amc': amc,
         'rawBody': rawBody,
@@ -536,6 +550,7 @@ class InvestmentEvent {
         fundOrScheme: json['fundOrScheme'] as String?,
         folioOrAccount: json['folioOrAccount'] as String?,
         units: (json['units'] as num?)?.toDouble(),
+        unitsBalance: (json['unitsBalance'] as num?)?.toDouble(),
         nav: (json['nav'] as num?)?.toDouble(),
         amc: json['amc'] as String?,
         isOverridden: json['isOverridden'] as bool? ?? false,

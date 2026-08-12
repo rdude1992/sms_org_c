@@ -28,7 +28,7 @@ class DatabaseService {
     final path = p.join(dbPath, 'sms_organizer.db');
     return openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE message_categories (
@@ -67,6 +67,7 @@ class DatabaseService {
             fund_or_scheme TEXT,
             folio_or_account TEXT,
             units REAL,
+            units_balance REAL,
             nav REAL,
             amc TEXT,
             raw_body TEXT,
@@ -150,6 +151,14 @@ class DatabaseService {
               spend_category TEXT NOT NULL
             )
           ''');
+        }
+        if (oldVersion < 8) {
+          // A stated running/cumulative unit balance (e.g. "Balance Units
+          // 205.177"), as opposed to `units`' this-installment-only delta —
+          // see InvestmentEvent.unitsBalance and holdings_service.dart's
+          // valueAsOf for why conflating the two double-counted every
+          // holding whose SMS reports a running total.
+          await db.execute('ALTER TABLE investments ADD COLUMN units_balance REAL');
         }
       },
     );
@@ -306,6 +315,7 @@ class DatabaseService {
         'fund_or_scheme': e.fundOrScheme,
         'folio_or_account': e.folioOrAccount,
         'units': e.units,
+        'units_balance': e.unitsBalance,
         'nav': e.nav,
         'amc': e.amc,
         'raw_body': e.rawBody,
@@ -357,6 +367,7 @@ class DatabaseService {
               fundOrScheme: row['fund_or_scheme'] as String?,
               folioOrAccount: row['folio_or_account'] as String?,
               units: row['units'] as double?,
+              unitsBalance: row['units_balance'] as double?,
               nav: row['nav'] as double?,
               amc: row['amc'] as String?,
               rawBody: row['raw_body'] as String? ?? '',
