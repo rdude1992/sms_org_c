@@ -56,7 +56,12 @@ extension on _SortBy {
 /// can still slice that provider's history by time.
 enum InvestmentRange { thisMonth, last3Months, last6Months, thisYear, allTime }
 
-extension on InvestmentRange {
+/// Named (unlike most of this file's other extensions) specifically so
+/// AmcDetailScreen — a separate library — can rely on plainly importing
+/// this file to bring these members into scope, the same way
+/// [InvestmentKindX] in transaction.dart is named for its own out-of-file
+/// callers.
+extension InvestmentRangeX on InvestmentRange {
   String get label {
     switch (this) {
       case InvestmentRange.thisMonth:
