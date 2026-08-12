@@ -151,7 +151,12 @@ class MessageBubble extends StatelessWidget {
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              CategoryBadge(category: message.category, compact: true, showLabel: false),
+                              CategoryBadge(
+                                category: message.category,
+                                compact: true,
+                                showLabel: false,
+                                iconSize: 9,
+                              ),
                               const SizedBox(width: 6),
                               Text(
                                 Formatters.timeOfDay(message.date),
