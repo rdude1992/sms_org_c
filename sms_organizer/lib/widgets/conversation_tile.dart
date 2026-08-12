@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/category.dart';
 import '../models/sms_message.dart';
+import '../theme/app_colors.dart';
 import '../utils/formatters.dart';
 import '../utils/search_snippet.dart';
 import 'category_badge.dart';
@@ -204,13 +205,16 @@ class MessagePreviewPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    // Fixed dark-neutral card — deliberately independent of light/dark
+    // theme and the terracotta brand accent, same reasoning as
+    // MessageBubble's outgoing bubble (see there): a low-key dark "peek"
+    // card rather than a theme-tinted one.
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: scheme.surfaceVariant.withOpacity(0.4),
+        color: AppColors.stone900,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -219,7 +223,8 @@ class MessagePreviewPanel extends StatelessWidget {
         children: [
           Text(
             Formatters.full(message.date),
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: scheme.onSurfaceVariant),
+            style: const TextStyle(
+                fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.darkMutedForeground),
           ),
           const SizedBox(height: 6),
           ConstrainedBox(
@@ -227,7 +232,7 @@ class MessagePreviewPanel extends StatelessWidget {
             child: SingleChildScrollView(
               child: Text(
                 message.body.isEmpty ? '(no message text)' : message.body,
-                style: TextStyle(fontSize: 13, height: 1.4, color: scheme.onSurface),
+                style: const TextStyle(fontSize: 13, height: 1.4, color: AppColors.darkOnSurface),
               ),
             ),
           ),

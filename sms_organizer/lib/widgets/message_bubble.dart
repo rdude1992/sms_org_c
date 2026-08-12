@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/category.dart';
 import '../models/sms_message.dart';
+import '../theme/app_colors.dart';
 import '../utils/formatters.dart';
 import '../utils/message_highlighter.dart';
 import '../utils/sms_extractors.dart';
@@ -60,8 +61,13 @@ class MessageBubble extends StatelessWidget {
     final isOutgoing = message.box == SmsBoxType.sent || message.box == SmsBoxType.outbox;
     final scheme = Theme.of(context).colorScheme;
 
-    final bubbleColor = isOutgoing ? scheme.primary : scheme.surfaceVariant;
-    final textColor = isOutgoing ? scheme.onPrimary : scheme.onSurface;
+    // Sent bubbles get their own fixed dark-neutral look — deliberately
+    // independent of both light/dark theme and the terracotta brand accent,
+    // the same way a chat app's own sent-bubble color usually stays fixed
+    // regardless of system theme, rather than the accent-tinted bubble this
+    // used to be.
+    final bubbleColor = isOutgoing ? AppColors.stone900 : scheme.surfaceVariant;
+    final textColor = isOutgoing ? AppColors.darkOnSurface : scheme.onSurface;
 
     // Computed on demand rather than cached on the model — only otp-tagged
     // messages need it, and it's a single cheap regex pass per render.
