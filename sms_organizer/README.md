@@ -75,19 +75,24 @@ lib/
     transaction_parser_service.dart Extracts amount/direction/instrument/issuer/balance
     spend_category_detector.dart    Best-effort auto-tagging of Transaction.spendCategory
     insights_service.dart           Aggregates into totals/trend/per-instrument/per-category summaries
+    duplicate_detection_service.dart Flags the "shadow" half of a card-network +
+                                      bank-account SMS pair reporting one purchase twice,
+                                      so linked-account totals aren't doubled
     database_service.dart           sqflite cache of categories + parsed data
     backup_service.dart             JSON export/share + restore
     contact_service.dart            Phone-number-to-name lookup, built once from device contacts
     notification_preferences_service.dart  Persists muted categories (notifications
                                             themselves are fully native — see below)
-    biometric_auth_service.dart     Fingerprint/face/PIN gate for the Insights tab
+    biometric_auth_service.dart     Fingerprint/face/PIN gate for the Insights/Accounts tabs
   providers/               SmsProvider (app state), ThemeProvider (dark mode),
                             NotificationSettingsProvider (per-category mute switches),
-                            SecuritySettingsProvider (Insights biometric lock)
-  screens/                 Onboarding, Home (bottom nav), Inbox (chat/list toggle), Thread,
-                            Compose, Insights (+ instrument/investment/merchant/transaction
-                            drilldowns, uncategorised-transactions review), Settings,
-                            Starred, Drafts
+                            SecuritySettingsProvider (Insights/Accounts biometric lock)
+  screens/                 Onboarding, Home (bottom nav: Inbox/Insights/Accounts/Settings),
+                            Inbox (chat/list toggle), Thread, Compose, Insights (+
+                            instrument/investment/merchant/transaction drilldowns,
+                            uncategorised-transactions review), Accounts (the same
+                            "Cards & Accounts" screen as Insights' drilldown, promoted
+                            to a top-level tab), Settings, Starred, Drafts
   widgets/                 Conversation tile, message bubble, category badge, direction badge,
                             multi-select app bar, transaction tile (+ its edit/assign-account/
                             detected-SMS sheets), investment tile (+ its edit sheet),
@@ -327,6 +332,16 @@ from the second sync onward.
   in `IncomingSmsNotifier.kt`.
 - **Merchant extraction is best-effort.** The regex looks for patterns like
   "at MERCHANT", "to MERCHANT" — it'll miss unusual phrasing.
+- **Duplicate-alert detection is a heuristic, not exact.** For a linked
+  debit-card + bank-account pair (see `Transaction.instrumentGroupKey`),
+  `duplicate_detection_service.dart` collapses a card-network alert and a
+  bank-account alert into one counted transaction when they're the same
+  direction, amount, and within a 5-minute window of each other — it can't
+  distinguish that from two genuinely separate purchases of the identical
+  amount within 5 minutes of one another (rare, but possible). Both
+  underlying SMS/transactions always stay visible in the inbox and
+  transaction lists; only aggregate totals (Insights, Cards & Accounts,
+  merchant breakdown) suppress the redundant one.
 - **Backup/restore is app-data-only.** It exports/imports this app's view of
   your messages + parsed data as JSON. Restoring does **not** write messages
   back into the Android SMS provider (silently mass-inserting SMS into a
