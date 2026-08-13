@@ -170,6 +170,14 @@ String? extractMerchant(String content) {
     // slash or "UMRN" since those introduce a reference code, not more of
     // the payee name.
     RegExp(r"towards\s+([A-Za-z0-9\s&.'-]{2,40}?)(?:\s*\/|\s+UMRN|\n|$|\.)", caseSensitive: false),
+    // "Info: ACH D- BD-BSE Limited-TSEZ04615." — the auto-debit narration
+    // NACH/ACH mandate SMS use (see IncomingSmsNotifier/CLAUDE.md re: "ACH
+    // D-" = e-mandate auto-debit; common for mutual fund SIPs collected via
+    // BSE StAR MF/similar RTA platforms). Greedy up to the *last* hyphen so
+    // a creditor name that itself contains one (e.g. "BD-BSE Limited")
+    // isn't split early — only the trailing UMRN/mandate reference code
+    // after that final hyphen is dropped.
+    RegExp(r'ACH\s*D-\s*(.+)-[A-Za-z0-9]+\.?(?:\s|$)', caseSensitive: false),
     RegExp(
       r"(?:paid\s+to|sent\s+to|transfer\s+to|at)\s+([A-Za-z0-9\s&.*_/'-]{2,30}?)(?:\s+(?:via|using|through|on|by)|$|\.|\n)",
       caseSensitive: false,

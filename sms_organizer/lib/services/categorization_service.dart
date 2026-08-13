@@ -20,7 +20,7 @@ class CategorizationService {
   /// cached categories/transactions from before a logic change would
   /// silently keep being reused forever (incremental sync deliberately
   /// never re-evaluates cached entries on its own).
-  static const int version = 10;
+  static const int version = 11;
 
   SmsCategory categorize(SmsMessage message) {
     final sender = message.address;
