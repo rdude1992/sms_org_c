@@ -86,6 +86,11 @@ class TrendLineChart extends StatelessWidget {
     // either cram the wide ones or under-use the room short ones leave free.
     final xLabelWidth =
         dates.fold<double>(0, (w, d) => math.max(w, measureTextWidth(axisLabelBuilder(d), _axisLabelStyle)));
+    // Bottom axis needs extra vertical room when a caller's axisLabelBuilder
+    // embeds a newline to stack a tick onto two lines (e.g. AmcDetailScreen's
+    // month-granularity "Aug"/"25" split — see Formatters.monthOnly) —
+    // Text renders that as two lines automatically, this just reserves room.
+    final hasMultilineXLabels = dates.any((d) => axisLabelBuilder(d).contains('\n'));
 
     void handleTap(FlTouchEvent event, LineTouchResponse? response) {
       if (event is! FlTapUpEvent) return;
@@ -212,7 +217,7 @@ class TrendLineChart extends StatelessWidget {
                         bottomTitles: AxisTitles(
                           sideTitles: SideTitles(
                             showTitles: true,
-                            reservedSize: 28,
+                            reservedSize: hasMultilineXLabels ? 36 : 28,
                             getTitlesWidget: (value, meta) {
                               final idx = value.toInt();
                               if (idx < 0 || idx >= dates.length) return const SizedBox.shrink();
@@ -222,6 +227,7 @@ class TrendLineChart extends StatelessWidget {
                                 padding: const EdgeInsets.only(top: 6),
                                 child: Text(
                                   axisLabelBuilder(dates[idx]),
+                                  textAlign: TextAlign.center,
                                   style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
                                 ),
                               );

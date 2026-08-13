@@ -847,7 +847,10 @@ class _AmcAnalytics extends StatelessWidget {
         case TrendGranularity.week:
           return Formatters.dayMonth(date);
         case TrendGranularity.month:
-          return Formatters.monthYearShort(date);
+          // Stacked on two lines (TrendLineChart renders the embedded
+          // newline as such) rather than "Aug 25" on one — see
+          // Formatters.monthOnly.
+          return '${Formatters.monthOnly(date)}\n${Formatters.yearOnlyShort(date)}';
       }
     }
 
