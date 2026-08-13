@@ -6,6 +6,7 @@ import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/transaction_tile.dart';
 import '../widgets/ui/breakdown_donut.dart';
+import '../widgets/ui/collapsible_section.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/filter_chip_bar.dart';
 import '../widgets/ui/trend_bar_chart.dart';
@@ -344,8 +345,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
                               // is usually what you're checking Insights for; the
                               // trend/by-card/by-merchant/by-category detail is there
                               // when you want it; not the first thing to scroll past.
-                              _CollapsibleSection(
-                                title: 'Recent transactions',
+                              CollapsibleSection(
+                                prefKey: 'insights.recent_transactions',
+                                title: Text('Recent transactions', style: Theme.of(context).textTheme.titleMedium),
                                 trailing: TextButton(
                                   onPressed: () => _openDrilldown(
                                     context,
@@ -383,8 +385,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ),
                               ),
                               const SizedBox(height: 24),
-                              _CollapsibleSection(
-                                title: 'By card / account',
+                              CollapsibleSection(
+                                prefKey: 'insights.by_instrument',
+                                title: Text('By card / account', style: Theme.of(context).textTheme.titleMedium),
                                 trailing: summary.byInstrument.isEmpty
                                     ? null
                                     : TextButton(
@@ -439,8 +442,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ),
                               ),
                               const SizedBox(height: 24),
-                              _CollapsibleSection(
-                                title: 'By merchant',
+                              CollapsibleSection(
+                                prefKey: 'insights.by_merchant',
+                                title: Text('By merchant', style: Theme.of(context).textTheme.titleMedium),
                                 trailing: summary.byMerchant.isEmpty
                                     ? null
                                     : TextButton(
@@ -494,8 +498,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ),
                               ),
                               const SizedBox(height: 24),
-                              _CollapsibleSection(
-                                title: 'By spend category',
+                              CollapsibleSection(
+                                prefKey: 'insights.by_spend_category',
+                                title: Text('By spend category', style: Theme.of(context).textTheme.titleMedium),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
@@ -627,75 +632,6 @@ class _InsightsScreenState extends State<InsightsScreen> {
       title: title,
       subtitle: _effectiveLabel,
       transactions: transactions.where(matchesBucket).toList(),
-    );
-  }
-}
-
-/// A titled section that can be collapsed to just its header — the page
-/// grew long enough (Recent transactions, By card/account, By merchant, By
-/// spend category, each with its own donut/list) that seeing the whole
-/// thing meant a lot of scrolling even when you only care about one or two
-/// of them. Expanded by default (so nothing looks hidden on first load);
-/// [trailing] — usually a "See all" button — stays outside the
-/// collapse/expand tap target and is always visible regardless of state.
-/// State is local per section rather than lifted to [_InsightsScreenState]:
-/// there's no cross-section behaviour that needs coordinating, and these
-/// sections keep a stable position in a plain (non-builder) ListView, so
-/// Flutter preserves each one's collapsed/expanded state across rebuilds
-/// (range changes, provider refreshes) on its own.
-class _CollapsibleSection extends StatefulWidget {
-  final String title;
-  final Widget? trailing;
-  final Widget child;
-  const _CollapsibleSection({required this.title, this.trailing, required this.child});
-
-  @override
-  State<_CollapsibleSection> createState() => _CollapsibleSectionState();
-}
-
-class _CollapsibleSectionState extends State<_CollapsibleSection> {
-  bool _expanded = true;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: () => setState(() => _expanded = !_expanded),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _expanded ? Icons.expand_more : Icons.chevron_right,
-                        size: 20,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(width: 2),
-                      Text(widget.title, style: Theme.of(context).textTheme.titleMedium),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            if (widget.trailing != null) widget.trailing!,
-          ],
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-          alignment: Alignment.topCenter,
-          child: _expanded
-              ? Padding(padding: const EdgeInsets.only(top: 4), child: widget.child)
-              : const SizedBox(width: double.infinity),
-        ),
-      ],
     );
   }
 }

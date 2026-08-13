@@ -3,6 +3,7 @@ import '../models/transaction.dart';
 import '../services/holdings_service.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
+import '../widgets/ui/collapsible_section.dart';
 import '../widgets/ui/filter_chip_bar.dart';
 import '../widgets/ui/gain_loss_stat.dart';
 import '../widgets/ui/total_stat.dart';
@@ -221,9 +222,13 @@ class _HoldingSection extends StatelessWidget {
         children: [
           Divider(color: scheme.outlineVariant.withOpacity(0.5)),
           const SizedBox(height: 8),
-          InkWell(
-            onTap: openHoldingTransactions,
-            child: Row(
+          CollapsibleSection(
+            // A fund/folio can be renamed by an AMC and reappear under a new
+            // holding.key (see holdings_service.dart) — accepted here since
+            // that's rare and the persisted state simply starts fresh for
+            // it, same as any other never-before-seen prefKey.
+            prefKey: 'amc_holding.${holding.key}',
+            title: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Flexible(
@@ -246,138 +251,147 @@ class _HoldingSection extends StatelessWidget {
                     ),
                   ),
                 ],
-                const SizedBox(width: 4),
-                Icon(Icons.chevron_right, size: 18, color: scheme.onSurfaceVariant),
               ],
             ),
-          ),
-          if (holding.folioOrAccount != null && holding.folioOrAccount!.trim().isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text('Folio ${holding.folioOrAccount}',
-                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+            trailing: IconButton(
+              icon: const Icon(Icons.receipt_long_outlined, size: 20),
+              tooltip: 'All transactions',
+              onPressed: openHoldingTransactions,
             ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TotalStat(label: 'Invested', value: holding.netInvested, color: scheme.primary),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child:
-                    TotalStat(label: 'Est. value', value: holding.estimatedValue, color: scheme.onSurface),
-              ),
-              const SizedBox(width: 12),
-              Expanded(child: GainLossStat(gain: holding.estimatedGain, gainPct: holding.estimatedGainPct)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          // Some holdings (NPS Voluntary contribution SMS, notably) never
-          // state units/NAV at all — skip this line rather than showing a
-          // meaningless "0 units held" for them.
-          if (holding.unitsHeld > 0 || holding.latestNav != null)
-            Text(
-              '${Formatters.units(holding.unitsHeld)} units held'
-              '${holding.latestNav != null ? ' · NAV ${Formatters.currencyPrecise(holding.latestNav!)}' : ''}'
-              '${holding.latestNavDate != null ? ' as of ${Formatters.dayMonthYear(holding.latestNavDate!)}' : ''}',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-            ),
-          // Value statements (e.g. NPS "Investment value ... is Rs X") are
-          // what estimatedValue actually anchors to for a holding like
-          // this — see holdings_service.dart's valueAsOf — so show where
-          // that figure came from rather than leaving it looking like a
-          // plain units×NAV estimate.
-          if (holding.latestValuation != null)
-            Text(
-              'Confirmed value ${Formatters.currency(holding.latestValuation!.value)} '
-              'as on ${Formatters.dayMonthYear(holding.latestValuation!.date)}',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-            ),
-          const SizedBox(height: 4),
-          if (sip == null)
-            Text(
-              'No recurring monthly pattern detected.',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-            )
-          else ...[
-            Text(
-              'Monthly SIP ${Formatters.currency(sip.amount)} · live since ${Formatters.dayMonthYear(sip.since)} '
-              '(${sip.installments} installments)',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-            ),
-            if (sip.isDiscontinued)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (holding.folioOrAccount != null && holding.folioOrAccount!.trim().isNotEmpty)
+                  Text('Folio ${holding.folioOrAccount}',
+                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                const SizedBox(height: 10),
+                Row(
                   children: [
-                    Icon(Icons.pause_circle_outline, size: 13, color: kLossColor),
-                    const SizedBox(width: 4),
-                    Text(
-                      'SIP likely discontinued — no installment since '
-                      '${Formatters.dayMonthYear(sip.lastInstallment)}',
-                      style: TextStyle(fontSize: 12, color: kLossColor, fontWeight: FontWeight.w600),
+                    Expanded(
+                      child:
+                          TotalStat(label: 'Invested', value: holding.netInvested, color: scheme.primary),
                     ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TotalStat(
+                          label: 'Est. value', value: holding.estimatedValue, color: scheme.onSurface),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                        child: GainLossStat(gain: holding.estimatedGain, gainPct: holding.estimatedGainPct)),
                   ],
                 ),
-              ),
-          ],
-          if (valuationPoints.length >= 2) ...[
-            const SizedBox(height: 12),
-            Text('Confirmed value over time',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: scheme.onSurface)),
-            const SizedBox(height: 6),
-            TrendLineChart(
-              dates: [for (final p in valuationPoints) p.date],
-              series: [
-                TrendLineSeries(
-                  label: 'Value',
-                  color: scheme.primary,
-                  values: [for (final p in valuationPoints) p.value],
+                const SizedBox(height: 6),
+                // Some holdings (NPS Voluntary contribution SMS, notably)
+                // never state units/NAV at all — skip this line rather than
+                // showing a meaningless "0 units held" for them.
+                if (holding.unitsHeld > 0 || holding.latestNav != null)
+                  Text(
+                    '${Formatters.units(holding.unitsHeld)} units held'
+                    '${holding.latestNav != null ? ' · NAV ${Formatters.currencyPrecise(holding.latestNav!)}' : ''}'
+                    '${holding.latestNavDate != null ? ' as of ${Formatters.dayMonthYear(holding.latestNavDate!)}' : ''}',
+                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                  ),
+                // Value statements (e.g. NPS "Investment value ... is Rs X")
+                // are what estimatedValue actually anchors to for a holding
+                // like this — see holdings_service.dart's valueAsOf — so
+                // show where that figure came from rather than leaving it
+                // looking like a plain units×NAV estimate.
+                if (holding.latestValuation != null)
+                  Text(
+                    'Confirmed value ${Formatters.currency(holding.latestValuation!.value)} '
+                    'as on ${Formatters.dayMonthYear(holding.latestValuation!.date)}',
+                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                  ),
+                const SizedBox(height: 4),
+                if (sip == null)
+                  Text(
+                    'No recurring monthly pattern detected.',
+                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                  )
+                else ...[
+                  Text(
+                    'Monthly SIP ${Formatters.currency(sip.amount)} · live since ${Formatters.dayMonthYear(sip.since)} '
+                    '(${sip.installments} installments)',
+                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                  ),
+                  if (sip.isDiscontinued)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.pause_circle_outline, size: 13, color: kLossColor),
+                          const SizedBox(width: 4),
+                          Text(
+                            'SIP likely discontinued — no installment since '
+                            '${Formatters.dayMonthYear(sip.lastInstallment)}',
+                            style: TextStyle(fontSize: 12, color: kLossColor, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+                if (valuationPoints.length >= 2) ...[
+                  const SizedBox(height: 12),
+                  Text('Confirmed value over time',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: scheme.onSurface)),
+                  const SizedBox(height: 6),
+                  TrendLineChart(
+                    dates: [for (final p in valuationPoints) p.date],
+                    series: [
+                      TrendLineSeries(
+                        label: 'Value',
+                        color: scheme.primary,
+                        values: [for (final p in valuationPoints) p.value],
+                      ),
+                    ],
+                    axisLabelBuilder: (d) => Formatters.dayMonth(d),
+                    tooltipDateBuilder: (d) => Formatters.dayMonthYear(d),
+                    valueFormatter: Formatters.currency,
+                    emptyMessage: 'No confirmed value history yet.',
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Text('NAV over time',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: scheme.onSurface)),
+                const SizedBox(height: 6),
+                TrendLineChart(
+                  dates: [for (final p in navPoints) p.date],
+                  series: [
+                    TrendLineSeries(
+                      label: 'NAV',
+                      color: scheme.primary,
+                      values: [for (final p in navPoints) p.nav],
+                    ),
+                  ],
+                  axisLabelBuilder: (d) => Formatters.dayMonth(d),
+                  tooltipDateBuilder: (d) => Formatters.dayMonthYear(d),
+                  valueFormatter: Formatters.currencyPrecise,
+                  emptyMessage: 'No NAV history yet.',
                 ),
+                const SizedBox(height: 12),
+                Text('Units over time',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: scheme.onSurface)),
+                const SizedBox(height: 6),
+                TrendLineChart(
+                  dates: [for (final p in unitsPoints) p.date],
+                  series: [
+                    TrendLineSeries(
+                      label: 'Units',
+                      color: const Color(0xFF8B5CF6),
+                      values: [for (final p in unitsPoints) p.units],
+                    ),
+                  ],
+                  axisLabelBuilder: (d) => Formatters.dayMonth(d),
+                  tooltipDateBuilder: (d) => Formatters.dayMonthYear(d),
+                  valueFormatter: Formatters.units,
+                  emptyMessage: 'No unit history yet.',
+                ),
+                const SizedBox(height: 8),
               ],
-              axisLabelBuilder: (d) => Formatters.dayMonth(d),
-              tooltipDateBuilder: (d) => Formatters.dayMonthYear(d),
-              valueFormatter: Formatters.currency,
-              emptyMessage: 'No confirmed value history yet.',
             ),
-          ],
-          const SizedBox(height: 12),
-          Text('NAV over time', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: scheme.onSurface)),
-          const SizedBox(height: 6),
-          TrendLineChart(
-            dates: [for (final p in navPoints) p.date],
-            series: [
-              TrendLineSeries(
-                label: 'NAV',
-                color: scheme.primary,
-                values: [for (final p in navPoints) p.nav],
-              ),
-            ],
-            axisLabelBuilder: (d) => Formatters.dayMonth(d),
-            tooltipDateBuilder: (d) => Formatters.dayMonthYear(d),
-            valueFormatter: Formatters.currencyPrecise,
-            emptyMessage: 'No NAV history yet.',
           ),
-          const SizedBox(height: 12),
-          Text('Units over time', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: scheme.onSurface)),
-          const SizedBox(height: 6),
-          TrendLineChart(
-            dates: [for (final p in unitsPoints) p.date],
-            series: [
-              TrendLineSeries(
-                label: 'Units',
-                color: const Color(0xFF8B5CF6),
-                values: [for (final p in unitsPoints) p.units],
-              ),
-            ],
-            axisLabelBuilder: (d) => Formatters.dayMonth(d),
-            tooltipDateBuilder: (d) => Formatters.dayMonthYear(d),
-            valueFormatter: Formatters.units,
-            emptyMessage: 'No unit history yet.',
-          ),
-          const SizedBox(height: 8),
         ],
       ),
     );
