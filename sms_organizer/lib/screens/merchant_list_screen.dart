@@ -7,6 +7,7 @@ import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/search_toggle_mixin.dart';
 import '../widgets/ui/empty_state.dart';
+import '../widgets/ui/row_divider.dart';
 import '../widgets/ui/sparkline.dart';
 import 'transaction_list_screen.dart';
 
@@ -83,9 +84,10 @@ class _MerchantListScreenState extends State<MerchantListScreen>
                   ? 'No merchants detected in this range'
                   : 'No matches for "$trimmedQuery"',
             )
-          : ListView.builder(
+          : ListView.separated(
               padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: sorted.length,
+              separatorBuilder: (context, _) => buildRowDivider(context),
               itemBuilder: (context, index) => _MerchantTile(
                 summary: sorted[index],
                 transactions: liveTransactions,
@@ -135,35 +137,54 @@ class _MerchantTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final trendColor =
         summary.totalDebit >= summary.totalCredit ? const Color(0xFFEF4444) : const Color(0xFF10B981);
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-      dense: true,
-      leading: const Icon(Icons.storefront_outlined),
-      title:
-          Text(summary.displayName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-      subtitle: Text('${summary.count} transactions', style: const TextStyle(fontSize: 11.5)),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Sparkline(values: _series, color: trendColor),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisSize: MainAxisSize.min,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
             children: [
-              if (summary.totalCredit > 0)
-                Text('+${Formatters.currency(summary.totalCredit)}',
-                    style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
-              if (summary.totalDebit > 0)
-                Text('-${Formatters.currency(summary.totalDebit)}',
-                    style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
+              const Icon(Icons.storefront_outlined, size: 16),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        summary.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text('(${summary.count})', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Sparkline(values: _series, color: trendColor),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (summary.totalCredit > 0)
+                    Text('+${Formatters.currency(summary.totalCredit)}',
+                        style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
+                  if (summary.totalDebit > 0)
+                    Text('-${Formatters.currency(summary.totalDebit)}',
+                        style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
+                ],
+              ),
             ],
           ),
-        ],
+        ),
       ),
-      onTap: onTap,
     );
   }
 }

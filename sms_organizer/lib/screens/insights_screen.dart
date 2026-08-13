@@ -10,6 +10,7 @@ import '../widgets/ui/breakdown_donut.dart';
 import '../widgets/ui/collapsible_section.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/filter_chip_bar.dart';
+import '../widgets/ui/row_divider.dart';
 import '../widgets/ui/trend_bar_chart.dart';
 import 'instrument_list_screen.dart';
 import 'investment_list_screen.dart';
@@ -360,17 +361,13 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                   child: Text('${summary.transactionCount} total · See all'),
                                 ),
                                 child: Column(
-                                  children: [
-                                    for (var i = 0; i < recentTransactions.length; i++) ...[
-                                      TransactionTile(transaction: recentTransactions[i], compact: true),
-                                      if (i != recentTransactions.length - 1)
-                                        Divider(
-                                          height: 1,
-                                          thickness: 1,
-                                          color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.4),
-                                        ),
+                                  children: withRowDividers(
+                                    context,
+                                    [
+                                      for (final t in recentTransactions)
+                                        TransactionTile(transaction: t, compact: true),
                                     ],
-                                  ],
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 24),
@@ -425,21 +422,27 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                         ),
                                       )
                                     else
-                                      ...summary.byInstrument.take(6).map(
-                                            (s) => _InstrumentRow(
-                                              summary: s,
-                                              lastBalance: lastBalanceByInstrument[s.key],
-                                              onTap: () => _openDrilldown(
-                                                context,
-                                                title: s.displayName,
-                                                subtitle: _effectiveLabel,
-                                                transactions: filteredTransactions
-                                                    .where((t) => t.instrumentGroupKey == s.key)
-                                                    .toList(),
-                                                matches: (t) => t.instrumentGroupKey == s.key,
+                                      ...withRowDividers(
+                                        context,
+                                        summary.byInstrument
+                                            .take(6)
+                                            .map(
+                                              (s) => _InstrumentRow(
+                                                summary: s,
+                                                lastBalance: lastBalanceByInstrument[s.key],
+                                                onTap: () => _openDrilldown(
+                                                  context,
+                                                  title: s.displayName,
+                                                  subtitle: _effectiveLabel,
+                                                  transactions: filteredTransactions
+                                                      .where((t) => t.instrumentGroupKey == s.key)
+                                                      .toList(),
+                                                  matches: (t) => t.instrumentGroupKey == s.key,
+                                                ),
                                               ),
-                                            ),
-                                          ),
+                                            )
+                                            .toList(),
+                                      ),
                                   ],
                                 ),
                               ),
@@ -482,20 +485,26 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                         ),
                                       )
                                     else
-                                      ...summary.byMerchant.take(6).map(
-                                            (s) => _MerchantRow(
-                                              summary: s,
-                                              onTap: () => _openDrilldown(
-                                                context,
-                                                title: s.displayName,
-                                                subtitle: _effectiveLabel,
-                                                transactions: filteredTransactions
-                                                    .where((t) => t.merchantGroupKey == s.key)
-                                                    .toList(),
-                                                matches: (t) => t.merchantGroupKey == s.key,
+                                      ...withRowDividers(
+                                        context,
+                                        summary.byMerchant
+                                            .take(6)
+                                            .map(
+                                              (s) => _MerchantRow(
+                                                summary: s,
+                                                onTap: () => _openDrilldown(
+                                                  context,
+                                                  title: s.displayName,
+                                                  subtitle: _effectiveLabel,
+                                                  transactions: filteredTransactions
+                                                      .where((t) => t.merchantGroupKey == s.key)
+                                                      .toList(),
+                                                  matches: (t) => t.merchantGroupKey == s.key,
+                                                ),
                                               ),
-                                            ),
-                                          ),
+                                            )
+                                            .toList(),
+                                      ),
                                   ],
                                 ),
                               ),
@@ -546,24 +555,30 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                       // lands on exactly the transactions its own count
                                       // covers, instead of Uncategorised jumping to the
                                       // full, every-direction backlog in Settings.
-                                      ...summary.byCategory.take(6).map(
-                                            (c) => SpendCategoryRow(
-                                              summary: c,
-                                              onTap: () => _openDrilldown(
-                                                context,
-                                                title: c.displayName,
-                                                subtitle: _effectiveLabel,
-                                                transactions: filteredTransactions
-                                                    .where((t) =>
-                                                        t.spendCategory == c.category &&
-                                                        t.direction == TxnDirection.debit)
-                                                    .toList(),
-                                                matches: (t) =>
-                                                    t.spendCategory == c.category &&
-                                                    t.direction == TxnDirection.debit,
+                                      ...withRowDividers(
+                                        context,
+                                        summary.byCategory
+                                            .take(6)
+                                            .map(
+                                              (c) => SpendCategoryRow(
+                                                summary: c,
+                                                onTap: () => _openDrilldown(
+                                                  context,
+                                                  title: c.displayName,
+                                                  subtitle: _effectiveLabel,
+                                                  transactions: filteredTransactions
+                                                      .where((t) =>
+                                                          t.spendCategory == c.category &&
+                                                          t.direction == TxnDirection.debit)
+                                                      .toList(),
+                                                  matches: (t) =>
+                                                      t.spendCategory == c.category &&
+                                                      t.direction == TxnDirection.debit,
+                                                ),
                                               ),
-                                            ),
-                                          ),
+                                            )
+                                            .toList(),
+                                      ),
                                   ],
                                 ),
                               ),
@@ -1012,30 +1027,71 @@ class _InstrumentRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      minVerticalPadding: 10,
-      leading: Icon(_icon),
-      title: Text(summary.displayName),
-      subtitle: Text(
-        [
-          if (summary.isLinkedAccount) summary.typeLabel,
-          '${summary.count} transactions',
-          if (lastBalance != null) 'Bal ${Formatters.currency(lastBalance!)}',
-        ].join(' · '),
-        style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+    final scheme = Theme.of(context).colorScheme;
+    // A linked-account badge or last-known balance is real extra
+    // information (not decorative), so it stays as its own small line
+    // rather than being crammed onto the name row — but only when there's
+    // actually something to show, so a plain account with neither stays a
+    // true single line like Merchant/Spend-category rows.
+    final extra = [
+      if (summary.isLinkedAccount) summary.typeLabel,
+      if (lastBalance != null) 'Bal ${Formatters.currency(lastBalance!)}',
+    ].join(' · ');
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(_icon, size: 16),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            summary.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text('(${summary.count})', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                      ],
+                    ),
+                    if (extra.isNotEmpty)
+                      Text(
+                        extra,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('+${Formatters.currency(summary.totalCredit)}',
+                      style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
+                  Text('-${Formatters.currency(summary.totalDebit)}',
+                      style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
-      trailing: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('+${Formatters.currency(summary.totalCredit)}',
-              style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
-          Text('-${Formatters.currency(summary.totalDebit)}',
-              style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
-        ],
-      ),
-      onTap: onTap,
     );
   }
 }
@@ -1047,28 +1103,50 @@ class _MerchantRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      minVerticalPadding: 10,
-      leading: const Icon(Icons.storefront_outlined),
-      title: Text(summary.displayName),
-      subtitle: Text(
-        '${summary.count} transactions',
-        style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          child: Row(
+            children: [
+              const Icon(Icons.storefront_outlined, size: 16),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        summary.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text('(${summary.count})', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (summary.totalCredit > 0)
+                    Text('+${Formatters.currency(summary.totalCredit)}',
+                        style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
+                  if (summary.totalDebit > 0)
+                    Text('-${Formatters.currency(summary.totalDebit)}',
+                        style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
-      trailing: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (summary.totalCredit > 0)
-            Text('+${Formatters.currency(summary.totalCredit)}',
-                style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
-          if (summary.totalDebit > 0)
-            Text('-${Formatters.currency(summary.totalDebit)}',
-                style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
-        ],
-      ),
-      onTap: onTap,
     );
   }
 }

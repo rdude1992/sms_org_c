@@ -13,6 +13,7 @@ import '../widgets/ui/breakdown_donut.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/filter_chip_bar.dart';
 import '../widgets/ui/gain_loss_stat.dart';
+import '../widgets/ui/row_divider.dart';
 import '../widgets/ui/total_stat.dart';
 import '../widgets/ui/trend_bar_chart.dart';
 import '../widgets/ui/trend_line_chart.dart';
@@ -681,8 +682,13 @@ class _AmcListViewState extends State<_AmcListView> {
           onRangeSelected: (r) => setState(() => _range = r),
           allInvestments: widget.allInvestments,
         ),
-        for (final p in filteredProviders)
-          _ProviderRow(provider: p, allInvestments: widget.allInvestments),
+        ...withRowDividers(
+          context,
+          [
+            for (final p in filteredProviders)
+              _ProviderRow(provider: p, allInvestments: widget.allInvestments),
+          ],
+        ),
       ],
     );
   }

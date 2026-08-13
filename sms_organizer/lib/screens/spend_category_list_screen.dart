@@ -6,6 +6,7 @@ import '../services/duplicate_detection_service.dart';
 import '../services/insights_service.dart';
 import '../widgets/spend_category_row.dart';
 import '../widgets/ui/empty_state.dart';
+import '../widgets/ui/row_divider.dart';
 import 'transaction_list_screen.dart';
 
 /// Full "By spend category" drilldown for Insights' spend-category
@@ -55,9 +56,10 @@ class SpendCategoryListScreen extends StatelessWidget {
       ),
       body: categories.isEmpty
           ? const EmptyState(icon: Icons.pie_chart_outline, title: 'No spend in this range')
-          : ListView.builder(
+          : ListView.separated(
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
               itemCount: categories.length,
+              separatorBuilder: (context, _) => buildRowDivider(context),
               itemBuilder: (context, index) {
                 final c = categories[index];
                 return SpendCategoryRow(
