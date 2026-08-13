@@ -246,6 +246,17 @@ class TrendBarChart extends StatelessWidget {
                               // it explicitly too in case rounding ever
                               // lands one on the other side of that check.
                               if (value >= maxY) return const SizedBox.shrink();
+                              // Same defensive rounding as TrendLineChart's
+                              // leftTitles — fl_chart's own tick math (0, N
+                              // * maxY/4) can land a hair off an intended
+                              // step due to floating point, which otherwise
+                              // draws an extra label almost exactly on top
+                              // of a real one (most visible right at the
+                              // "₹0" row).
+                              final stepsFromMin = value / (maxY / 4);
+                              if ((stepsFromMin - stepsFromMin.roundToDouble()).abs() > 0.02) {
+                                return const SizedBox.shrink();
+                              }
                               return Padding(
                                 padding: const EdgeInsets.only(right: 6),
                                 child: Text(

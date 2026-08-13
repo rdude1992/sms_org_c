@@ -4,6 +4,7 @@ import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
+import '../widgets/spend_category_row.dart';
 import '../widgets/transaction_tile.dart';
 import '../widgets/ui/breakdown_donut.dart';
 import '../widgets/ui/collapsible_section.dart';
@@ -13,6 +14,7 @@ import '../widgets/ui/trend_bar_chart.dart';
 import 'instrument_list_screen.dart';
 import 'investment_list_screen.dart';
 import 'merchant_list_screen.dart';
+import 'spend_category_list_screen.dart';
 import 'transaction_list_screen.dart';
 
 /// `custom` covers a user-picked (via showDateRangePicker) arbitrary span —
@@ -501,6 +503,20 @@ class _InsightsScreenState extends State<InsightsScreen> {
                               CollapsibleSection(
                                 prefKey: 'insights.by_spend_category',
                                 title: Text('By spend category', style: Theme.of(context).textTheme.titleMedium),
+                                trailing: summary.byCategory.isEmpty
+                                    ? null
+                                    : TextButton(
+                                        onPressed: () => Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => SpendCategoryListScreen(
+                                              transactions: filteredTransactions,
+                                              subtitle: _effectiveLabel,
+                                            ),
+                                          ),
+                                        ),
+                                        child: const Text('See all'),
+                                      ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
@@ -521,42 +537,33 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                               TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                                         ),
                                       )
-                                    else ...[
-                                      // Same 6-item cap as By card / By merchant, for the
-                                      // same compactness — the rest fold into one "Other"
-                                      // row below (mirroring the donut's own "Other"
-                                      // slice) rather than a dedicated drilldown screen
-                                      // the way those two have, since SpendCategory is a
-                                      // small fixed set, not an open-ended list.
+                                    else
+                                      // Same 6-item cap as By card / By merchant, with the
+                                      // same "See all" to a dedicated screen for the rest.
                                       // Every row here — Uncategorised included — only ever
                                       // counts debits (see SpendCategorySummary), so the
                                       // drilldown filters the same way: tapping a row always
                                       // lands on exactly the transactions its own count
                                       // covers, instead of Uncategorised jumping to the
                                       // full, every-direction backlog in Settings.
-                                      for (final c in summary.byCategory.take(6))
-                                        _SpendCategoryRow(
-                                          summary: c,
-                                          onTap: () => _openDrilldown(
-                                            context,
-                                            title: c.displayName,
-                                            subtitle: _effectiveLabel,
-                                            transactions: filteredTransactions
-                                                .where((t) =>
+                                      ...summary.byCategory.take(6).map(
+                                            (c) => SpendCategoryRow(
+                                              summary: c,
+                                              onTap: () => _openDrilldown(
+                                                context,
+                                                title: c.displayName,
+                                                subtitle: _effectiveLabel,
+                                                transactions: filteredTransactions
+                                                    .where((t) =>
+                                                        t.spendCategory == c.category &&
+                                                        t.direction == TxnDirection.debit)
+                                                    .toList(),
+                                                matches: (t) =>
                                                     t.spendCategory == c.category &&
-                                                    t.direction == TxnDirection.debit)
-                                                .toList(),
-                                            matches: (t) =>
-                                                t.spendCategory == c.category &&
-                                                t.direction == TxnDirection.debit,
+                                                    t.direction == TxnDirection.debit,
+                                              ),
+                                            ),
                                           ),
-                                        ),
-                                      if (summary.byCategory.length > 6)
-                                        _buildOtherCategoryRow(
-                                          summary.byCategory.skip(6).toList(),
-                                          filteredTransactions,
-                                        ),
-                                    ],
                                   ],
                                 ),
                               ),
@@ -584,43 +591,6 @@ class _InsightsScreenState extends State<InsightsScreen> {
           ),
         );
       },
-    );
-  }
-
-  /// The folded-together row for every spend category past the top 6 (see
-  /// the "By spend category" section) — same compact styling as
-  /// [_SpendCategoryRow], but built inline rather than by extending that
-  /// widget/[SpendCategorySummary] with "Other" semantics they don't
-  /// otherwise need to know about.
-  Widget _buildOtherCategoryRow(List<SpendCategorySummary> rest, List<Transaction> filteredTransactions) {
-    final scheme = Theme.of(context).colorScheme;
-    final otherCategories = rest.map((c) => c.category).toSet();
-    final otherTotal = rest.fold<double>(0, (a, c) => a + c.totalDebit);
-    final otherCount = rest.fold<int>(0, (a, c) => a + c.count);
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      minVerticalPadding: 10,
-      leading: Icon(Icons.more_horiz, color: scheme.outline, size: 18),
-      title: Row(
-        children: [
-          const Text('Other'),
-          const SizedBox(width: 4),
-          Text('($otherCount)', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-        ],
-      ),
-      trailing: Text(
-        '-${Formatters.currency(otherTotal)}',
-        style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12, fontWeight: FontWeight.w600),
-      ),
-      onTap: () => _openDrilldown(
-        context,
-        title: 'Other',
-        subtitle: _effectiveLabel,
-        transactions: filteredTransactions
-            .where((t) => t.direction == TxnDirection.debit && otherCategories.contains(t.spendCategory))
-            .toList(),
-        matches: (t) => t.direction == TxnDirection.debit && otherCategories.contains(t.spendCategory),
-      ),
     );
   }
 
@@ -1144,39 +1114,6 @@ class _SpendCategoryDonut extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _SpendCategoryRow extends StatelessWidget {
-  final SpendCategorySummary summary;
-  final VoidCallback onTap;
-  const _SpendCategoryRow({required this.summary, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final color = summary.category?.color ?? scheme.outline;
-    final icon = summary.category?.icon ?? Icons.label_off_outlined;
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      minVerticalPadding: 10,
-      leading: Icon(icon, color: color, size: 18),
-      // Count folded into the title row itself (rather than a separate
-      // subtitle line) so each row is one line tall, same density as
-      // Recent transactions' compact rows.
-      title: Row(
-        children: [
-          Flexible(child: Text(summary.displayName, overflow: TextOverflow.ellipsis)),
-          const SizedBox(width: 4),
-          Text('(${summary.count})', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-        ],
-      ),
-      trailing: Text(
-        '-${Formatters.currency(summary.totalDebit)}',
-        style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12, fontWeight: FontWeight.w600),
-      ),
-      onTap: onTap,
     );
   }
 }

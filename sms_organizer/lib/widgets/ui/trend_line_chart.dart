@@ -195,6 +195,19 @@ class TrendLineChart extends StatelessWidget {
                             interval: yInterval,
                             getTitlesWidget: (value, meta) {
                               if (value >= maxY) return const SizedBox.shrink();
+                              // fl_chart's own tick-value math (minY + N *
+                              // yInterval) can land a hair off an intended
+                              // step due to floating point — passed through
+                              // unfiltered, that draws an extra label almost
+                              // exactly on top of a real one (most visible
+                              // right at the minY/"₹0" row). Only render a
+                              // title for values that land on an actual
+                              // step from minY, so a near-duplicate never
+                              // gets drawn.
+                              final stepsFromMin = (value - minY) / yInterval;
+                              if ((stepsFromMin - stepsFromMin.roundToDouble()).abs() > 0.02) {
+                                return const SizedBox.shrink();
+                              }
                               return Padding(
                                 padding: const EdgeInsets.only(right: 6),
                                 child: Text(

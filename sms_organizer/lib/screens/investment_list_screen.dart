@@ -958,40 +958,59 @@ class _ProviderRow extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final primary = scheme.primary;
     final p = provider;
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      minVerticalPadding: 10,
-      leading: Icon(Icons.account_balance_outlined, color: primary, size: 18),
-      // Count folded into the title row itself (rather than a separate
-      // subtitle line) so each row is one line tall, matching Insights'
-      // compact list rows.
-      title: Row(
-        children: [
-          Flexible(
-            child: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+    // A raw Row in a Padding (like TransactionTile's `compact` mode /
+    // Insights' SpendCategoryRow), not a ListTile — ListTile enforces a
+    // minimum row height even with contentPadding/minVerticalPadding pared
+    // down, which read as noticeably taller than the transaction list's
+    // own compact rows.
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AmcDetailScreen(
+              providerKey: p.key,
+              providerName: p.name,
+              allInvestments: allInvestments,
+            ),
           ),
-          const SizedBox(width: 4),
-          Text('(${p.count})', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-        ],
-      ),
-      trailing: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (p.invested > 0)
-            Text('-${Formatters.currency(p.invested)}', style: TextStyle(color: primary, fontSize: 12)),
-          if (p.redeemed > 0)
-            Text('+${Formatters.currency(p.redeemed)}',
-                style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 12)),
-        ],
-      ),
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => AmcDetailScreen(
-            providerKey: p.key,
-            providerName: p.name,
-            allInvestments: allInvestments,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(Icons.account_balance_outlined, color: primary, size: 16),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        p.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text('(${p.count})', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (p.invested > 0)
+                    Text('-${Formatters.currency(p.invested)}', style: TextStyle(color: primary, fontSize: 12)),
+                  if (p.redeemed > 0)
+                    Text('+${Formatters.currency(p.redeemed)}',
+                        style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 12)),
+                ],
+              ),
+            ],
           ),
         ),
       ),
