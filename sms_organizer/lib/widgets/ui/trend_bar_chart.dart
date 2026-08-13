@@ -45,19 +45,26 @@ class TrendBarChart extends StatelessWidget {
     }
   }
 
-  /// Short-year form for the x-axis tick text itself — day/week are already
-  /// compact ("15", "15 Aug") and unaffected, but month's "MMM yyyy" (e.g.
-  /// "Aug 2025") was wide enough to push the first/last tick's label past
-  /// the chart's own edge on a range spanning several years ("All time").
-  /// "MMM yy" keeps every tick well inside the reserved anchor width below.
-  String _axisLabel(DateTime date) {
+  /// The x-axis tick widget itself — day/week are already compact ("15",
+  /// "15 Aug") and just render as one line, but month's "MMM yyyy" (e.g.
+  /// "Aug 2025") was wide enough that adjacent ticks' labels ran into each
+  /// other on a range spanning several years ("All time"). Stacking month
+  /// above a short year on two lines instead keeps each tick's width down
+  /// to whichever of the two is wider.
+  Widget _axisLabel(DateTime date, TextStyle style) {
     switch (granularity) {
       case TrendGranularity.day:
-        return Formatters.dayOnly(date);
+        return Text(Formatters.dayOnly(date), style: style);
       case TrendGranularity.week:
-        return Formatters.dayMonth(date);
+        return Text(Formatters.dayMonth(date), style: style);
       case TrendGranularity.month:
-        return Formatters.monthYearShort(date);
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(Formatters.monthOnly(date), style: style),
+            Text(Formatters.yearOnlyShort(date), style: style),
+          ],
+        );
     }
   }
 
@@ -249,19 +256,17 @@ class TrendBarChart extends StatelessWidget {
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
-                        reservedSize: 28,
+                        reservedSize: granularity == TrendGranularity.month ? 36 : 28,
                         getTitlesWidget: (value, meta) {
                           final idx = value.toInt();
                           if (idx < 0 || idx >= dates.length) return const SizedBox.shrink();
                           final isLast = idx == dates.length - 1;
                           if (idx % labelInterval != 0 && !isLast) return const SizedBox.shrink();
 
+                          final labelStyle = TextStyle(fontSize: 10, color: scheme.onSurfaceVariant);
                           return Padding(
                             padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              _axisLabel(dates[idx]),
-                              style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
-                            ),
+                            child: _axisLabel(dates[idx], labelStyle),
                           );
                         },
                       ),
