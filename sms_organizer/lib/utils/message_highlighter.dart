@@ -4,7 +4,7 @@ import 'sms_extractors.dart';
 /// What kind of "important" token a [TextHighlight] covers — lets the
 /// widget style each one differently (e.g. green/red for a confidently
 /// directional amount, accent for an account reference or OTP code).
-enum HighlightKind { otp, creditAmount, debitAmount, amount, account }
+enum HighlightKind { otp, creditAmount, debitAmount, amount, account, searchMatch }
 
 class TextHighlight {
   final int start;
@@ -73,4 +73,26 @@ List<TextHighlight> findMessageHighlights(String body, SmsCategory category) {
     case SmsCategory.updates:
       return const [];
   }
+}
+
+/// Every case-insensitive occurrence of [query] within [body] — the
+/// find-in-conversation counterpart to [findMessageHighlights] above, fed
+/// into the same [TextHighlight]-consuming widget (LinkifiedText) so a
+/// search match gets highlighted right in place alongside any OTP/amount/
+/// account highlighting that message already had. Empty when [query] is
+/// blank.
+List<TextHighlight> findSearchMatchHighlights(String body, String query) {
+  final q = query.trim();
+  if (q.isEmpty) return const [];
+  final lowerBody = body.toLowerCase();
+  final lowerQuery = q.toLowerCase();
+  final result = <TextHighlight>[];
+  var searchStart = 0;
+  while (true) {
+    final index = lowerBody.indexOf(lowerQuery, searchStart);
+    if (index < 0) break;
+    result.add(TextHighlight(start: index, end: index + lowerQuery.length, kind: HighlightKind.searchMatch));
+    searchStart = index + lowerQuery.length;
+  }
+  return result;
 }

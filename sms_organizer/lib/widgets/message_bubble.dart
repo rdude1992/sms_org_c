@@ -40,6 +40,13 @@ class MessageBubble extends StatelessWidget {
   /// for why that one's excluded.
   final VoidCallback? onRetry;
 
+  /// ThreadScreen's in-conversation search query, if a search is active —
+  /// every case-insensitive occurrence within [message.body] gets
+  /// highlighted (see findSearchMatchHighlights), layered on top of any
+  /// OTP/amount/account highlighting the message already had. Blank/null
+  /// when no search is active, same as every other call site.
+  final String? searchQuery;
+
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -54,6 +61,7 @@ class MessageBubble extends StatelessWidget {
     this.starred = false,
     this.isNew = false,
     this.onRetry,
+    this.searchQuery,
   });
 
   @override
@@ -78,7 +86,14 @@ class MessageBubble extends StatelessWidget {
     // findMessageHighlights). Bolds/colours the OTP code or the amount/
     // account reference in place within the bubble text, rather than
     // requiring a tap into the message details to spot them.
-    final highlights = findMessageHighlights(message.body, message.category);
+    final categoryHighlights = findMessageHighlights(message.body, message.category);
+    // Listed first so LinkifiedText's combined sort keeps a search match
+    // ahead of anything it happens to tie/overlap with — finding your
+    // search term is the active task, an OTP/amount bold is secondary.
+    final highlights = [
+      ...findSearchMatchHighlights(message.body, searchQuery ?? ''),
+      ...categoryHighlights,
+    ];
     final sendState = message.sendState;
 
     final bubble = GestureDetector(
@@ -258,6 +273,17 @@ class MessageBubble extends StatelessWidget {
         return TextStyle(
           fontWeight: FontWeight.w700,
           color: isOutgoing ? textColor : scheme.primary,
+        );
+      case HighlightKind.searchMatch:
+        // Fixed light background + dark text regardless of bubble
+        // direction (unlike every other kind above) — a search hit needs
+        // to stay legible whether it lands on the light incoming bubble or
+        // the dark outgoing one, the same way a browser's find-in-page
+        // highlight doesn't adapt to page theme either.
+        return const TextStyle(
+          backgroundColor: Color(0xFFFFD54F),
+          color: Colors.black87,
+          fontWeight: FontWeight.w700,
         );
     }
   }

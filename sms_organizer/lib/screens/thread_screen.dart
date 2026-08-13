@@ -47,6 +47,18 @@ class _ThreadScreenState extends State<ThreadScreen> {
   int? _highlightedId;
   bool _didInitialScroll = false;
 
+  // In-conversation "find" search — a separate concern from
+  // _highlightedId/_didInitialScroll above (which only ever target one
+  // message, on open). Ids rather than indices so a match stays correctly
+  // tracked across rebuilds even if messages shift (a new reply arriving
+  // while search is open, say). Oldest-first, matching `messages`' own
+  // order, so navigating "previous"/"next" moves chronologically.
+  bool _isSearching = false;
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+  List<int> _searchMatchIds = [];
+  int _currentMatchIndex = -1;
+
   // Every message id this screen has already rendered at least once —
   // seeded with the whole thread on the first build, then grown as new
   // messages (sent or received) show up. MessageBubble.isNew is driven off
@@ -113,7 +125,67 @@ class _ThreadScreenState extends State<ThreadScreen> {
   void dispose() {
     _persistDraftOnExit();
     _replyController.dispose();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  void _startSearch() => setState(() => _isSearching = true);
+
+  void _stopSearch() {
+    setState(() {
+      _isSearching = false;
+      _searchController.clear();
+      _searchQuery = '';
+      _searchMatchIds = [];
+      _currentMatchIndex = -1;
+    });
+  }
+
+  /// Recomputes which messages match, oldest-first, and lands on the
+  /// *newest* one (the end of the list) rather than the oldest — the
+  /// conversation is already open at the bottom, so the nearest match to
+  /// where the user actually is reads as the natural starting point, same
+  /// as most chat apps' own find-in-conversation.
+  void _onSearchChanged(String value, List<SmsMessage> messages) {
+    setState(() {
+      _searchQuery = value;
+      final q = value.trim().toLowerCase();
+      _searchMatchIds = q.isEmpty ? [] : [for (final m in messages) if (m.body.toLowerCase().contains(q)) m.id];
+      _currentMatchIndex = _searchMatchIds.isEmpty ? -1 : _searchMatchIds.length - 1;
+    });
+    _scrollToCurrentMatch(messages);
+  }
+
+  void _scrollToCurrentMatch(List<SmsMessage> messages) {
+    if (_currentMatchIndex < 0 || _currentMatchIndex >= _searchMatchIds.length) return;
+    final targetId = _searchMatchIds[_currentMatchIndex];
+    final index = messages.indexWhere((m) => m.id == targetId);
+    if (index == -1) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_itemScrollController.isAttached) return;
+      _itemScrollController.scrollTo(
+        index: index,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+        alignment: 0.4,
+      );
+    });
+  }
+
+  void _goToPreviousMatch(List<SmsMessage> messages) {
+    if (_searchMatchIds.isEmpty) return;
+    setState(() {
+      _currentMatchIndex = _currentMatchIndex <= 0 ? _searchMatchIds.length - 1 : _currentMatchIndex - 1;
+    });
+    _scrollToCurrentMatch(messages);
+  }
+
+  void _goToNextMatch(List<SmsMessage> messages) {
+    if (_searchMatchIds.isEmpty) return;
+    setState(() {
+      _currentMatchIndex = _currentMatchIndex >= _searchMatchIds.length - 1 ? 0 : _currentMatchIndex + 1;
+    });
+    _scrollToCurrentMatch(messages);
   }
 
   /// Leaving the thread with unsent reply text saves/updates its draft;
@@ -234,40 +306,91 @@ class _ThreadScreenState extends State<ThreadScreen> {
                       allSelected ? provider.clearSelection() : provider.selectIds(visibleIds),
                 )
               : AppBar(
-                  title: _ThreadTitle(
-                    displayName: provider.displayNameFor(conversation.address),
-                    address: conversation.address,
-                    isKnownContact: provider.contactService.isKnownContact(conversation.address),
-                    onOpenContact: () async {
-                      final opened = await provider.openContact(conversation.address);
-                      if (!opened && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Could not open contact'),
-                            duration: Duration(seconds: 2),
+                  title: _isSearching
+                      ? TextField(
+                          controller: _searchController,
+                          autofocus: true,
+                          textInputAction: TextInputAction.search,
+                          decoration: const InputDecoration(
+                            hintText: 'Search this conversation',
+                            border: InputBorder.none,
                           ),
-                        );
-                      }
-                    },
-                  ),
-                  actions: [
-                    // Same repliability check as the reply bar below — a
-                    // shortcode/sender ID (e.g. "HDFCBK") isn't a number
-                    // the Phone app could dial in the first place.
-                    if (canReply)
-                      IconButton(
-                        icon: const Icon(Icons.call_outlined),
-                        tooltip: 'Call ${conversation.address}',
-                        onPressed: () => _callNumber(context, conversation.address),
-                      ),
-                    IconButton(
-                      icon: Icon(
-                        provider.isPinned(conversation.threadId) ? Icons.push_pin : Icons.push_pin_outlined,
-                      ),
-                      tooltip: provider.isPinned(conversation.threadId) ? 'Unpin' : 'Pin conversation',
-                      onPressed: () => provider.togglePinned(conversation.threadId),
-                    ),
-                  ],
+                          onChanged: (value) => _onSearchChanged(value, messages),
+                        )
+                      : _ThreadTitle(
+                          displayName: provider.displayNameFor(conversation.address),
+                          address: conversation.address,
+                          isKnownContact: provider.contactService.isKnownContact(conversation.address),
+                          onOpenContact: () async {
+                            final opened = await provider.openContact(conversation.address);
+                            if (!opened && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Could not open contact'),
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                  actions: _isSearching
+                      ? [
+                          if (_searchQuery.trim().isNotEmpty)
+                            Center(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 4),
+                                child: Text(
+                                  _searchMatchIds.isEmpty
+                                      ? '0 results'
+                                      : '${_currentMatchIndex + 1}/${_searchMatchIds.length}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          IconButton(
+                            icon: const Icon(Icons.keyboard_arrow_up),
+                            tooltip: 'Previous match',
+                            onPressed: _searchMatchIds.isEmpty ? null : () => _goToPreviousMatch(messages),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.keyboard_arrow_down),
+                            tooltip: 'Next match',
+                            onPressed: _searchMatchIds.isEmpty ? null : () => _goToNextMatch(messages),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            tooltip: 'Close search',
+                            onPressed: _stopSearch,
+                          ),
+                        ]
+                      : [
+                          IconButton(
+                            icon: const Icon(Icons.search),
+                            tooltip: 'Search this conversation',
+                            onPressed: _startSearch,
+                          ),
+                          // Same repliability check as the reply bar below — a
+                          // shortcode/sender ID (e.g. "HDFCBK") isn't a number
+                          // the Phone app could dial in the first place.
+                          if (canReply)
+                            IconButton(
+                              icon: const Icon(Icons.call_outlined),
+                              tooltip: 'Call ${conversation.address}',
+                              onPressed: () => _callNumber(context, conversation.address),
+                            ),
+                          IconButton(
+                            icon: Icon(
+                              provider.isPinned(conversation.threadId)
+                                  ? Icons.push_pin
+                                  : Icons.push_pin_outlined,
+                            ),
+                            tooltip: provider.isPinned(conversation.threadId) ? 'Unpin' : 'Pin conversation',
+                            onPressed: () => provider.togglePinned(conversation.threadId),
+                          ),
+                        ],
                 ),
           body: Column(
             children: [
@@ -301,6 +424,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           highlighted: m.id == _highlightedId,
                           starred: provider.isStarred(m.id),
                           isNew: isNew,
+                          searchQuery: _isSearching ? _searchQuery : null,
                           onRetry: m.sendState == OutgoingSendState.failed
                               ? () => provider.retrySend(m)
                               : null,
