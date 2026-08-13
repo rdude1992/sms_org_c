@@ -155,6 +155,14 @@ object Categorizer {
 
         if (suffixCategory == Category.TRANSACTIONAL) return Category.TRANSACTIONAL
 
+        // EPFO passbook SMS ("... Contribution of Rs.X for due month
+        // Feb-26 has been received.") name the contribution's *due
+        // period*, not an unpaid bill — keep in sync with
+        // categorization_service.dart's isEpfoContribution.
+        val isEpfoContribution = contentLower.contains("contribution") &&
+            (contentLower.contains("epfo") || contentLower.contains("provident fund") ||
+                contentLower.contains("passbook balance"))
+
         if (hasAmount &&
             (transactionKeywords.any { contentLower.contains(it) } ||
                 bankSenders.any { senderLower.contains(it) } ||
@@ -163,7 +171,7 @@ object Categorizer {
                 senderUpper.contains("FASTAG"))
         ) {
             val isBillNotification = (contentLower.contains("due") || contentLower.contains("bill")) &&
-                !contentLower.contains("paid") && !contentLower.contains("debited")
+                !contentLower.contains("paid") && !contentLower.contains("debited") && !isEpfoContribution
             val isMandateNotification = contentLower.contains("mandate registered") ||
                 (contentLower.contains("mandate") && contentLower.contains("creation"))
 

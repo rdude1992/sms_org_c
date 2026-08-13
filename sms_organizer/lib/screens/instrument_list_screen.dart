@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
+import '../services/duplicate_detection_service.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/search_toggle_mixin.dart';
@@ -18,6 +19,9 @@ import 'transaction_list_screen.dart';
 /// glance. A row spanning a debit card and its linked bank account (same
 /// issuer + last-4, see [Transaction.instrumentGroupKey]) shows up once,
 /// under Debit Cards, with a "Debit Card + Bank Account" badge.
+///
+/// [transactions] is a pre-filtered snapshot from whichever screen pushed
+/// this route (e.g. the Insights "See all" drilldown).
 class InstrumentListScreen extends StatefulWidget {
   final List<Transaction> transactions;
   final String? subtitle;
@@ -50,9 +54,10 @@ class _InstrumentListScreenState extends State<InstrumentListScreen>
     // reflected here too, instead of this screen staying stale until it's
     // popped and re-opened.
     final ids = widget.transactions.map((t) => t.smsId).toSet();
-    final liveTransactions =
-        context.watch<SmsProvider>().transactions.where((t) => ids.contains(t.smsId)).toList();
-    final grouped = groupByInstrument(liveTransactions);
+    final allLive = context.watch<SmsProvider>().transactions;
+    final liveTransactions = allLive.where((t) => ids.contains(t.smsId)).toList();
+    final duplicateIds = findDuplicateTransactionIds(liveTransactions);
+    final grouped = groupByInstrument(liveTransactions, duplicateIds: duplicateIds);
 
     final trimmedQuery = query.trim().toLowerCase();
     final instruments = trimmedQuery.isEmpty
@@ -92,6 +97,7 @@ class _InstrumentListScreenState extends State<InstrumentListScreen>
                     _Section(
                       section: section,
                       transactions: liveTransactions,
+                      duplicateIds: duplicateIds,
                       onTapItem: (s) => _openDrilldown(context, s, liveTransactions),
                     ),
               ],
@@ -180,8 +186,14 @@ class _SectionData {
 class _Section extends StatelessWidget {
   final _SectionData section;
   final List<Transaction> transactions;
+  final Set<int> duplicateIds;
   final ValueChanged<InstrumentSummary> onTapItem;
-  const _Section({required this.section, required this.transactions, required this.onTapItem});
+  const _Section({
+    required this.section,
+    required this.transactions,
+    required this.duplicateIds,
+    required this.onTapItem,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -206,7 +218,12 @@ class _Section extends StatelessWidget {
           ),
         ),
         ...section.items.map(
-          (s) => _InstrumentTile(summary: s, transactions: transactions, onTap: () => onTapItem(s)),
+          (s) => _InstrumentTile(
+            summary: s,
+            transactions: transactions,
+            duplicateIds: duplicateIds,
+            onTap: () => onTapItem(s),
+          ),
         ),
         const SizedBox(height: 16),
       ],
@@ -217,13 +234,23 @@ class _Section extends StatelessWidget {
 class _InstrumentTile extends StatelessWidget {
   final InstrumentSummary summary;
   final List<Transaction> transactions;
+  final Set<int> duplicateIds;
   final VoidCallback onTap;
-  const _InstrumentTile({required this.summary, required this.transactions, required this.onTap});
+  const _InstrumentTile({
+    required this.summary,
+    required this.transactions,
+    required this.duplicateIds,
+    required this.onTap,
+  });
 
   /// Up to the last 10 transactions for this instrument, oldest first,
-  /// signed by direction — the series the row's sparkline traces.
+  /// signed by direction — the series the row's sparkline traces. Excludes
+  /// duplicate-alert shadows so one purchase reported by two SMS doesn't
+  /// draw as a doubled dip.
   List<double> get _series {
-    final own = transactions.where((t) => t.instrumentGroupKey == summary.key).toList()
+    final own = transactions
+        .where((t) => t.instrumentGroupKey == summary.key && !duplicateIds.contains(t.smsId))
+        .toList()
       ..sort((a, b) => a.date.compareTo(b.date));
     final recent = own.length > 10 ? own.sublist(own.length - 10) : own;
     return [

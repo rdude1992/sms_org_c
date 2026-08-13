@@ -375,6 +375,17 @@ class SmsProvider extends ChangeNotifier {
 
     await _db.clearAll();
     await _db.setMeta('categorizer_version', currentVersion);
+    // clearAll() just deleted every non-override transaction's
+    // spend_category along with its row. _backfillSpendCategories() below
+    // (called later in initialize()) is the only thing that re-tags those
+    // — but it's gated on its own, unrelated SpendCategoryDetector.version
+    // meta key, which this wipe didn't touch. Left alone, that gate would
+    // still read as "already backfilled" from before this wipe and skip
+    // re-running entirely, leaving every auto-tagged transaction stuck on
+    // "Uncategorised" until SpendCategoryDetector's own logic happens to
+    // change next. Clearing the key forces that pass to treat itself as
+    // never having run, so it actually re-tags the freshly-reparsed data.
+    await _db.deleteMeta('spend_category_version');
   }
 
   /// One-time pass tagging already-cached transactions with a
@@ -539,6 +550,14 @@ class SmsProvider extends ChangeNotifier {
               final txn = _txnParser.parseTransaction(m);
               if (txn != null) newTransactions.add(_applyLearnedMerchantCategory(txn));
             }
+          } else if (cached == SmsCategory.updates && !cachedInvIds.contains(m.id)) {
+            // A periodic investment value statement (NPS/Protean's
+            // "Investment value ... as on ... is Rs X") — categorized
+            // updates, not transactional, since no money moved, but still
+            // worth recording as an InvestmentEvent so holdings_service.dart
+            // can use it as a value checkpoint. See parseInvestmentValuation.
+            final valuation = _txnParser.parseInvestmentValuation(m);
+            if (valuation != null) newInvestments.add(valuation);
           }
           continue; // already processed in a previous sync
         }
@@ -566,6 +585,9 @@ class SmsProvider extends ChangeNotifier {
             final txn = _txnParser.parseTransaction(m);
             if (txn != null) newTransactions.add(_applyLearnedMerchantCategory(txn));
           }
+        } else if (m.category == SmsCategory.updates) {
+          final valuation = _txnParser.parseInvestmentValuation(m);
+          if (valuation != null) newInvestments.add(valuation);
         }
       }
 
@@ -606,9 +628,20 @@ class SmsProvider extends ChangeNotifier {
   /// rather than waiting for incremental sync to naturally correct it (it
   /// won't, by design — cached entries are never automatically
   /// re-evaluated once written).
+  ///
+  /// Mirrors initialize()'s post-wipe sequence, not just clearAll()+refresh()
+  /// — clearAll() deletes every non-override transaction's spend_category
+  /// along with its row, and only _backfillSpendCategories/
+  /// _applyMerchantRulesToUncategorised actually refill it. Skipping those
+  /// (as an earlier version of this method did) left every auto-tagged
+  /// transaction stuck "Uncategorised" after a manual recalculate, with no
+  /// way to self-heal short of a full app restart.
   Future<void> recalculateAll() async {
     await _db.clearAll();
+    await _db.deleteMeta('spend_category_version');
     await refresh();
+    await _backfillSpendCategories();
+    await _applyMerchantRulesToUncategorised();
   }
 
   void _listenForIncoming() {
@@ -686,6 +719,19 @@ class SmsProvider extends ChangeNotifier {
   /// see TransactionListScreen's multi-select "Set category" action, for
   /// tagging a batch of transactions SpendCategoryDetector left
   /// "Uncategorised" (or got wrong) in one pass instead of one at a time.
+  ///
+  /// Also pins the parent message's category as an override, same as
+  /// [updateTransaction] does — without this, a later
+  /// [DatabaseService.clearAll] wipe (see
+  /// [_ensureCacheMatchesCurrentLogic]) would delete this message's
+  /// `message_categories` row (still `is_override = 0`, since nothing here
+  /// had touched it) even though its `transactions` row correctly survived
+  /// as an override. `refresh()` would then find no cached category for
+  /// it, re-classify and re-parse it from scratch as a brand-new,
+  /// un-tagged `Transaction`, and `saveTransactionsBulk`'s `INSERT OR
+  /// REPLACE` would silently overwrite the still-good override row with
+  /// that blank one — destroying a spend category the user explicitly set,
+  /// not just hiding it.
   Future<void> setSpendCategoryForTransactions(List<int> smsIds, SpendCategory? category) async {
     var ruleChanged = false;
     for (final id in smsIds) {
@@ -694,20 +740,30 @@ class SmsProvider extends ChangeNotifier {
       final updated = _transactions[index].copyWith(spendCategory: category, isOverridden: true);
       _transactions[index] = updated;
       await _db.saveTransaction(updated, isOverride: true);
+      await _db.saveCategory(id, SmsCategory.transactional, isOverride: true);
+      final message = messageById(id);
+      if (message != null) {
+        message.category = SmsCategory.transactional;
+        message.isCategoryOverridden = true;
+      }
       if (await _rememberMerchantCategory(updated, category)) ruleChanged = true;
     }
     if (ruleChanged) await _applyMerchantRulesToUncategorised();
     notifyListeners();
   }
 
-  /// Bulk equivalent of [setMessageCategory] for TransactionListScreen's
-  /// multi-select "Not a transaction?" action — moves every transaction in
-  /// [smsIds] to [category] in one pass, the same way the single-item
-  /// TransactionTile action does for one. Kept separate from
-  /// [setSelectedCategory] because that one is hard-wired to
-  /// [selectedIds] (the Inbox's own cross-screen selection state) — the
-  /// transaction list deliberately keeps its selection local (see
-  /// TransactionListScreen), so this takes the id list explicitly instead.
+  /// Bulk equivalent of [setMessageCategory] for TransactionListScreen's and
+  /// InvestmentListScreen's multi-select "Not a transaction?"/"Not an
+  /// investment?" actions — moves every message in [smsIds] to [category] in
+  /// one pass, the same way the single-item TransactionTile/InvestmentTile
+  /// action does for one. Despite the name, this only ever touches
+  /// [SmsMessage.category] (via [setMessageCategory]), so it works
+  /// identically for a batch of transaction or investment ids. Kept separate
+  /// from [setSelectedCategory] because that one is hard-wired to
+  /// [selectedIds] (the Inbox's own cross-screen selection state) — both
+  /// list screens deliberately keep their selection local (see
+  /// TransactionListScreen/InvestmentListScreen), so this takes the id list
+  /// explicitly instead.
   Future<void> setCategoryForTransactions(List<int> smsIds, SmsCategory category) async {
     for (final id in smsIds) {
       final message = messageById(id);
@@ -1025,8 +1081,15 @@ class SmsProvider extends ChangeNotifier {
   /// transaction whose SMS never included an explicit account number, so
   /// TransactionParserService could tell it moved money but not through
   /// which of the user's own accounts. Marks each as overridden, same as
-  /// [updateTransaction], so a later cache wipe or re-sync never silently
-  /// un-links it again.
+  /// [updateTransaction] — including pinning the parent message's category
+  /// as an override too, which this used to skip: without it, a later
+  /// [DatabaseService.clearAll] wipe deletes the message's still-`is_override
+  /// = 0` category row even though the transaction row survived as an
+  /// override, `refresh()` then finds no cached category for it and
+  /// re-parses it from scratch, and that fresh, un-assigned `Transaction`
+  /// silently overwrites the real one via `saveTransactionsBulk`'s `INSERT
+  /// OR REPLACE` — undoing the assignment rather than "never silently
+  /// un-linking it again" as intended.
   Future<void> assignInstrumentToTransactions(
     List<Transaction> transactions, {
     required InstrumentType instrument,
@@ -1043,6 +1106,12 @@ class SmsProvider extends ChangeNotifier {
       final index = _transactions.indexWhere((x) => x.smsId == t.smsId);
       if (index != -1) _transactions[index] = updated;
       await _db.saveTransaction(updated, isOverride: true);
+      await _db.saveCategory(t.smsId, SmsCategory.transactional, isOverride: true);
+      final message = messageById(t.smsId);
+      if (message != null) {
+        message.category = SmsCategory.transactional;
+        message.isCategoryOverridden = true;
+      }
     }
     notifyListeners();
   }
@@ -1099,6 +1168,51 @@ class SmsProvider extends ChangeNotifier {
       message.isCategoryOverridden = true;
       notifyListeners();
     }
+  }
+
+  /// Bulk equivalent of [updateInvestment] for InvestmentListScreen's
+  /// multi-select "Edit" action — same "only touches what's actually
+  /// passed" design as [updateTransactionsBulk]: [kind] left null keeps
+  /// each event's existing value, [fundOrScheme]/[amc]/[folioOrAccount]
+  /// left null or blank do the same (bulk-*clearing* isn't supported, same
+  /// reasoning as [updateTransactionsBulk] — too easy to wipe a whole batch
+  /// by leaving a field blank while only meaning to change something else).
+  Future<void> updateInvestmentsBulk(
+    List<InvestmentEvent> investments, {
+    InvestmentKind? kind,
+    String? fundOrScheme,
+    String? amc,
+    String? folioOrAccount,
+  }) async {
+    final cleanedFund = fundOrScheme?.trim();
+    final cleanedAmc = amc?.trim();
+    final cleanedFolio = folioOrAccount?.trim();
+    for (final i in investments) {
+      final updated = InvestmentEvent(
+        smsId: i.smsId,
+        date: i.date,
+        amount: i.amount,
+        kind: kind ?? i.kind,
+        rawBody: i.rawBody,
+        fundOrScheme: (cleanedFund == null || cleanedFund.isEmpty) ? i.fundOrScheme : cleanedFund,
+        folioOrAccount: (cleanedFolio == null || cleanedFolio.isEmpty) ? i.folioOrAccount : cleanedFolio,
+        units: i.units,
+        nav: i.nav,
+        amc: (cleanedAmc == null || cleanedAmc.isEmpty) ? i.amc : cleanedAmc,
+        isOverridden: true,
+      );
+      final index = _investments.indexWhere((x) => x.smsId == i.smsId);
+      if (index != -1) _investments[index] = updated;
+      await _db.saveInvestment(updated, isOverride: true);
+      await _db.saveCategory(i.smsId, SmsCategory.transactional, isOverride: true);
+
+      final message = messageById(i.smsId);
+      if (message != null) {
+        message.category = SmsCategory.transactional;
+        message.isCategoryOverridden = true;
+      }
+    }
+    notifyListeners();
   }
 
   void setCategoryFilter(SmsCategory? category) {

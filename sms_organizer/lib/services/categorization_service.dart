@@ -20,7 +20,7 @@ class CategorizationService {
   /// cached categories/transactions from before a logic change would
   /// silently keep being reused forever (incremental sync deliberately
   /// never re-evaluates cached entries on its own).
-  static const int version = 6;
+  static const int version = 10;
 
   SmsCategory categorize(SmsMessage message) {
     final sender = message.address;
@@ -185,6 +185,20 @@ class CategorizationService {
 
     if (suffixCategory == SmsCategory.transactional) return SmsCategory.transactional;
 
+    // EPFO passbook SMS ("... Contribution of Rs.X for due month Feb-26
+    // has been received.") name the contribution's *due period*, not an
+    // unpaid bill — "due month Feb-26" would otherwise trip
+    // isBillNotification below the same way an actual "payment due"
+    // reminder does, and get routed to updates/dropped instead of
+    // recorded as the PF credit it actually is. Requires both an
+    // EPFO-specific signal and "contribution" together, so this stays
+    // narrow enough not to also swallow an unrelated bill reminder that
+    // happens to mention "provident fund" in passing.
+    final isEpfoContribution = contentLower.contains('contribution') &&
+        (contentLower.contains('epfo') ||
+            contentLower.contains('provident fund') ||
+            contentLower.contains('passbook balance'));
+
     if (hasAmount &&
         (transactionKeywords.any((kw) => contentLower.contains(kw)) ||
             bankSenders.any((bank) => senderLower.contains(bank)) ||
@@ -193,7 +207,8 @@ class CategorizationService {
             senderUpper.contains('FASTAG'))) {
       final isBillNotification = (contentLower.contains('due') || contentLower.contains('bill')) &&
           !contentLower.contains('paid') &&
-          !contentLower.contains('debited');
+          !contentLower.contains('debited') &&
+          !isEpfoContribution;
 
       final isMandateNotification = contentLower.contains('mandate registered') ||
           (contentLower.contains('mandate') && contentLower.contains('creation'));

@@ -1,4 +1,5 @@
 import '../models/transaction.dart';
+import 'duplicate_detection_service.dart';
 
 /// How finely [InsightsSummary.trend] buckets transactions — chosen by the
 /// caller to match how wide a date range it's summarizing (a single month
@@ -39,10 +40,11 @@ class InstrumentSummary {
 
   /// Balance the most recent transaction (within the summarized range) that
   /// actually mentioned one reported — null if none of them did. Tracked
-  /// alongside its date purely to know which transaction is "most recent"
-  /// as they're folded in; the date itself isn't shown anywhere.
+  /// alongside its date and instrument purely to drive the tie-break logic
+  /// in [_considerBalance]; neither is shown anywhere.
   double? lastBalance;
   DateTime? _lastBalanceDate;
+  InstrumentType? _lastBalanceInstrument;
 
   InstrumentSummary({
     required this.key,
@@ -52,11 +54,41 @@ class InstrumentSummary {
     this.walletType,
   });
 
-  void _considerBalance(double? balance, DateTime date) {
+  /// Picks the authoritative balance for a linked debit-card+bank-account
+  /// group. Plain recency is the default rule, but within
+  /// [kLinkedAccountEventWindow] of the current best reading — i.e. the pair
+  /// of alerts one swipe typically produces — a bank-account-sourced
+  /// balance always wins over a debit-card one: a bank statement figure is
+  /// the more authoritative source for the actual account balance than a
+  /// card-network swipe alert reporting roughly the same moment.
+  void _considerBalance(double? balance, DateTime date, InstrumentType instrument) {
     if (balance == null) return;
-    if (_lastBalanceDate == null || date.isAfter(_lastBalanceDate!)) {
+    if (_lastBalanceDate == null) {
       lastBalance = balance;
       _lastBalanceDate = date;
+      _lastBalanceInstrument = instrument;
+      return;
+    }
+
+    final withinWindow = date.difference(_lastBalanceDate!).abs() <= kLinkedAccountEventWindow;
+    if (withinWindow) {
+      final isBankReading = instrument == InstrumentType.bankAccount;
+      final currentIsBankReading = _lastBalanceInstrument == InstrumentType.bankAccount;
+      if (isBankReading && !currentIsBankReading) {
+        lastBalance = balance;
+        _lastBalanceDate = date;
+        _lastBalanceInstrument = instrument;
+        return;
+      }
+      if (!isBankReading && currentIsBankReading) {
+        return;
+      }
+    }
+
+    if (date.isAfter(_lastBalanceDate!)) {
+      lastBalance = balance;
+      _lastBalanceDate = date;
+      _lastBalanceInstrument = instrument;
     }
   }
 
@@ -201,11 +233,19 @@ class InsightsService {
       return true;
     }).toList();
 
+    // Some banks send two SMS for one purchase (a card-network alert and a
+    // bank-account debit alert); both parse into separate transactions
+    // sharing one instrumentGroupKey. Excluding the shadow half from every
+    // total below keeps a linked debit-card+bank-account pair from doubling
+    // its own spend — see duplicate_detection_service.dart.
+    final duplicateIds = findDuplicateTransactionIds(filtered);
+    final deduped = filtered.where((t) => !duplicateIds.contains(t.smsId)).toList();
+
     double totalCredit = 0;
     double totalDebit = 0;
     final Map<String, TrendPoint> trendMap = {};
 
-    for (final t in filtered) {
+    for (final t in deduped) {
       if (t.direction == TxnDirection.credit) {
         totalCredit += t.amount;
       } else if (t.direction == TxnDirection.debit) {
@@ -220,9 +260,13 @@ class InsightsService {
     }
 
     final trendList = _zeroFillTrend(trendMap.values.toList(), from, to, granularity);
-    final instrumentList = groupByInstrument(filtered);
-    final merchantList = groupByMerchant(filtered);
-    final categoryList = groupBySpendCategory(filtered);
+    // groupByInstrument still sees every transaction (not [deduped]) so a
+    // suppressed shadow can still contribute its balance reading and
+    // instrument type — only its contribution to totalCredit/totalDebit/
+    // count is skipped, via [duplicateIds].
+    final instrumentList = groupByInstrument(filtered, duplicateIds: duplicateIds);
+    final merchantList = groupByMerchant(deduped);
+    final categoryList = groupBySpendCategory(deduped);
 
     double invested = 0;
     double redeemed = 0;
@@ -230,6 +274,10 @@ class InsightsService {
     for (final inv in investments) {
       if (from != null && inv.date.isBefore(from)) continue;
       if (to != null && inv.date.isAfter(to)) continue;
+      // A periodic value statement (InvestmentKind.valuationUpdate) states
+      // what a holding is worth, not money moving in or out — it must stay
+      // out of both invested/redeemed totals and the event count.
+      if (inv.kind.isValuationOnly) continue;
       investmentEvents += 1;
       if (inv.kind == InvestmentKind.mutualFundRedemption) {
         redeemed += inv.amount;
@@ -241,7 +289,7 @@ class InsightsService {
     return InsightsSummary(
       totalCredit: totalCredit,
       totalDebit: totalDebit,
-      transactionCount: filtered.length,
+      transactionCount: deduped.length,
       byInstrument: instrumentList,
       byMerchant: merchantList,
       byCategory: categoryList,
@@ -268,7 +316,17 @@ class InsightsService {
 /// is excluded from the count, keeping "N transactions" in lockstep with
 /// what totalCredit/totalDebit actually add up to instead of over-counting
 /// against them.
-List<InstrumentSummary> groupByInstrument(List<Transaction> transactions) {
+///
+/// [duplicateIds] (see [findDuplicateTransactionIds]) marks the "shadow"
+/// half of a duplicate-alert pair — it's still folded into [types] and the
+/// balance tie-break (it may carry the more accurate balance reading) but
+/// excluded from totalCredit/totalDebit/count so a linked debit-card+
+/// bank-account group's totals aren't doubled by two SMS reporting one
+/// purchase.
+List<InstrumentSummary> groupByInstrument(
+  List<Transaction> transactions, {
+  Set<int> duplicateIds = const {},
+}) {
   final map = <String, InstrumentSummary>{};
   for (final t in transactions) {
     final summary = map.putIfAbsent(
@@ -282,14 +340,16 @@ List<InstrumentSummary> groupByInstrument(List<Transaction> transactions) {
       ),
     );
     summary.types.add(t.instrument);
-    if (t.direction == TxnDirection.credit) {
-      summary.totalCredit += t.amount;
-      summary.count += 1;
-    } else if (t.direction == TxnDirection.debit) {
-      summary.totalDebit += t.amount;
-      summary.count += 1;
+    if (!duplicateIds.contains(t.smsId)) {
+      if (t.direction == TxnDirection.credit) {
+        summary.totalCredit += t.amount;
+        summary.count += 1;
+      } else if (t.direction == TxnDirection.debit) {
+        summary.totalDebit += t.amount;
+        summary.count += 1;
+      }
     }
-    summary._considerBalance(t.balanceAfter, t.date);
+    summary._considerBalance(t.balanceAfter, t.date, t.instrument);
   }
   return map.values.toList()
     ..sort((a, b) => (b.totalCredit + b.totalDebit).compareTo(a.totalCredit + a.totalDebit));

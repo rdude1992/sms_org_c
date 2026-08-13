@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
+import '../services/duplicate_detection_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/assign_instrument_sheet.dart';
 import '../widgets/category_picker_sheet.dart';
@@ -178,8 +179,18 @@ class _TransactionListScreenState extends State<TransactionListScreen>
     final sorted = [...searched]..sort(_sortBy.compare);
     final credited = sorted.where((t) => t.direction == TxnDirection.credit).toList();
     final debited = sorted.where((t) => t.direction == TxnDirection.debit).toList();
-    final creditTotal = credited.fold<double>(0, (a, t) => a + t.amount);
-    final debitTotal = debited.fold<double>(0, (a, t) => a + t.amount);
+    // Rows for both halves of a duplicate-alert pair (see
+    // duplicate_detection_service.dart) stay visible — the user still
+    // received both SMS — but only one counts toward the header totals, so
+    // a linked debit-card+bank-account purchase reported twice doesn't
+    // double its own sum here.
+    final duplicateIds = findDuplicateTransactionIds(sorted);
+    final creditTotal = credited
+        .where((t) => !duplicateIds.contains(t.smsId))
+        .fold<double>(0, (a, t) => a + t.amount);
+    final debitTotal = debited
+        .where((t) => !duplicateIds.contains(t.smsId))
+        .fold<double>(0, (a, t) => a + t.amount);
 
     // A list where every transaction shares one direction — e.g. opened via
     // the Insights "Credited"/"Debited" total card, or (the common case) a

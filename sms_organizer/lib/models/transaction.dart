@@ -393,7 +393,20 @@ class Transaction {
       );
 }
 
-enum InvestmentKind { mutualFundSip, mutualFundPurchase, mutualFundRedemption, stockTrade, other }
+/// [valuationUpdate] is a periodic "here's what your holding is worth"
+/// statement (e.g. NPS/Protean's "Investment value in Tier II ... as on ...
+/// is Rs X") — see TransactionParserService.parseInvestmentValuation. It
+/// states a value as of a date, not money moving in or out, so it must
+/// never be summed into invested/redeemed totals the way every other kind
+/// here is.
+enum InvestmentKind {
+  mutualFundSip,
+  mutualFundPurchase,
+  mutualFundRedemption,
+  stockTrade,
+  valuationUpdate,
+  other,
+}
 
 extension InvestmentKindX on InvestmentKind {
   String get label {
@@ -406,12 +419,20 @@ extension InvestmentKindX on InvestmentKind {
         return 'Redemption';
       case InvestmentKind.stockTrade:
         return 'Stock Trade';
+      case InvestmentKind.valuationUpdate:
+        return 'Value update';
       case InvestmentKind.other:
         return 'Other';
     }
   }
 
   bool get isRedemption => this == InvestmentKind.mutualFundRedemption;
+
+  /// True for [InvestmentKind.valuationUpdate] — every invested/redeemed
+  /// total, SIP-cadence detector, and provider/AMC bucketing across the
+  /// Investments screens must skip these rather than folding a stated
+  /// balance into a cash-flow sum.
+  bool get isValuationOnly => this == InvestmentKind.valuationUpdate;
 }
 
 class InvestmentEvent {
@@ -422,9 +443,21 @@ class InvestmentEvent {
   final String? fundOrScheme;
   final String? folioOrAccount;
 
-  /// Number of units allotted/redeemed, if the SMS stated it or it could be
-  /// derived from amount ÷ NAV.
+  /// Number of units allotted/redeemed *by this installment specifically*,
+  /// if the SMS stated it that way or it could be derived from amount ÷
+  /// NAV — a delta to add to (or, for a redemption, subtract from) a
+  /// holding's running unit total. Mutually exclusive with [unitsBalance];
+  /// see there for the other, non-delta shape a unit count can take.
   final double? units;
+
+  /// A stated running/cumulative unit balance — e.g. "Balance Units
+  /// 205.177" in an AMC's purchase/SIP confirmation — the folio's *total*
+  /// units after this transaction, not this installment's own allotment.
+  /// holdings_service.dart treats this as authoritative and *sets* a
+  /// holding's unit count to it rather than adding it on top of the
+  /// running total the way [units] is summed, since it already includes
+  /// every prior installment.
+  final double? unitsBalance;
 
   /// Net asset value per unit at the time of this event, if stated.
   final double? nav;
@@ -449,6 +482,7 @@ class InvestmentEvent {
     this.fundOrScheme,
     this.folioOrAccount,
     this.units,
+    this.unitsBalance,
     this.nav,
     this.amc,
     this.isOverridden = false,
@@ -468,6 +502,29 @@ class InvestmentEvent {
 
   String get providerDisplayName => (amc ?? fundOrScheme ?? 'Other').trim();
 
+  /// Groups investment events into a single *holding* — same AMC + fund/
+  /// scheme + folio/account — for NAV/units/current-value tracking, which
+  /// [providerGroupKey] is too coarse for: two folios of the same fund (or
+  /// two different funds under one AMC) have different unit counts and can
+  /// carry different NAV histories, so netting them together would produce
+  /// a meaningless "units held" figure.
+  ///
+  /// [fundOrScheme] has to stay part of the key even though [folioOrAccount]
+  /// is already a strong identity signal on its own — NPS/Protean is the
+  /// concrete reason: Tier I and Tier II are two genuinely distinct
+  /// sub-accounts (different units, different value) that routinely share
+  /// one PRAN, so keying on folio alone would blend them into one
+  /// meaningless blended holding. A tier-agnostic "Voluntary contribution"
+  /// credit SMS that never names a tier at all (extractInvestmentDetails
+  /// falls back to the generic "NPS Scheme") ends up as its own third
+  /// bucket under that PRAN rather than guessed into either tier — not
+  /// perfect, but safer than silently merging two accounts that might not
+  /// be the same one.
+  String get holdingGroupKey {
+    final folioPart = (folioOrAccount ?? '').trim().toLowerCase();
+    return '$providerGroupKey|${(fundOrScheme ?? '').trim().toLowerCase()}|$folioPart';
+  }
+
   Map<String, dynamic> toJson() => {
         'smsId': smsId,
         'date': date.millisecondsSinceEpoch,
@@ -476,6 +533,7 @@ class InvestmentEvent {
         'fundOrScheme': fundOrScheme,
         'folioOrAccount': folioOrAccount,
         'units': units,
+        'unitsBalance': unitsBalance,
         'nav': nav,
         'amc': amc,
         'rawBody': rawBody,
@@ -492,6 +550,7 @@ class InvestmentEvent {
         fundOrScheme: json['fundOrScheme'] as String?,
         folioOrAccount: json['folioOrAccount'] as String?,
         units: (json['units'] as num?)?.toDouble(),
+        unitsBalance: (json['unitsBalance'] as num?)?.toDouble(),
         nav: (json['nav'] as num?)?.toDouble(),
         amc: json['amc'] as String?,
         isOverridden: json['isOverridden'] as bool? ?? false,

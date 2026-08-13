@@ -11,21 +11,21 @@ class Formatters {
   static final _timeOfDay = DateFormat('h:mm a');
   static final _fullDate = DateFormat('d MMM yyyy, h:mm a');
   static final _monthYear = DateFormat('MMM yyyy');
-  static final _monthOnly = DateFormat('MMM');
-  static final _yearOnlyShort = DateFormat('yy');
+  static final _monthYearShort = DateFormat('MMM yy');
+  static final _units = NumberFormat('#,##0.###', 'en_IN');
 
   static String currency(double value) => _currency.format(value);
   static String currencyPrecise(double value) => _currencyPrecise.format(value);
+
+  /// Plain (non-currency) number with up to 3 decimal places — mutual fund
+  /// unit counts, which are fractional but don't carry a ₹ symbol.
+  static String units(double value) => _units.format(value);
   static String monthYear(DateTime date) => _monthYear.format(date);
   /// e.g. "Aug 25" — TrendBarChart's x-axis tick labels, where the full
   /// 4-digit year (see [monthYear], still used for drilldown titles/
   /// tooltips where there's room) pushed the first/last tick past the
   /// chart's edge on a wide date range like "All time".
-  /// Month and short-year split apart — TrendBarChart's x-axis stacks these
-  /// on two lines instead of "MMM yy" on one, so adjacent tick labels on a
-  /// wide "All time" range don't run into each other horizontally.
-  static String monthOnly(DateTime date) => _monthOnly.format(date);
-  static String yearOnlyShort(DateTime date) => _yearOnlyShort.format(date);
+  static String monthYearShort(DateTime date) => _monthYearShort.format(date);
   static String dayOnly(DateTime date) => _dayOnly.format(date);
   static String dayMonth(DateTime date) => _dayMonth.format(date);
   static String dayMonthYear(DateTime date) => _dayMonthYear.format(date);

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
+import '../services/duplicate_detection_service.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/search_toggle_mixin.dart';
@@ -47,7 +48,11 @@ class _MerchantListScreenState extends State<MerchantListScreen>
     final ids = widget.transactions.map((t) => t.smsId).toSet();
     final liveTransactions =
         context.watch<SmsProvider>().transactions.where((t) => ids.contains(t.smsId)).toList();
-    final grouped = groupByMerchant(liveTransactions);
+    // Excludes duplicate-alert shadows (see duplicate_detection_service.dart)
+    // so a purchase reported by two SMS doesn't double a merchant's total.
+    final duplicateIds = findDuplicateTransactionIds(liveTransactions);
+    final grouped =
+        groupByMerchant(liveTransactions.where((t) => !duplicateIds.contains(t.smsId)).toList());
 
     final trimmedQuery = query.trim().toLowerCase();
     final sorted = trimmedQuery.isEmpty
