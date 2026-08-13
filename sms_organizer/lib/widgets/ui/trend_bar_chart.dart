@@ -47,11 +47,15 @@ class TrendBarChart extends StatelessWidget {
     }
   }
 
-  /// Short-year form for the x-axis tick text itself — day/week are already
-  /// compact ("15", "15 Aug") and unaffected, but month's "MMM yyyy" (e.g.
-  /// "Aug 2025") was wide enough to push the first/last tick's label past
-  /// the chart's own edge on a range spanning several years ("All time").
-  /// "MMM yy" keeps every tick well inside the reserved anchor width below.
+  /// The x-axis tick text itself — day/week are already compact ("15", "15
+  /// Aug") and just one line, but month's "MMM yyyy" (e.g. "Aug 2025") was
+  /// wide enough that adjacent ticks' labels ran into each other on a range
+  /// spanning several years ("All time"). Embeds a newline to stack month
+  /// above a short year on two lines instead — Text renders it as two
+  /// lines automatically, and [measureTextWidth] (used below to size the
+  /// reserved axis width) already reports a multi-line string's widest
+  /// line, so this needs no special-casing beyond the extra vertical room
+  /// [hasMultilineXLabels] reserves in bottomTitles.
   String _axisLabel(DateTime date) {
     switch (granularity) {
       case TrendGranularity.day:
@@ -59,7 +63,7 @@ class TrendBarChart extends StatelessWidget {
       case TrendGranularity.week:
         return Formatters.dayMonth(date);
       case TrendGranularity.month:
-        return Formatters.monthYearShort(date);
+        return '${Formatters.monthOnly(date)}\n${Formatters.yearOnlyShort(date)}';
     }
   }
 
@@ -114,6 +118,10 @@ class TrendBarChart extends StatelessWidget {
     // fixed count regardless of period.
     final xLabelWidth =
         dates.fold<double>(0, (w, d) => math.max(w, measureTextWidth(_axisLabel(d), _axisLabelStyle)));
+    // Bottom axis needs extra vertical room once labels wrap to two lines
+    // (see _axisLabel) — checked once here rather than per-tick since it's
+    // the same answer (this chart's granularity) for every tick.
+    final hasMultilineXLabels = dates.any((d) => _axisLabel(d).contains('\n'));
 
     // Narrower, tighter-packed bars once there are enough buckets that
     // full-width bars would overlap (31 daily bars vs. 12 monthly ones).
@@ -238,6 +246,17 @@ class TrendBarChart extends StatelessWidget {
                               // it explicitly too in case rounding ever
                               // lands one on the other side of that check.
                               if (value >= maxY) return const SizedBox.shrink();
+                              // Same defensive rounding as TrendLineChart's
+                              // leftTitles — fl_chart's own tick math (0, N
+                              // * maxY/4) can land a hair off an intended
+                              // step due to floating point, which otherwise
+                              // draws an extra label almost exactly on top
+                              // of a real one (most visible right at the
+                              // "₹0" row).
+                              final stepsFromMin = value / (maxY / 4);
+                              if ((stepsFromMin - stepsFromMin.roundToDouble()).abs() > 0.02) {
+                                return const SizedBox.shrink();
+                              }
                               return Padding(
                                 padding: const EdgeInsets.only(right: 6),
                                 child: Text(
@@ -280,7 +299,7 @@ class TrendBarChart extends StatelessWidget {
                         bottomTitles: AxisTitles(
                           sideTitles: SideTitles(
                             showTitles: true,
-                            reservedSize: 28,
+                            reservedSize: hasMultilineXLabels ? 36 : 28,
                             getTitlesWidget: (value, meta) {
                               final idx = value.toInt();
                               if (idx < 0 || idx >= dates.length) return const SizedBox.shrink();
@@ -291,6 +310,7 @@ class TrendBarChart extends StatelessWidget {
                                 padding: const EdgeInsets.only(top: 6),
                                 child: Text(
                                   _axisLabel(dates[idx]),
+                                  textAlign: TextAlign.center,
                                   style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
                                 ),
                               );

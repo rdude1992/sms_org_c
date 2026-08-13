@@ -5,7 +5,11 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.Build
 import android.provider.Telephony
@@ -139,8 +143,7 @@ object IncomingSmsNotifier {
             NotificationChannels.ensureConversationChannel(context, category.prefKey, threadId, displayName)
 
         val contactIcon = ContactsRepository.lookupPhotoIcon(context, address)
-        val fallbackIcon = IconCompat.createWithResource(context, R.mipmap.ic_launcher)
-        val avatarIcon = contactIcon ?: fallbackIcon
+        val avatarIcon = contactIcon ?: buildDefaultAvatarIcon(displayName)
 
         val sender = Person.Builder().setName(displayName).setIcon(avatarIcon).build()
         val me = Person.Builder().setName("You").build()
@@ -206,6 +209,7 @@ object IncomingSmsNotifier {
             .setContentIntent(contentIntent)
             .addAction(buildReplyAction(context, threadId, address))
             .addAction(buildMarkReadAction(context, threadId))
+            .addAction(buildDeleteAction(context, threadId))
 
         if (category == Categorizer.Category.OTP) {
             val lastIncoming = history.lastOrNull { !it.fromMe }?.text
@@ -353,6 +357,45 @@ object IncomingSmsNotifier {
     /** Indian-locale (lakh/crore) digit grouping, matching Formatters.currency() in Dart. */
     private fun formatAmount(amount: Double): String = indianAmountFormat.format(Math.round(amount))
 
+    /**
+     * Generic sender avatar for when [ContactsRepository.lookupPhotoIcon]
+     * has nothing to show — no matching contact (a bank/OTP shortcode like
+     * "HDFCBK", say) or no permission. Previously fell back to the app's
+     * own launcher icon, which — cropped into the notification shade's
+     * circular avatar slot — reads as "the app icon has a weird background"
+     * rather than as a per-sender placeholder. Drawn as an accent-colored
+     * circle with [displayName]'s first letter, matching how most
+     * messaging/contacts apps placeholder a contact with no photo; a sender
+     * whose name has no letter in it at all (a bare phone number) gets a
+     * plain person silhouette instead of a stray digit.
+     */
+    private fun buildDefaultAvatarIcon(displayName: String): IconCompat {
+        val size = 96
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ACCENT_COLOR
+        })
+
+        val initial = displayName.trim().firstOrNull { it.isLetter() }?.uppercaseChar()
+        if (initial != null) {
+            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                textSize = size * 0.46f
+                textAlign = Paint.Align.CENTER
+                typeface = Typeface.DEFAULT_BOLD
+            }
+            val textY = size / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
+            canvas.drawText(initial.toString(), size / 2f, textY, textPaint)
+        } else {
+            val personPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+            canvas.drawCircle(size / 2f, size * 0.38f, size * 0.16f, personPaint)
+            val shoulders = RectF(size * 0.26f, size * 0.56f, size * 0.74f, size * 0.92f)
+            canvas.drawArc(shoulders, 180f, 180f, true, personPaint)
+        }
+        return IconCompat.createWithBitmap(bitmap)
+    }
+
     private fun buildReplyAction(context: Context, threadId: Long, address: String): NotificationCompat.Action {
         val remoteInput = RemoteInput.Builder(NotificationActionReceiver.KEY_REPLY_TEXT)
             .setLabel("Reply")
@@ -391,6 +434,24 @@ object IncomingSmsNotifier {
         return NotificationCompat.Action.Builder(
             IconCompat.createWithResource(context, android.R.drawable.ic_menu_view),
             "Mark read",
+            pendingIntent
+        ).build()
+    }
+
+    private fun buildDeleteAction(context: Context, threadId: Long): NotificationCompat.Action {
+        val intent = Intent(context, NotificationActionReceiver::class.java).apply {
+            action = NotificationActionReceiver.ACTION_DELETE
+            putExtra(NotificationActionReceiver.EXTRA_THREAD_ID, threadId)
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            threadId.toInt() * 10 + 5,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return NotificationCompat.Action.Builder(
+            IconCompat.createWithResource(context, android.R.drawable.ic_menu_delete),
+            "Delete",
             pendingIntent
         ).build()
     }

@@ -18,7 +18,7 @@ class SpendCategoryDetector {
   /// backfill (see _backfillSpendCategories) re-runs over every
   /// still-uncategorised, non-overridden transaction rather than only ever
   /// applying to transactions parsed after the change.
-  static const int version = 4;
+  static const int version = 5;
 
   static SpendCategory? detect(Transaction t) {
     final haystack = [t.merchant, t.walletType, t.rawBody].whereType<String>().join(' ').toLowerCase();
@@ -130,6 +130,11 @@ const _rules = <_Rule>[
     'zerodha', 'groww', 'upstox', 'angel one', 'kite by zerodha', 'icici direct',
     'hdfc securities', 'motilal oswal', 'sharekhan', '5paisa', 'paytm money',
     'ppf', 'sukanya samriddhi', 'nps contribution', 'recurring deposit',
+    // "ACH D- BD-BSE Limited-..." — BSE StAR MF/similar RTA platforms are
+    // the common intermediary a bank-side ACH mandate debit names when
+    // it's actually collecting a mutual fund SIP installment, not a
+    // dedicated broker relationship the way the entries above are.
+    'bse limited',
   ], SpendCategory.investment),
   _Rule([
     'electricity bill', 'water bill', 'gas bill', 'dth recharge', 'broadband bill',

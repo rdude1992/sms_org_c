@@ -23,6 +23,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         const val ACTION_REPLY = "com.smsorganizer.app.action.REPLY"
         const val ACTION_MARK_READ = "com.smsorganizer.app.action.MARK_READ"
         const val ACTION_COPY_OTP = "com.smsorganizer.app.action.COPY_OTP"
+        const val ACTION_DELETE = "com.smsorganizer.app.action.DELETE"
 
         const val EXTRA_THREAD_ID = "thread_id"
         const val EXTRA_ADDRESS = "address"
@@ -38,6 +39,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
             ACTION_REPLY -> handleReply(context, intent, threadId)
             ACTION_MARK_READ -> handleMarkRead(context, threadId)
             ACTION_COPY_OTP -> handleCopyOtp(context, intent)
+            ACTION_DELETE -> handleDelete(context, threadId)
         }
     }
 
@@ -64,6 +66,20 @@ class NotificationActionReceiver : BroadcastReceiver() {
         val ids = SmsRepository.getUnreadIncomingIds(context, threadId)
         if (ids.isNotEmpty()) {
             SmsRepository.markRead(context, ids, true)
+        }
+        ConversationHistoryStore.clear(context, threadId)
+        NotificationManagerCompat.from(context).cancel(threadId.toInt())
+    }
+
+    /**
+     * Deletes the unread incoming messages this notification represents
+     * straight from content://sms — same id scope as [handleMarkRead], so
+     * it never reaches back past what's actually shown in the notification.
+     */
+    private fun handleDelete(context: Context, threadId: Long) {
+        val ids = SmsRepository.getUnreadIncomingIds(context, threadId)
+        if (ids.isNotEmpty()) {
+            SmsRepository.deleteMessages(context, ids)
         }
         ConversationHistoryStore.clear(context, threadId)
         NotificationManagerCompat.from(context).cancel(threadId.toInt())
