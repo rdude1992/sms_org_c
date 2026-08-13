@@ -600,11 +600,13 @@ class _InsightsScreenState extends State<InsightsScreen> {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       minVerticalPadding: 10,
-      leading: Icon(Icons.more_horiz, color: scheme.outline),
-      title: const Text('Other'),
-      subtitle: Text(
-        '$otherCount transaction${otherCount == 1 ? '' : 's'}',
-        style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+      leading: Icon(Icons.more_horiz, color: scheme.outline, size: 18),
+      title: Row(
+        children: [
+          const Text('Other'),
+          const SizedBox(width: 4),
+          Text('($otherCount)', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        ],
       ),
       trailing: Text(
         '-${Formatters.currency(otherTotal)}',
@@ -1153,16 +1155,22 @@ class _SpendCategoryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = summary.category?.color ?? Theme.of(context).colorScheme.outline;
+    final scheme = Theme.of(context).colorScheme;
+    final color = summary.category?.color ?? scheme.outline;
     final icon = summary.category?.icon ?? Icons.label_off_outlined;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       minVerticalPadding: 10,
-      leading: Icon(icon, color: color),
-      title: Text(summary.displayName),
-      subtitle: Text(
-        '${summary.count} transaction${summary.count == 1 ? '' : 's'}',
-        style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+      leading: Icon(icon, color: color, size: 18),
+      // Count folded into the title row itself (rather than a separate
+      // subtitle line) so each row is one line tall, same density as
+      // Recent transactions' compact rows.
+      title: Row(
+        children: [
+          Flexible(child: Text(summary.displayName, overflow: TextOverflow.ellipsis)),
+          const SizedBox(width: 4),
+          Text('(${summary.count})', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        ],
       ),
       trailing: Text(
         '-${Formatters.currency(summary.totalDebit)}',

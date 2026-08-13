@@ -955,17 +955,25 @@ class _ProviderRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final scheme = Theme.of(context).colorScheme;
+    final primary = scheme.primary;
     final p = provider;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      leading: CircleAvatar(
-        radius: 20,
-        backgroundColor: primary.withOpacity(0.12),
-        child: Icon(Icons.account_balance_outlined, color: primary, size: 18),
+      minVerticalPadding: 10,
+      leading: Icon(Icons.account_balance_outlined, color: primary, size: 18),
+      // Count folded into the title row itself (rather than a separate
+      // subtitle line) so each row is one line tall, matching Insights'
+      // compact list rows.
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+          ),
+          const SizedBox(width: 4),
+          Text('(${p.count})', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        ],
       ),
-      title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text('${p.count} event${p.count == 1 ? '' : 's'}'),
       trailing: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,
