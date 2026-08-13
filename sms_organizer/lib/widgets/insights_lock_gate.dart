@@ -4,13 +4,14 @@ import '../providers/security_settings_provider.dart';
 
 /// Wraps [child] (the Insights tab) behind a lock screen while
 /// SecuritySettingsProvider.lockEnabled is on and the app hasn't been
-/// unlocked yet this session. Insights is a PageView tab kept alive for the
-/// app's whole lifetime (see HomeScreen._KeepAlivePage), not a pushed
-/// route, so this can't rely on a route guard — instead it observes app
-/// lifecycle directly and re-locks on every backgrounding, regardless of
-/// which tab happens to be showing at the time.
+/// unlocked yet this session. It's a PageView tab kept alive for the app's
+/// whole lifetime (see HomeScreen._KeepAlivePage), not a pushed route, so
+/// this can't rely on a route guard — instead it observes app lifecycle
+/// directly and re-locks on every backgrounding, regardless of which tab
+/// happens to be showing at the time.
 class InsightsLockGate extends StatefulWidget {
   final Widget child;
+
   const InsightsLockGate({super.key, required this.child});
 
   @override

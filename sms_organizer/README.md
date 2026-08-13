@@ -75,6 +75,9 @@ lib/
     transaction_parser_service.dart Extracts amount/direction/instrument/issuer/balance
     spend_category_detector.dart    Best-effort auto-tagging of Transaction.spendCategory
     insights_service.dart           Aggregates into totals/trend/per-instrument/per-category summaries
+    duplicate_detection_service.dart Flags the "shadow" half of a card-network +
+                                      bank-account SMS pair reporting one purchase twice,
+                                      so linked-account totals aren't doubled
     database_service.dart           sqflite cache of categories + parsed data
     backup_service.dart             JSON export/share + restore
     contact_service.dart            Phone-number-to-name lookup, built once from device contacts
@@ -84,10 +87,11 @@ lib/
   providers/               SmsProvider (app state), ThemeProvider (dark mode),
                             NotificationSettingsProvider (per-category mute switches),
                             SecuritySettingsProvider (Insights biometric lock)
-  screens/                 Onboarding, Home (bottom nav), Inbox (chat/list toggle), Thread,
-                            Compose, Insights (+ instrument/investment/merchant/transaction
-                            drilldowns, uncategorised-transactions review), Settings,
-                            Starred, Drafts
+  screens/                 Onboarding, Home (bottom nav: Inbox/Insights/Settings),
+                            Inbox (chat/list toggle), Thread, Compose, Insights (+
+                            instrument/investment/merchant/transaction drilldowns,
+                            uncategorised-transactions review, "Cards & Accounts"
+                            drilldown), Settings, Starred, Drafts
   widgets/                 Conversation tile, message bubble, category badge, direction badge,
                             multi-select app bar, transaction tile (+ its edit/assign-account/
                             detected-SMS sheets), investment tile (+ its edit sheet),
@@ -200,7 +204,98 @@ notes if you're porting further updates from the source later.
   account even though the SMS says "credited" (to the fund, not the
   user's cash), and NPS Tier 1/2 naming.
 
-- **PPF/SSY/NPS self-transfers** get their own `InstrumentType.investment`
+- **Estimated fund value, NAV/units trend, and SIP detection**
+  (`holdings_service.dart`) group investment events into per-fund
+  *holdings* — same AMC + fund/scheme + folio/account
+  (`InvestmentEvent.holdingGroupKey`) — a finer grouping than the "By AMC"
+  tab's own `providerGroupKey` (AMC only), since two folios of the same
+  fund, or two different funds/tiers under one AMC (NPS Tier I and Tier II
+  routinely share one PRAN — see below), have independent unit counts and
+  NAV histories that would produce a meaningless blended figure if netted
+  together. A tier-agnostic NPS contribution SMS that never names a tier
+  at all ends up its own third bucket under that PRAN rather than guessed
+  into either tier's holding. Each holding's units-held and net-invested
+  are reconstructed
+  event-by-event; "estimated current value" prefers units held × the most
+  recent NAV any SMS mentioned, falls back to the most recent confirmed
+  value statement (see below) plus contributions made since, and falls
+  back again to cost basis if neither is available — never a live market
+  quote. The Investments dashboard and the per-AMC drilldown
+  (`AmcDetailScreen`) both chart this — invested vs. estimated value, NAV
+  over time, units over time — and `detectSip` heuristically flags a
+  recurring monthly contribution (same rounded amount recurring across ≥3
+  distinct months) even when the SMS itself never used the word "SIP".
+
+- **NPS/Protean gets two message shapes the holdings engine handles
+  differently.** A contribution SMS ("Units for Voluntary contribution of
+  Rs.X credited with NAV of DD/MM/YY") states neither units nor a NAV —
+  "NAV of DD/MM/YY" is an *allotment date*, not a rupee value, and
+  `extractInvestmentDetails`'s NAV regex has a lookahead specifically
+  rejecting that date shape (it used to parse the date's leading digits as
+  a bogus NAV, e.g. "NAV of 04/04/25" → 4.0, silently corrupting
+  units-derivation and every NAV/value chart for that holding). Separately,
+  a periodic statement ("Investment value in Tier II (PRANXXXX) as on
+  DD.MM.YY is Rs X") states a value directly with no units/NAV at all —
+  `extractInvestmentValueStatement` + `TransactionParserService.
+  parseInvestmentValuation` record this as `InvestmentKind.valuationUpdate`
+  (categorized `SmsCategory.updates`, not `transactional`, since no money
+  moved — see `SmsProvider.refresh`'s `else if (category == updates)`
+  branch), which `holdings_service.dart` treats as an authoritative
+  checkpoint rather than a cash flow: every invested/redeemed total, the
+  SIP detector, and provider/AMC bucketing all skip it via
+  `InvestmentKind.isValuationOnly`.
+
+- **Tier I/Tier II detection had a substring bug.** `extractInvestment
+  Details`'s tier check used to be a plain `contentLower.contains('tier
+  i')` — which also matches inside "tier ii" (`"tier i"` is literally the
+  first 6 characters of `"tier ii"`), and since the Tier I branch was
+  checked first, every Tier II message got mislabeled "NPS Tier 1", never
+  reaching the Tier II branch at all. Fixed with `\b`-bounded regex
+  (`\btier\s+(?:1|i)\b` / `\btier\s+(?:2|ii)\b`) — a word boundary can't
+  land between the two `i`s in "ii", so "tier i" genuinely stops matching
+  inside "tier ii".
+
+- **"Balance Units" was being summed as if it were a per-installment
+  delta.** Regular AMC purchase/SIP confirmations (e.g. ABSL MF's "...
+  Purchase-SIP ... is processed. Balance Units 205.177.") often report a
+  *running total* units balance, not the units allotted by that one
+  installment — but `extractInvestmentDetails`'s units regex treated
+  "Units 205.177" the same either way, and `holdings_service.dart` summed
+  every event's `units` on top of the running total. Two ₹4,999.75
+  installments a month apart, reporting balances of 205.177 then 211.947
+  units, were being recorded as ~417 units held instead of the ~212 the
+  second statement actually reported — a holding whose SMS reports a
+  balance this way never converges to the right unit count, it just keeps
+  compounding the error every installment. Fixed with a dedicated "balance
+  units" regex (`ExtractedInvestmentDetails.balanceUnits`,
+  `InvestmentEvent.unitsBalance` — new `units_balance` column, DB version
+  9) that `computeFundHoldings` *sets* the running total to rather than
+  adding on top of it, falling back to the old delta-summing behavior only
+  when a message states a plain per-installment count instead.
+
+- **SIP-discontinued detection.** `SipInfo.isDiscontinued` (holdings_
+  service.dart) flags a detected SIP once ~3 months have passed with no
+  further installment at its cadence/amount — there's no SMS that
+  explicitly says "SIP cancelled", so a long gap since the last one is the
+  only signal available. Surfaced in `AmcDetailScreen` as a
+  "DISCONTINUED" badge next to the fund name plus a note under the SIP
+  line; tapping the fund name itself now opens that holding's own filtered
+  transaction list (previously only the whole AMC's list was reachable).
+
+- **Trend chart axis sizing is now content-aware, not a fixed guess.**
+  `TrendBarChart`/`TrendLineChart` used to reserve a fixed 46px for the
+  y-axis and thin x-axis labels to a flat "6 max" regardless of what was
+  actually being displayed — clipping a precise NAV value like
+  "₹1,234.56" in the same space a compact "₹4.9K" fit fine, and applying
+  the same label count whether the x-axis was showing "15" (day
+  granularity) or "Aug 25" (month granularity). `chart_label_sizing.dart`'s
+  `measureTextWidth` (a `TextPainter` layout) now sizes the reserved
+  y-axis column to the widest tick label actually reachable at the
+  current amount scale, and a `LayoutBuilder` sizes x-axis label thinning
+  to how many of the widest label actually fit in the real available
+  width for the current period granularity.
+
+- **PPF/SSY/NPS/EPFO self-transfers** get their own `InstrumentType.investment`
   (`TransactionParserService._instrumentType`), separate from the generic
   `bankAccount` type, so a small-savings-scheme sub-account shows up as its
   own row in the Cards & Accounts "Investments" section instead of being
@@ -209,6 +304,28 @@ notes if you're porting further updates from the source later.
   "Rs.X transferred to your PPF/SSY A/c ..." as a debit — on its own that
   phrasing reads like an incoming transfer ("to your ... A/c"), even though
   it's really money leaving the linked bank account into a locked scheme.
+  EPFO passbook SMS ("your passbook balance against KRMAL...0085 is Rs.
+  X. Contribution of Rs. Y for due month Feb-26 has been received.") don't
+  say "EPFO"/"provident fund" outright and never name an "A/c", so
+  `passbook balance` is the one consistently EPFO-specific phrase that
+  `_instrumentType`, `extractEntityType`, and `extractBankNameFromContent`
+  (issuer label "EPFO") all key off instead. Two message-shape quirks needed
+  their own fixes rather than falling out of the existing patterns: (1)
+  the message names the contribution's *due period* ("due month Feb-26"),
+  which used to trip `isBillNotification` (`categorization_service.dart` /
+  `Categorizer.kt`, kept in sync) the same way an actual unpaid-bill
+  reminder does and get the whole message dropped into `updates` instead
+  of `transactional`; (2) the message states *two* rupee amounts (the
+  passbook balance, then the contribution), so `extractAmount`'s generic
+  first-match scan grabbed the larger balance figure instead of the
+  contribution that's actually the transaction amount, and `extractBalance`
+  couldn't bridge the account-reference clause sitting between "balance"
+  and its own Rs. figure — both extractors now have an EPFO-specific
+  pattern checked ahead of their generic ones. `extractAccountNumber`
+  similarly needed its own EPFO pattern (`balance against <code> is`) so
+  the actual PF establishment+member code becomes the account reference,
+  rather than an unrelated masked number (the user's own masked UAN/mobile
+  prefix) that happens to appear earlier in the message text.
 
 - **OTP messages** now also extract the actual code (`extractOtp`) and
   surface a tap-to-copy button in the thread view (`MessageBubble`) —
@@ -287,6 +404,39 @@ as a cache now, not just written and ignored:
   under the hood. Bump `CategorizationService.version` yourself if you
   tune the regex enough that old cached results should be considered
   invalid.
+- **`Transaction.spendCategory` has its own, separate version gate** —
+  `SpendCategoryDetector.version`, checked against a `spend_category_version`
+  meta key by `SmsProvider._backfillSpendCategories`, independent of
+  `CategorizationService.version`. This one bit an actual user: a
+  `CategorizationService.version` bump wipes every non-override
+  transaction row (`spend_category` included, since it lives on that row)
+  via `clearAll()`, but `spend_category_version` was untouched by that
+  wipe — so `_backfillSpendCategories` saw its own gate as already
+  satisfied from before and skipped re-tagging the freshly-reparsed
+  transactions, leaving them "Uncategorised" until `SpendCategoryDetector`
+  itself happened to change. `_ensureCacheMatchesCurrentLogic` now also
+  clears `spend_category_version` (via `DatabaseService.deleteMeta`)
+  whenever it wipes for a categorizer bump, and `recalculateAll()` now
+  re-runs the backfill + learned-merchant-rule pass itself instead of just
+  `clearAll()` + `refresh()` — so both the automatic and manual "wipe and
+  redo" paths correctly restore auto-tagged spend categories afterward.
+- **A related, more serious variant of the same bug hit *manually*-tagged
+  spend categories too — actual permanent data loss, not just a missed
+  restore.** Every manual-edit entry point that marks a `transactions`/
+  `investments` row as an override (`is_override = 1`, safe from
+  `clearAll()`) is supposed to also pin its parent message's
+  `message_categories` row as an override in the same call — otherwise
+  that row stays `is_override = 0`, `clearAll()` deletes it, `refresh()`
+  finds no cached category for the message and re-parses it from scratch
+  as a brand-new un-tagged row, and that fresh row's `INSERT OR REPLACE`
+  (keyed on `sms_id`) **silently overwrites the still-good override row**
+  — not a stale-cache miss, an actual destructive stomp, all within one
+  `refresh()` call. `updateTransaction`/`updateTransactionsBulk`/
+  `updateInvestment`/`updateInvestmentsBulk` always paired the two writes
+  correctly; `setSpendCategoryForTransactions` (the quick per-transaction
+  and bulk "tag uncategorised transactions" pickers) and
+  `assignInstrumentToTransactions` (the "assign to account" picker) didn't
+  — both now do.
 - Cache entries for messages that no longer exist on-device (deleted since
   the last sync) are pruned during `refresh()` so a stale transaction
   doesn't linger in Insights forever.
@@ -327,6 +477,16 @@ from the second sync onward.
   in `IncomingSmsNotifier.kt`.
 - **Merchant extraction is best-effort.** The regex looks for patterns like
   "at MERCHANT", "to MERCHANT" — it'll miss unusual phrasing.
+- **Duplicate-alert detection is a heuristic, not exact.** For a linked
+  debit-card + bank-account pair (see `Transaction.instrumentGroupKey`),
+  `duplicate_detection_service.dart` collapses a card-network alert and a
+  bank-account alert into one counted transaction when they're the same
+  direction, amount, and within a 5-minute window of each other — it can't
+  distinguish that from two genuinely separate purchases of the identical
+  amount within 5 minutes of one another (rare, but possible). Both
+  underlying SMS/transactions always stay visible in the inbox and
+  transaction lists; only aggregate totals (Insights, Cards & Accounts,
+  merchant breakdown) suppress the redundant one.
 - **Backup/restore is app-data-only.** It exports/imports this app's view of
   your messages + parsed data as JSON. Restoring does **not** write messages
   back into the Android SMS provider (silently mass-inserting SMS into a
@@ -334,6 +494,14 @@ from the second sync onward.
   it repopulates the app's own cache/insights.
 - **Placeholder app icon.** `res/mipmap-*/ic_launcher.png` are simple
   generated placeholders — swap in real branding before shipping.
+- **"Estimated current value" is only ever as fresh as the last SMS that
+  mentioned a NAV** — there's no live market data feed, so a fund you
+  haven't gotten a purchase/redemption SMS for in months shows a stale NAV
+  with no indication a newer one exists beyond the "as of &lt;date&gt;"
+  label. SIP detection (`detectSip`) is a rounded-amount/≥3-months
+  heuristic, not a flag read from the SMS — a SIP that changed amount
+  partway through, or fewer than 3 installments so far, won't be
+  recognised as recurring.
 - **No release signing config.** `android/app/build.gradle` currently signs
   release builds with the debug key — set up a real `key.properties` /
   keystore before publishing anywhere.

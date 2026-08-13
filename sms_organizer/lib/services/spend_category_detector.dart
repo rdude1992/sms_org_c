@@ -18,7 +18,7 @@ class SpendCategoryDetector {
   /// backfill (see _backfillSpendCategories) re-runs over every
   /// still-uncategorised, non-overridden transaction rather than only ever
   /// applying to transactions parsed after the change.
-  static const int version = 3;
+  static const int version = 4;
 
   static SpendCategory? detect(Transaction t) {
     final haystack = [t.merchant, t.walletType, t.rawBody].whereType<String>().join(' ').toLowerCase();

@@ -99,6 +99,23 @@ String? extractOtp(String content) {
 // ---------------------------------------------------------------------------
 
 double? extractAmount(String content) {
+  // EPFO passbook SMS state both a passbook balance and a contribution
+  // amount in the same message ("your passbook balance ... is Rs.
+  // 1,75,975/-. Contribution of Rs. 2,350/- ... has been received.") — the
+  // generic first-Rs.-match scan below would grab the balance (mentioned
+  // first, and typically the larger figure) instead of the contribution
+  // that's actually this transaction's amount. Checked ahead of the
+  // generic patterns so "contribution of Rs. X" phrasing always wins
+  // whenever both appear together, regardless of which comes first.
+  final contributionMatch =
+      RegExp(r'contribution\s+of\s+(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)', caseSensitive: false)
+          .firstMatch(content);
+  final contributionRaw = contributionMatch?.group(1);
+  if (contributionRaw != null) {
+    final contributionAmount = double.tryParse(contributionRaw.replaceAll(',', ''));
+    if (contributionAmount != null && contributionAmount > 0) return contributionAmount;
+  }
+
   final patterns = [
     RegExp(r'(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)', caseSensitive: false),
     RegExp(r'([\d,]+(?:\.\d{1,2})?)\s*(?:rs|rupees|inr)', caseSensitive: false),
@@ -225,6 +242,14 @@ String? extractMerchant(String content) {
 
 String? extractAccountNumber(String content) {
   final explicitPatterns = [
+    // EPFO passbook SMS: "your passbook balance against KRMAL...0085 is
+    // Rs. X." — the establishment+member code after "against" is the
+    // actual PF account reference. Checked first: a masked number earlier
+    // in the same message (e.g. "Dear XXXXXXXX1745,", the user's own
+    // masked UAN/mobile prefix) would otherwise win via the generic
+    // mask-scan below just by appearing first in the text, even though
+    // it isn't the scheme-account identifier.
+    RegExp(r'balance\s+against\s+\S*?(\d{4})\b', caseSensitive: false),
     // Mask length varies by bank — some use a single "*" ("A/C *6020"),
     // others "XX"/"xxxx"/multiple asterisks. Widened from requiring 2+
     // mask characters to 1+ so a lone "*" or "x" still matches.
@@ -295,6 +320,16 @@ String? extractAccountNumber(String content) {
 
 double? extractBalance(String content) {
   final balancePatterns = [
+    // EPFO passbook SMS: "your passbook balance against KRMAL...0085 is
+    // Rs. 1,75,975/-." — the account reference sits between "balance" and
+    // the actual Rs. figure, which the generic "balance ... Rs. X" pattern
+    // below can't bridge (its `[:;\s-]*` gap doesn't allow the letters/
+    // digits/asterisks of an account number in between). Checked first so
+    // it wins over the generic pattern for this specific phrasing.
+    RegExp(
+      r'passbook\s+balance\s+against\s+.*?\s+is\s+(?:rs\.?|inr|₹)?\s*([0-9,]+(?:\.\d{1,2})?)',
+      caseSensitive: false,
+    ),
     RegExp(
       r'(?:avl\.?\s*bal\.?|available\s+balance|bal\.?|balance)[:;\s-]*(?:rs\.?|inr|₹)?\s*([0-9,]+(?:\.\d{1,2})?)',
       caseSensitive: false,
@@ -493,12 +528,22 @@ String? extractBankName(String sender) {
 String? extractBankNameFromContent(String content) {
   final match = RegExp(r'([A-Za-z]+)\s+Gift\s+Card', caseSensitive: false).firstMatch(content);
   final brand = match?.group(1);
-  if (brand == null) return null;
+  if (brand != null) {
+    const generics = ['my', 'your', 'the', 'a', 'an', 'new', 'free'];
+    if (!generics.contains(brand.toLowerCase())) {
+      return brand[0].toUpperCase() + brand.substring(1);
+    }
+  }
 
-  const generics = ['my', 'your', 'the', 'a', 'an', 'new', 'free'];
-  if (generics.contains(brand.toLowerCase())) return null;
+  // EPFO passbook SMS don't always name "EPFO"/"Provident Fund" in the
+  // sender ID the way a bank's DLT header would — "passbook balance" is
+  // the one consistently EPFO-specific phrase available, so it's used
+  // here rather than in _bankNamesBySenderKeyword above.
+  if (RegExp(r'\bepfo\b|provident fund|passbook balance', caseSensitive: false).hasMatch(content)) {
+    return 'EPFO';
+  }
 
-  return brand[0].toUpperCase() + brand.substring(1);
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -542,10 +587,21 @@ ParsedEntityType extractEntityType(String sender, String content) {
     'UPSTOX', 'ANGEL', 'ANGELONE', 'SHAREKHAN', 'MOTILAL', 'IIFL',
     'ICICI-PRU', 'ICICIPRU', 'IPRUMF', 'HDFC-MF', 'SBI-MF', 'AXIS-MF',
     'ABCAMC', 'MIRAEI', 'NIPPON', 'KOTAK-MF', 'DSP-MF', 'UTI-MF',
-    'QNTAMC', 'BOIAMC',
+    'QNTAMC', 'BOIAMC', 'EPFO',
   ];
   for (final investment in investmentProviders) {
     if (senderUpper.contains(investment)) return ParsedEntityType.investment;
+  }
+
+  // EPFO passbook SMS ("your passbook balance against KRMAL...0085 is
+  // Rs. X. Contribution of Rs. Y ... has been received.") don't always
+  // name "EPFO" in the sender ID the way a bank's DLT header does —
+  // "passbook balance" is the one consistently EPFO-specific phrase
+  // available, so it's checked by content here too, not just sender.
+  if (contentLower.contains('epfo') ||
+      contentLower.contains('provident fund') ||
+      contentLower.contains('passbook balance')) {
+    return ParsedEntityType.investment;
   }
 
   if ((senderUpper.contains('MF') ||
@@ -648,7 +704,9 @@ DateTime? extractBillDueDate(String content) {
 /// `new Date(str)` which happily parses "18-Feb-25" or "05/03/2024". This
 /// is a small hand-written stand-in covering the two formats
 /// [extractBillDueDate] actually produces: "DD-MMM-YY(YY)" and
-/// "DD-MM-YYYY"/"DD/MM/YYYY" (day-first, matching Indian SMS conventions).
+/// "DD-MM-YYYY"/"DD/MM/YYYY"/"DD.MM.YYYY" (day-first, matching Indian SMS
+/// conventions — also reused by [extractInvestmentValueStatement] for
+/// "as on DD.MM.YY" statement dates, which favour dots over slashes).
 DateTime? tryParseFlexibleDate(String raw) {
   final normalized = raw.trim();
 
@@ -663,7 +721,7 @@ DateTime? tryParseFlexibleDate(String raw) {
     }
   }
 
-  final numericMatch = RegExp(r'^(\d{1,2})[-/\s](\d{1,2})[-/\s](\d{2,4})$').firstMatch(normalized);
+  final numericMatch = RegExp(r'^(\d{1,2})[-/.\s](\d{1,2})[-/.\s](\d{2,4})$').firstMatch(normalized);
   if (numericMatch != null) {
     final day = int.tryParse(numericMatch.group(1)!);
     final month = int.tryParse(numericMatch.group(2)!);
@@ -828,7 +886,19 @@ String _capitalizeWords(String input) =>
 
 class ExtractedInvestmentDetails {
   String? investmentName;
+
+  /// This *installment's own* unit count (e.g. "155.248 units ... have
+  /// been allotted") — a delta to add to a holding's running total, not
+  /// the total itself. Mutually exclusive with [balanceUnits]; see there.
   double? units;
+
+  /// A stated running/cumulative unit balance (e.g. "Balance Units
+  /// 205.177") — the folio's total units *after* this transaction, not
+  /// this installment's own allotment. Kept separate from [units]
+  /// specifically so callers never accidentally sum it across installments
+  /// the way a real per-installment delta should be summed.
+  double? balanceUnits;
+
   double? nav;
   String? folio;
   String? amc;
@@ -847,9 +917,19 @@ ExtractedInvestmentDetails extractInvestmentDetails(String content, String sende
     if (pranMatch?.group(1) != null) details.folio = pranMatch!.group(1);
   }
 
-  final navMatch =
-      RegExp(r'NAV\s*(?:of|is)?\s*[:\-]?\s*(?:Rs\.?)?\s*([0-9,]+(?:\.\d+)?)', caseSensitive: false)
-          .firstMatch(content);
+  // The negative lookahead rejects "NAV of 04/04/25" (an *allotment date*,
+  // e.g. Protean/NPS "Units ... credited with NAV of 04/04/25") before the
+  // digit capture ever runs — without it, `[0-9,]+` greedily grabs "04",
+  // stops at the "/", and happily parses that lone "04" as NAV=4, wildly
+  // corrupting units-derivation (amount ÷ NAV) and every downstream
+  // NAV/value chart. It has to sit *before* the capture group, not as a
+  // lookahead immediately after it — placing it after is defeated by
+  // backtracking, since the engine just shrinks `[0-9,]+` to "0" (still not
+  // followed by "/") and "succeeds" with an equally bogus NAV=0.
+  final navMatch = RegExp(
+    r'NAV\s*(?:of|is)?\s*[:\-]?\s*(?:Rs\.?)?\s*(?!\d{1,2}\/\d{1,2}\/\d{2,4}\b)([0-9,]+(?:\.\d+)?)',
+    caseSensitive: false,
+  ).firstMatch(content);
   if (navMatch?.group(1) != null) {
     details.nav = double.tryParse(navMatch!.group(1)!.replaceAll(',', ''));
   }
@@ -859,19 +939,44 @@ ExtractedInvestmentDetails extractInvestmentDetails(String content, String sende
     details.amc = 'NPS';
   }
 
-  final unitsMatch = RegExp(r'(\d+(?:\.\d+)?)\s*units', caseSensitive: false).firstMatch(content) ??
-      RegExp(r'units\s*[:\-]?\s*(\d+(?:\.\d+)?)', caseSensitive: false).firstMatch(content);
-  if (unitsMatch?.group(1) != null) {
-    details.units = double.tryParse(unitsMatch!.group(1)!.replaceAll(',', ''));
+  // "Balance Units X" (common in AMC purchase/SIP confirmations, e.g.
+  // ABSL MF's "... is processed. Balance Units 205.177.") states the
+  // folio's *running total* after this transaction, not this installment's
+  // own allotment — checked first and, when it matches, deliberately skips
+  // the generic `unitsMatch` fallback below (which would otherwise also
+  // match the same "Units 205.177" text and misfile it as a delta). Mixing
+  // the two up meant every installment's *cumulative* balance got summed
+  // as if each one were a fresh allotment on top of the last — a 205-unit
+  // balance followed by a 212-unit balance next month was being recorded
+  // as ~417 units held, not the ~212 the statement actually reported.
+  final balanceUnitsMatch =
+      RegExp(r'balance\s+units\s*[:\-]?\s*([\d,]+(?:\.\d+)?)', caseSensitive: false).firstMatch(content);
+  if (balanceUnitsMatch?.group(1) != null) {
+    details.balanceUnits = double.tryParse(balanceUnitsMatch!.group(1)!.replaceAll(',', ''));
+  } else {
+    final unitsMatch = RegExp(r'(\d+(?:\.\d+)?)\s*units', caseSensitive: false).firstMatch(content) ??
+        RegExp(r'units\s*[:\-]?\s*(\d+(?:\.\d+)?)', caseSensitive: false).firstMatch(content);
+    if (unitsMatch?.group(1) != null) {
+      details.units = double.tryParse(unitsMatch!.group(1)!.replaceAll(',', ''));
+    }
   }
 
   final contentLower = content.toLowerCase();
-  if (contentLower.contains('nps') && (contentLower.contains('tier 1') || contentLower.contains('tier i'))) {
-    details.investmentName = 'NPS Tier 1';
-    details.amc = 'NPS';
-  } else if (contentLower.contains('nps') &&
-      (contentLower.contains('tier 2') || contentLower.contains('tier ii'))) {
+  // Word-boundary matching matters here: a plain `.contains('tier i')`
+  // check is also a substring match against "tier ii" ("tier i" is
+  // literally the first 6 characters of "tier ii"), so the Tier 1 branch
+  // used to fire for *every* Tier II message too — and since it was
+  // checked first, Tier II never actually got a chance to be detected.
+  // `\b` after the numeral requires a non-word character (or end of
+  // string) right after it, which the second "i" in "ii" isn't, so this
+  // correctly stops "tier i" from matching inside "tier ii".
+  final isTier1 = RegExp(r'\btier\s+(?:1|i)\b').hasMatch(contentLower);
+  final isTier2 = RegExp(r'\btier\s+(?:2|ii)\b').hasMatch(contentLower);
+  if (contentLower.contains('nps') && isTier2) {
     details.investmentName = 'NPS Tier 2';
+    details.amc = 'NPS';
+  } else if (contentLower.contains('nps') && isTier1) {
+    details.investmentName = 'NPS Tier 1';
     details.amc = 'NPS';
   }
 
@@ -998,6 +1103,48 @@ ExtractedInvestmentDetails extractInvestmentDetails(String content, String sende
   }
 
   return details;
+}
+
+// ---------------------------------------------------------------------------
+// extractInvestmentValueStatement
+// ---------------------------------------------------------------------------
+
+class ExtractedInvestmentValueStatement {
+  final double value;
+  final DateTime? asOfDate;
+  const ExtractedInvestmentValueStatement({required this.value, required this.asOfDate});
+}
+
+/// A periodic "here's what your holding is worth" statement — e.g. NPS/
+/// Protean's "Investment value in Tier II (PRANXX8324) as on 31.03.25 is
+/// Rs 1,04,683.33" — as opposed to a transaction. These never state
+/// units/NAV (some NPS "Voluntary contribution" credit SMS don't either),
+/// so [TransactionParserService.parseInvestmentValuation] uses this instead
+/// of [extractInvestmentDetails]'s amount/NAV pipeline. Mirrors the keyword
+/// pair categorization_service.dart already uses to route this message
+/// shape to SmsCategory.updates ('investment value'/'total holding'/
+/// 'current value' + 'as on'/'is rs') — this just extracts the amount/date
+/// that categorization itself doesn't need. Returns null if the "is Rs X"
+/// value can't be found, even if the message matched those keywords.
+ExtractedInvestmentValueStatement? extractInvestmentValueStatement(String content) {
+  final contentLower = content.toLowerCase();
+  final hasValueKeyword = contentLower.contains('investment value') ||
+      contentLower.contains('total holding') ||
+      contentLower.contains('current value');
+  if (!hasValueKeyword) return null;
+
+  final valueMatch =
+      RegExp(r'is\s+Rs\.?\s*([\d,]+(?:\.\d+)?)', caseSensitive: false).firstMatch(content);
+  final rawValue = valueMatch?.group(1);
+  if (rawValue == null) return null;
+  final value = double.tryParse(rawValue.replaceAll(',', ''));
+  if (value == null) return null;
+
+  final dateMatch = RegExp(r'as\s+on\s+([\d./\-]+)', caseSensitive: false).firstMatch(content);
+  final rawDate = dateMatch?.group(1);
+  final asOfDate = rawDate != null ? tryParseFlexibleDate(rawDate) : null;
+
+  return ExtractedInvestmentValueStatement(value: value, asOfDate: asOfDate);
 }
 
 // ---------------------------------------------------------------------------
