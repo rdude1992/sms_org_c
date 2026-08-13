@@ -28,7 +28,7 @@ class DatabaseService {
     final path = p.join(dbPath, 'sms_organizer.db');
     return openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE message_categories (
@@ -84,6 +84,12 @@ class DatabaseService {
           CREATE TABLE merchant_category_rules (
             merchant_key TEXT PRIMARY KEY,
             spend_category TEXT NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE merchant_name_rules (
+            merchant_key TEXT PRIMARY KEY,
+            corrected_merchant TEXT NOT NULL
           )
         ''');
       },
@@ -159,6 +165,20 @@ class DatabaseService {
           // valueAsOf for why conflating the two double-counted every
           // holding whose SMS reports a running total.
           await db.execute('ALTER TABLE investments ADD COLUMN units_balance REAL');
+        }
+        if (oldVersion < 9) {
+          // Raw-extracted-merchant → user-corrected-merchant associations
+          // learned from the user's own edits (see
+          // SmsProvider._rememberMerchantNameCorrection) — same idea as
+          // merchant_category_rules above, just fixing what extractMerchant
+          // got wrong in the first place rather than tagging what it left
+          // blank. Not touched by clearAll, same as any other user-set data.
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS merchant_name_rules (
+              merchant_key TEXT PRIMARY KEY,
+              corrected_merchant TEXT NOT NULL
+            )
+          ''');
         }
       },
     );
@@ -405,6 +425,33 @@ class DatabaseService {
   Future<void> deleteMerchantCategoryRule(String merchantKey) async {
     final db = await database;
     await db.delete('merchant_category_rules', where: 'merchant_key = ?', whereArgs: [merchantKey]);
+  }
+
+  // ---- Merchant name rules (learned from user corrections) ----
+
+  /// Keyed by the *pre-correction* [Transaction.merchantGroupKey] — see
+  /// SmsProvider._rememberMerchantNameCorrection for how a rule gets learned
+  /// and SmsProvider._applyMerchantNameRulesToUncorrected for how it then
+  /// spreads to every other transaction still carrying that same wrong
+  /// extracted name.
+  Future<Map<String, String>> loadMerchantNameRules() async {
+    final db = await database;
+    final rows = await db.query('merchant_name_rules');
+    return {for (final row in rows) row['merchant_key'] as String: row['corrected_merchant'] as String};
+  }
+
+  Future<void> saveMerchantNameRule(String merchantKey, String correctedMerchant) async {
+    final db = await database;
+    await db.insert(
+      'merchant_name_rules',
+      {'merchant_key': merchantKey, 'corrected_merchant': correctedMerchant},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> deleteMerchantNameRule(String merchantKey) async {
+    final db = await database;
+    await db.delete('merchant_name_rules', where: 'merchant_key = ?', whereArgs: [merchantKey]);
   }
 
   // ---- Meta (small key/value settings, e.g. categorizer cache version) ----

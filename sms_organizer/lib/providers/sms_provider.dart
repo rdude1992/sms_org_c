@@ -55,6 +55,15 @@ class SmsProvider extends ChangeNotifier {
   // _applyMerchantRulesToUncategorised.
   Map<String, SpendCategory> _merchantCategoryRules = {};
 
+  // Raw-extracted-merchant -> user-corrected-merchant associations learned
+  // from the user's own edits (see _rememberMerchantNameCorrection), keyed
+  // by the *pre-correction* Transaction.merchantGroupKey. Consulted right
+  // after extractMerchant() runs, so a correction to a wrongly-parsed
+  // merchant name applies to every future SMS whose narration extracts to
+  // that same wrong string, not just the one transaction it was made on —
+  // see _applyLearnedMerchantName / _applyMerchantNameRulesToUncorrected.
+  Map<String, String> _merchantNameRules = {};
+
   StreamSubscription? _incomingSub;
 
   // Multi-select state for the list views.
@@ -274,9 +283,11 @@ class SmsProvider extends ChangeNotifier {
     // _applyLearnedMerchantCategory calls), not just the one-time backfill
     // pass below.
     _merchantCategoryRules = await _db.loadMerchantCategoryRules();
+    _merchantNameRules = await _db.loadMerchantNameRules();
     await refresh();
     await _backfillSpendCategories();
     await _applyMerchantRulesToUncategorised();
+    await _applyMerchantNameRulesToUncorrected();
     _listenForIncoming();
   }
 
@@ -492,6 +503,74 @@ class SmsProvider extends ChangeNotifier {
     }
   }
 
+  /// Fixes [t]'s [Transaction.merchant] from a learned correction when
+  /// extractMerchant() produced the same wrong string it did last time — the
+  /// parse-time half of "correct one, apply everywhere" (the other half,
+  /// [_applyMerchantNameRulesToUncorrected], is the retroactive backfill for
+  /// transactions that already existed when the correction was made). Runs
+  /// before [_applyLearnedMerchantCategory] wherever both are called, since
+  /// correcting the name changes [Transaction.merchantGroupKey] and a
+  /// learned category rule should key off the corrected name, not the wrong
+  /// one that's about to be replaced.
+  Transaction _applyLearnedMerchantName(Transaction t) {
+    final key = t.merchantGroupKey;
+    if (key == null) return t;
+    final correction = _merchantNameRules[key];
+    if (correction == null || correction == t.merchant) return t;
+    return t.copyWith(merchant: correction);
+  }
+
+  /// Records (or forgets) a raw-extracted-merchant -> corrected-merchant
+  /// association from an explicit user edit — called from
+  /// [updateTransaction] whenever the merchant field actually changed from
+  /// what was there before. Returns whether the rule set actually changed,
+  /// so the caller only pays for [_applyMerchantNameRulesToUncorrected]'s
+  /// retroactive scan when there's actually something new to spread.
+  ///
+  /// Keyed by [oldMerchant]'s own normalised form (same as
+  /// [Transaction.merchantGroupKey]) rather than the transaction's sender or
+  /// raw SMS body — deliberately narrow, since a bank's own alert sender
+  /// covers far too many distinct real-world payees to safely rename every
+  /// future message from it the same way.
+  Future<bool> _rememberMerchantNameCorrection(String oldMerchant, String correctedMerchant) async {
+    final key = oldMerchant.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+    if (key.isEmpty || correctedMerchant.isEmpty) return false;
+    if (_merchantNameRules[key] == correctedMerchant) return false;
+    _merchantNameRules[key] = correctedMerchant;
+    await _db.saveMerchantNameRule(key, correctedMerchant);
+    return true;
+  }
+
+  /// Applies every learned merchant-name rule to every other transaction
+  /// still carrying the wrong extracted name, skipping anything the user
+  /// has separately overridden (a deliberate hand-edit shouldn't be
+  /// silently replaced by an unrelated correction learned elsewhere) — see
+  /// [_rememberMerchantNameCorrection] (which updates [_merchantNameRules])
+  /// and [_applyLearnedMerchantName] (the equivalent fallback applied to a
+  /// transaction as it's first parsed, so this backfill only has to cover
+  /// transactions that already existed before the rule did). Also re-runs
+  /// the spend-category backfill afterward, since a renamed transaction's
+  /// [Transaction.merchantGroupKey] may now match a category rule it didn't
+  /// match under its old, wrong name.
+  Future<void> _applyMerchantNameRulesToUncorrected() async {
+    if (_merchantNameRules.isEmpty) return;
+    final updated = <Transaction>[];
+    for (var i = 0; i < _transactions.length; i++) {
+      final t = _transactions[i];
+      if (t.isOverridden) continue;
+      final correction = _merchantNameRules[t.merchantGroupKey];
+      if (correction == null || correction == t.merchant) continue;
+      final corrected = t.copyWith(merchant: correction);
+      _transactions[i] = corrected;
+      updated.add(corrected);
+    }
+    if (updated.isNotEmpty) {
+      await _db.saveTransactionsBulk(updated);
+      notifyListeners();
+    }
+    await _applyMerchantRulesToUncategorised();
+  }
+
   Future<bool> requestDefaultSmsRole() async {
     await _platform.requestDefaultSmsApp();
     isDefaultSmsApp = await _platform.isDefaultSmsApp();
@@ -548,7 +627,9 @@ class SmsProvider extends ChangeNotifier {
               newInvestments.add(inv);
             } else {
               final txn = _txnParser.parseTransaction(m);
-              if (txn != null) newTransactions.add(_applyLearnedMerchantCategory(txn));
+              if (txn != null) {
+                newTransactions.add(_applyLearnedMerchantCategory(_applyLearnedMerchantName(txn)));
+              }
             }
           } else if (cached == SmsCategory.updates && !cachedInvIds.contains(m.id)) {
             // A periodic investment value statement (NPS/Protean's
@@ -583,7 +664,9 @@ class SmsProvider extends ChangeNotifier {
             newInvestments.add(inv);
           } else {
             final txn = _txnParser.parseTransaction(m);
-            if (txn != null) newTransactions.add(_applyLearnedMerchantCategory(txn));
+            if (txn != null) {
+              newTransactions.add(_applyLearnedMerchantCategory(_applyLearnedMerchantName(txn)));
+            }
           }
         } else if (m.category == SmsCategory.updates) {
           final valuation = _txnParser.parseInvestmentValuation(m);
@@ -886,7 +969,7 @@ class SmsProvider extends ChangeNotifier {
       } else {
         final parsed = _txnParser.parseTransaction(message);
         if (parsed != null) {
-          final txn = _applyLearnedMerchantCategory(parsed);
+          final txn = _applyLearnedMerchantCategory(_applyLearnedMerchantName(parsed));
           await _db.saveTransactionsBulk([txn]);
           _transactions.add(txn);
         }
@@ -912,6 +995,11 @@ class SmsProvider extends ChangeNotifier {
   /// category row, fall through to re-classifying the message from
   /// scratch, and re-derive a fresh (uncorrected) transaction on top of
   /// this one.
+  ///
+  /// A merchant correction (as opposed to just filling in a blank one) also
+  /// gets remembered — see _rememberMerchantNameCorrection — and applied to
+  /// every other transaction extractMerchant() got wrong the same way, both
+  /// retroactively and for every SMS that arrives after.
   Future<void> updateTransaction(
     Transaction transaction, {
     required TxnDirection direction,
@@ -962,6 +1050,18 @@ class SmsProvider extends ChangeNotifier {
     }
 
     if (await _rememberMerchantCategory(updated, spendCategory)) await _applyMerchantRulesToUncategorised();
+
+    // A merchant correction (not just filling in a blank one — see
+    // _rememberMerchantNameCorrection's own doc comment on why this is
+    // scoped that narrowly) spreads to every other transaction that
+    // extracted the same wrong name, same as a spend-category tagging does.
+    final oldMerchant = transaction.merchant;
+    final newMerchant = updated.merchant;
+    if (oldMerchant != null && newMerchant != null && oldMerchant != newMerchant) {
+      if (await _rememberMerchantNameCorrection(oldMerchant, newMerchant)) {
+        await _applyMerchantNameRulesToUncorrected();
+      }
+    }
     notifyListeners();
   }
 
