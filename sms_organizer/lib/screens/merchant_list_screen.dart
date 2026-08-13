@@ -8,7 +8,6 @@ import '../utils/formatters.dart';
 import '../widgets/search_toggle_mixin.dart';
 import '../widgets/ui/empty_state.dart';
 import '../widgets/ui/row_divider.dart';
-import '../widgets/ui/sparkline.dart';
 import 'transaction_list_screen.dart';
 
 /// Full "By merchant" drilldown for the Insights merchant breakdown — a
@@ -90,7 +89,6 @@ class _MerchantListScreenState extends State<MerchantListScreen>
               separatorBuilder: (context, _) => buildRowDivider(context),
               itemBuilder: (context, index) => _MerchantTile(
                 summary: sorted[index],
-                transactions: liveTransactions,
                 onTap: () => _openDrilldown(context, sorted[index], liveTransactions),
               ),
             ),
@@ -114,32 +112,12 @@ class _MerchantListScreenState extends State<MerchantListScreen>
 
 class _MerchantTile extends StatelessWidget {
   final MerchantSummary summary;
-  final List<Transaction> transactions;
   final VoidCallback onTap;
-  const _MerchantTile({required this.summary, required this.transactions, required this.onTap});
-
-  /// Up to the last 10 transactions for this merchant, oldest first,
-  /// signed by direction — the series the row's sparkline traces.
-  List<double> get _series {
-    final own = transactions.where((t) => t.merchantGroupKey == summary.key).toList()
-      ..sort((a, b) => a.date.compareTo(b.date));
-    final recent = own.length > 10 ? own.sublist(own.length - 10) : own;
-    return [
-      for (final t in recent)
-        if (t.direction == TxnDirection.credit)
-          t.amount
-        else if (t.direction == TxnDirection.debit)
-          -t.amount
-        else
-          0.0,
-    ];
-  }
+  const _MerchantTile({required this.summary, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final trendColor =
-        summary.totalDebit >= summary.totalCredit ? const Color(0xFFEF4444) : const Color(0xFF10B981);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -167,8 +145,6 @@ class _MerchantTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Sparkline(values: _series, color: trendColor),
-              const SizedBox(width: 10),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
