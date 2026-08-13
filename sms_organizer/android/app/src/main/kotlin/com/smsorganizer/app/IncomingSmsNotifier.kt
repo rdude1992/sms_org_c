@@ -206,6 +206,7 @@ object IncomingSmsNotifier {
             .setContentIntent(contentIntent)
             .addAction(buildReplyAction(context, threadId, address))
             .addAction(buildMarkReadAction(context, threadId))
+            .addAction(buildDeleteAction(context, threadId))
 
         if (category == Categorizer.Category.OTP) {
             val lastIncoming = history.lastOrNull { !it.fromMe }?.text
@@ -391,6 +392,24 @@ object IncomingSmsNotifier {
         return NotificationCompat.Action.Builder(
             IconCompat.createWithResource(context, android.R.drawable.ic_menu_view),
             "Mark read",
+            pendingIntent
+        ).build()
+    }
+
+    private fun buildDeleteAction(context: Context, threadId: Long): NotificationCompat.Action {
+        val intent = Intent(context, NotificationActionReceiver::class.java).apply {
+            action = NotificationActionReceiver.ACTION_DELETE
+            putExtra(NotificationActionReceiver.EXTRA_THREAD_ID, threadId)
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            threadId.toInt() * 10 + 5,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return NotificationCompat.Action.Builder(
+            IconCompat.createWithResource(context, android.R.drawable.ic_menu_delete),
+            "Delete",
             pendingIntent
         ).build()
     }
