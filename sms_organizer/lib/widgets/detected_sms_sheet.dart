@@ -8,9 +8,11 @@ import '../utils/formatters.dart';
 /// or just confirm what the underlying message actually said. [onEdit], when
 /// given, shows a pencil next to the title that jumps straight into editing
 /// (closing this sheet first) — so a correction doesn't require backing out
-/// and long-pressing the tile instead. [onViewThread] and [onDelete] add an
-/// arrow (jump to the original SMS conversation, e.g. to sanity-check a
-/// suspected duplicate) and a delete icon (remove the underlying SMS
+/// and long-pressing the tile instead. [onSetCategory] adds a tag icon
+/// (transactions only — investments have no spend category) that opens the
+/// quick spend-category picker the same way. [onViewThread] and [onDelete]
+/// add an arrow (jump to the original SMS conversation, e.g. to sanity-check
+/// a suspected duplicate) and a delete icon (remove the underlying SMS
 /// entirely — this transaction stops being tracked along with it) next to
 /// the pencil, both closing this sheet first.
 void showDetectedSmsSheet(
@@ -20,6 +22,7 @@ void showDetectedSmsSheet(
   required String rawBody,
   required List<MapEntry<String, String>> details,
   VoidCallback? onEdit,
+  VoidCallback? onSetCategory,
   VoidCallback? onViewThread,
   VoidCallback? onDelete,
 }) {
@@ -75,6 +78,15 @@ void showDetectedSmsSheet(
                       onPressed: () {
                         Navigator.pop(context);
                         onViewThread();
+                      },
+                    ),
+                  if (onSetCategory != null)
+                    IconButton(
+                      icon: const Icon(Icons.sell_outlined),
+                      tooltip: 'Set category',
+                      onPressed: () {
+                        Navigator.pop(context);
+                        onSetCategory();
                       },
                     ),
                   if (onEdit != null)
