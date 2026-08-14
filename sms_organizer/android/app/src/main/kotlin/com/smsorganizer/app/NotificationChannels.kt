@@ -108,6 +108,19 @@ object NotificationChannels {
      * not getting the "Conversation" treatment. [parentId] is guaranteed
      * to already exist by the time this is called (see [ensureCreated]),
      * so it's always a safe value to fall back to.
+     *
+     * This — not the parent channel — is what every notification actually
+     * posts against, so it's also where importance has to be kept correct.
+     * A user can downgrade one specific conversation's importance straight
+     * from the notification shade (long-press → "Alerting"/"Silent") — a
+     * per-channel change with no in-app UI and no [syncMuteState] coverage
+     * (that only self-heals the 5 parent category channels), so an OTP
+     * thread nudged to "Silent" this way used to lose heads-up forever,
+     * silently, with the app's own Settings screen still reporting the OTP
+     * category as fine since it only reads the parent channel's importance.
+     * Re-checked and self-healed (delete + recreate, same as
+     * [syncMuteState]) on every notification for that thread, not just at
+     * creation time, closes that gap.
      */
     fun ensureConversationChannel(
         context: Context,
@@ -121,10 +134,12 @@ object NotificationChannels {
         return try {
             val conversationId = "${parentId}_conv_$threadId"
             val manager = NotificationManagerCompat.from(context)
-            if (manager.getNotificationChannelCompat(conversationId) == null) {
-                val importance = specs.firstOrNull { it.key == categoryKey }?.importance
-                    ?: NotificationManagerCompat.IMPORTANCE_DEFAULT
-                val channel = NotificationChannelCompat.Builder(conversationId, importance)
+            val targetImportance = specs.firstOrNull { it.key == categoryKey }?.importance
+                ?: NotificationManagerCompat.IMPORTANCE_DEFAULT
+            val existing = manager.getNotificationChannelCompat(conversationId)
+            if (existing == null || existing.importance != targetImportance) {
+                if (existing != null) manager.deleteNotificationChannel(conversationId)
+                val channel = NotificationChannelCompat.Builder(conversationId, targetImportance)
                     .setName(displayName)
                     .setConversationId(parentId, threadId.toString())
                     .build()
