@@ -240,6 +240,12 @@ class InvestmentTile extends StatelessWidget {
     final details = <MapEntry<String, String>>[
       MapEntry('Amount', Formatters.currency(i.amount)),
       MapEntry('Type', i.kind.label),
+      // The raw SMS sender ID (e.g. "VM-HDFCBK"), not [InvestmentEvent.amc] —
+      // that's a cleaned-up AMC/broker name parsed out of the message body,
+      // and can differ from (or be null while) the sender still is. Only
+      // available while the underlying message hasn't been deleted — mirrors
+      // TransactionTile._showDetails' own 'Sender' entry.
+      if (message != null) MapEntry('Sender', message.address),
       if (i.fundOrScheme != null) MapEntry('Fund / Scheme', i.fundOrScheme!),
       if (i.amc != null) MapEntry('AMC', i.amc!),
       if (i.folioOrAccount != null) MapEntry('Folio / Account', i.folioOrAccount!),
