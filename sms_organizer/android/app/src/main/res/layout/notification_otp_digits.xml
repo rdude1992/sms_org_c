@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Expanded-state body for an OTP notification (see
+  IncomingSmsNotifier.configureOtpNotification / buildOtpDigitsView) — a
+  small "OTP" caption next to a bitmap of the code rendered as individual
+  dashed boxes, one per character. The boxes themselves are drawn onto the
+  bitmap with a Canvas (buildOtpDigitsBitmap), not as inflated child views —
+  a <shape>'s dashed <stroke> renders solid once hardware-accelerated, which
+  is exactly what this RemoteViews layout runs under inside System UI.
+  android:textColor uses the platform's own secondary-text theme attribute
+  (rather than a fixed color) so the caption stays legible against both the
+  light and dark notification-shade backgrounds System UI inflates this
+  under.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="4dp"
+    android:layout_marginBottom="8dp"
+    android:orientation="horizontal"
+    android:gravity="center_vertical">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="10dp"
+        android:text="OTP"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:textColor="?android:attr/textColorSecondary" />
+
+    <ImageView
+        android:id="@+id/otp_digits_image"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:adjustViewBounds="true"
+        android:scaleType="fitStart"
+        android:contentDescription="@null" />
+
+</LinearLayout>

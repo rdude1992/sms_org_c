@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -19,6 +20,7 @@ import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
 import android.util.Log
+import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
@@ -142,6 +144,66 @@ object IncomingSmsNotifier {
         val channelId =
             NotificationChannels.ensureConversationChannel(context, category.prefKey, threadId, displayName)
 
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            action = Intent.ACTION_MAIN
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("notification_thread_id", threadId)
+        }
+        val contentIntent = PendingIntent.getActivity(
+            context,
+            threadId.toInt(),
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.drawable.ic_stat_notify)
+            // Explicit rather than left for the OS/launcher to derive from
+            // somewhere else (some render an inconsistent badge tint
+            // otherwise) — same accent used for the in-notification amount/
+            // OTP highlighting below, so the badge and the highlighted text
+            // read as the one brand color.
+            .setColor(ACCENT_COLOR)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setGroup(GROUP_KEY)
+            .setAutoCancel(true)
+            .setContentIntent(contentIntent)
+
+        // OTP gets its own plain, purpose-built layout (title + boxed-digit
+        // code + Copy/Delete only) rather than the chat-style Conversation
+        // treatment every other category gets — a one-shot code isn't a
+        // conversation you reply to or mark read.
+        if (category == Categorizer.Category.OTP) {
+            configureOtpNotification(context, builder, threadId, displayName, history)
+        } else {
+            configureConversationNotification(context, builder, threadId, address, displayName, history, openIntent)
+        }
+
+        try {
+            NotificationManagerCompat.from(context).notify(threadId.toInt(), builder.build())
+            postGroupSummary(context)
+        } catch (e: SecurityException) {
+            // Permission was revoked between the check above and this call
+            // (e.g. user turned it off in Settings mid-broadcast) — the
+            // message is still safely in content://sms either way.
+            Log.w("IncomingSmsNotif", "Notify denied by SecurityException", e)
+        }
+    }
+
+    /**
+     * The chat-style MessagingStyle "Conversation" treatment — a Person per
+     * sender, shortcut + bubble eligibility, reply/mark-read/delete actions
+     * — used for every category except OTP (see [configureOtpNotification]).
+     */
+    private fun configureConversationNotification(
+        context: Context,
+        builder: NotificationCompat.Builder,
+        threadId: Long,
+        address: String,
+        displayName: String,
+        history: List<ConversationHistoryStore.Entry>,
+        openIntent: Intent
+    ) {
         val contactIcon = ContactsRepository.lookupPhotoIcon(context, address)
         val avatarIcon = contactIcon ?: buildDefaultAvatarIcon(displayName)
 
@@ -164,24 +226,14 @@ object IncomingSmsNotifier {
         val shortcutId = "conv_$threadId"
         publishShortcut(context, shortcutId, displayName, sender, avatarIcon)
 
-        val openIntent = Intent(context, MainActivity::class.java).apply {
-            action = Intent.ACTION_MAIN
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("notification_thread_id", threadId)
-        }
-        val contentIntent = PendingIntent.getActivity(
-            context,
-            threadId.toInt(),
-            openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
         // Bubbles specifically require a MUTABLE PendingIntent — the
-        // opposite of the (correctly immutable) one above — so this can't
-        // just reuse contentIntent. Posting a BubbleMetadata built from an
-        // immutable intent doesn't fail until the system server validates
-        // it at notify() time, as an IllegalArgumentException ("PendingIntents
-        // attached to bubbles must be mutable") that's easy to mistake for
-        // something else going wrong in the rich notification path.
+        // opposite of the (correctly immutable) contentIntent already set on
+        // [builder] — so this needs its own. Posting a BubbleMetadata built
+        // from an immutable intent doesn't fail until the system server
+        // validates it at notify() time, as an IllegalArgumentException
+        // ("PendingIntents attached to bubbles must be mutable") that's easy
+        // to mistake for something else going wrong in the rich notification
+        // path.
         val bubbleIntent = PendingIntent.getActivity(
             context,
             threadId.toInt() * 10 + 4,
@@ -189,47 +241,55 @@ object IncomingSmsNotifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         )
 
-        val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_stat_notify)
-            // Explicit rather than left for the OS/launcher to derive from
-            // somewhere else (some render an inconsistent badge tint
-            // otherwise) — same accent used for the in-notification amount/
-            // OTP highlighting below, so the badge and the highlighted text
-            // read as the one brand color.
-            .setColor(ACCENT_COLOR)
+        builder
             .setStyle(style)
             .setShortcutId(shortcutId)
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setPriority(
-                if (category == Categorizer.Category.OTP) NotificationCompat.PRIORITY_HIGH
-                else NotificationCompat.PRIORITY_DEFAULT
-            )
-            .setGroup(GROUP_KEY)
-            .setAutoCancel(true)
-            .setContentIntent(contentIntent)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .addAction(buildReplyAction(context, threadId, address))
             .addAction(buildMarkReadAction(context, threadId))
             .addAction(buildDeleteAction(context, threadId))
 
-        if (category == Categorizer.Category.OTP) {
-            val lastIncoming = history.lastOrNull { !it.fromMe }?.text
-            val otpCode = lastIncoming?.let(OtpExtractor::extract)
-            if (otpCode != null) {
-                builder.addAction(buildCopyOtpAction(context, threadId, otpCode))
-            }
-        }
-
         attachBubbleMetadata(builder, bubbleIntent, avatarIcon)
+    }
 
-        try {
-            NotificationManagerCompat.from(context).notify(threadId.toInt(), builder.build())
-            postGroupSummary(context)
-        } catch (e: SecurityException) {
-            // Permission was revoked between the check above and this call
-            // (e.g. user turned it off in Settings mid-broadcast) — the
-            // message is still safely in content://sms either way.
-            Log.w("IncomingSmsNotif", "Notify denied by SecurityException", e)
+    /**
+     * OTP layout: content title is the sender, the collapsed/heads-up peek
+     * keeps the existing enlarged/bold/accent-colored inline code (see
+     * [formatOtpMessage]) for a glance without expanding, and the expanded
+     * body swaps in [buildOtpDigitsView] — the code rendered as individual
+     * boxed digits, like a PIN-entry field. Only Copy and Delete actions —
+     * see [configureConversationNotification] for why Reply/Mark read are
+     * skipped here.
+     */
+    private fun configureOtpNotification(
+        context: Context,
+        builder: NotificationCompat.Builder,
+        threadId: Long,
+        displayName: String,
+        history: List<ConversationHistoryStore.Entry>
+    ) {
+        builder.setContentTitle(displayName).setPriority(NotificationCompat.PRIORITY_HIGH)
+
+        val lastIncoming = history.lastOrNull { !it.fromMe }?.text
+        if (lastIncoming != null) {
+            builder.setContentText(formatOtpMessage(lastIncoming) ?: lastIncoming)
         }
+
+        val otpCode = lastIncoming?.let(OtpExtractor::extract)
+        if (otpCode != null) {
+            builder
+                .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+                .setCustomBigContentView(buildOtpDigitsView(context, otpCode))
+                .addAction(buildCopyOtpAction(context, threadId, otpCode))
+        } else if (lastIncoming != null) {
+            // No code found by OtpExtractor (rare — the two extractors
+            // aren't identical) — fall back to a plain expandable text view
+            // so the message is still fully readable rather than silently
+            // truncated to one line with no boxes and no way to see more.
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(lastIncoming))
+        }
+
+        builder.addAction(buildDeleteAction(context, threadId))
     }
 
     /**
@@ -394,6 +454,64 @@ object IncomingSmsNotifier {
             canvas.drawArc(shoulders, 180f, 180f, true, personPaint)
         }
         return IconCompat.createWithBitmap(bitmap)
+    }
+
+    /** Wraps [buildOtpDigitsBitmap] in the RemoteViews layout that hosts it — see notification_otp_digits.xml. */
+    private fun buildOtpDigitsView(context: Context, code: String): RemoteViews {
+        val views = RemoteViews(context.packageName, R.layout.notification_otp_digits)
+        views.setImageViewBitmap(R.id.otp_digits_image, buildOtpDigitsBitmap(context, code))
+        return views
+    }
+
+    /**
+     * Renders [code] as individual dashed boxes, one per character — the
+     * same "draw it ourselves with a Canvas" approach [buildDefaultAvatarIcon]
+     * already uses, needed here for the same underlying reason: a `<shape>`
+     * drawable's dashed `<stroke>` silently renders solid once
+     * hardware-accelerated, which is exactly how RemoteViews content draws
+     * inside the System UI process. Pre-rendering into a software-drawn
+     * bitmap sidesteps that. Sized for the common 4-6 digit case; an 8-char
+     * code (OtpExtractor's upper bound) renders wider and may get clipped by
+     * the notification shade's own width rather than wrapping — an accepted
+     * degradation rather than shrinking every more-common shorter code to
+     * accommodate the rare long one.
+     */
+    private fun buildOtpDigitsBitmap(context: Context, code: String): Bitmap {
+        val density = context.resources.displayMetrics.density
+        fun dp(v: Float) = v * density
+
+        val boxWidth = dp(34f)
+        val boxHeight = dp(44f)
+        val gap = dp(6f)
+        val padding = dp(4f)
+        val corner = dp(8f)
+
+        val width = (boxWidth * code.length + gap * (code.length - 1) + padding * 2).toInt().coerceAtLeast(1)
+        val height = (boxHeight + padding * 2).toInt().coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+
+        val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = dp(1.75f)
+            color = ACCENT_COLOR
+            pathEffect = DashPathEffect(floatArrayOf(dp(5f), dp(3.5f)), 0f)
+        }
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ACCENT_COLOR
+            textSize = dp(18f)
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        }
+
+        for ((index, char) in code.withIndex()) {
+            val left = padding + index * (boxWidth + gap)
+            val rect = RectF(left, padding, left + boxWidth, padding + boxHeight)
+            canvas.drawRoundRect(rect, corner, corner, boxPaint)
+            val textY = rect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2f
+            canvas.drawText(char.toString(), rect.centerX(), textY, textPaint)
+        }
+        return bitmap
     }
 
     private fun buildReplyAction(context: Context, threadId: Long, address: String): NotificationCompat.Action {
