@@ -1,22 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Expanded-state body for an OTP notification (see
-  IncomingSmsNotifier.configureOtpNotification / buildOtpDigitsView) — a
-  small "OTP" caption next to a bitmap of the code rendered as individual
-  dashed boxes, one per character. The boxes themselves are drawn onto the
-  bitmap with a Canvas (buildOtpDigitsBitmap), not as inflated child views —
-  a <shape>'s dashed <stroke> renders solid once hardware-accelerated, which
-  is exactly what this RemoteViews layout runs under inside System UI.
-  android:textColor uses the platform's own secondary-text theme attribute
-  (rather than a fixed color) so the caption stays legible against both the
-  light and dark notification-shade backgrounds System UI inflates this
-  under.
+  Body for an OTP notification (see IncomingSmsNotifier.configureOtpNotification
+  / buildOtpDigitsView) — a small "OTP" caption next to a bitmap of the code
+  rendered as individual dashed boxes, one per character. Reused for both the
+  collapsed/heads-up custom content view (a smaller bitmap) and the expanded
+  custom big content view (a larger one) — margins are kept tight so it still
+  fits the collapsed state's limited height budget. The boxes themselves are
+  drawn onto the bitmap with a Canvas (buildOtpDigitsBitmap), not as inflated
+  child views — a <shape>'s dashed <stroke> renders solid once
+  hardware-accelerated, which is exactly what this RemoteViews layout runs
+  under inside System UI. android:textColor uses the platform's own
+  secondary-text theme attribute (rather than a fixed color) so the caption
+  stays legible against both the light and dark notification-shade
+  backgrounds System UI inflates this under.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:layout_marginTop="4dp"
-    android:layout_marginBottom="8dp"
+    android:layout_marginTop="2dp"
+    android:layout_marginBottom="4dp"
     android:orientation="horizontal"
     android:gravity="center_vertical">
 

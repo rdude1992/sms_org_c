@@ -253,12 +253,17 @@ object IncomingSmsNotifier {
     }
 
     /**
-     * OTP layout: content title is the sender, the collapsed/heads-up peek
-     * keeps the existing enlarged/bold/accent-colored inline code (see
-     * [formatOtpMessage]) for a glance without expanding, and the expanded
-     * body swaps in [buildOtpDigitsView] — the code rendered as individual
-     * boxed digits, like a PIN-entry field. Only Copy and Delete actions —
-     * see [configureConversationNotification] for why Reply/Mark read are
+     * OTP layout: content title is the sender, and both the
+     * collapsed/heads-up peek and the expanded body show [buildOtpDigitsView]
+     * — the code rendered as individual boxed digits, like a PIN-entry field
+     * (a smaller rendering for the collapsed state, which System UI gives a
+     * much tighter height budget). [formatOtpMessage]'s enlarged/bold/
+     * accent-colored inline text is kept as [NotificationCompat.Builder]'s
+     * plain contentText fallback — used on pre-24 devices where
+     * DecoratedCustomViewStyle isn't supported, and by accessibility
+     * services/Wear that read contentText rather than rendering the custom
+     * view. Only Copy and Delete actions — see
+     * [configureConversationNotification] for why Reply/Mark read are
      * skipped here.
      */
     private fun configureOtpNotification(
@@ -279,7 +284,14 @@ object IncomingSmsNotifier {
         if (otpCode != null) {
             builder
                 .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-                .setCustomBigContentView(buildOtpDigitsView(context, otpCode))
+                // Both states get the boxed-digit view, not just the
+                // expanded one — a smaller rendering for the
+                // collapsed/heads-up row (which System UI gives a much
+                // tighter height budget than the fully expanded view) so
+                // the boxes are what's visible the moment the notification
+                // pops up, not only after pulling it down.
+                .setCustomContentView(buildOtpDigitsView(context, otpCode, compact = true))
+                .setCustomBigContentView(buildOtpDigitsView(context, otpCode, compact = false))
                 .addAction(buildCopyOtpAction(context, threadId, otpCode))
         } else if (lastIncoming != null) {
             // No code found by OtpExtractor (rare — the two extractors
@@ -456,10 +468,16 @@ object IncomingSmsNotifier {
         return IconCompat.createWithBitmap(bitmap)
     }
 
-    /** Wraps [buildOtpDigitsBitmap] in the RemoteViews layout that hosts it — see notification_otp_digits.xml. */
-    private fun buildOtpDigitsView(context: Context, code: String): RemoteViews {
+    /**
+     * Wraps [buildOtpDigitsBitmap] in the RemoteViews layout that hosts it —
+     * see notification_otp_digits.xml. [compact], when true, renders a
+     * smaller version of the same boxes for the collapsed/heads-up custom
+     * content view, which System UI gives a much tighter height budget than
+     * the fully expanded big content view.
+     */
+    private fun buildOtpDigitsView(context: Context, code: String, compact: Boolean): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.notification_otp_digits)
-        views.setImageViewBitmap(R.id.otp_digits_image, buildOtpDigitsBitmap(context, code))
+        views.setImageViewBitmap(R.id.otp_digits_image, buildOtpDigitsBitmap(context, code, compact))
         return views
     }
 
@@ -467,24 +485,34 @@ object IncomingSmsNotifier {
      * Renders [code] as individual dashed boxes, one per character — the
      * same "draw it ourselves with a Canvas" approach [buildDefaultAvatarIcon]
      * already uses, needed here for the same underlying reason: a `<shape>`
-     * drawable's dashed `<stroke>` silently renders solid once
-     * hardware-accelerated, which is exactly how RemoteViews content draws
-     * inside the System UI process. Pre-rendering into a software-drawn
-     * bitmap sidesteps that. Sized for the common 4-6 digit case; an 8-char
-     * code (OtpExtractor's upper bound) renders wider and may get clipped by
-     * the notification shade's own width rather than wrapping — an accepted
-     * degradation rather than shrinking every more-common shorter code to
-     * accommodate the rare long one.
+     * drawable's dashed `<stroke>` renders solid once hardware-accelerated,
+     * which is exactly how RemoteViews content draws inside the System UI
+     * process. Pre-rendering into a software-drawn bitmap sidesteps that.
+     * Sized for the common 4-6 digit case; an 8-char code (OtpExtractor's
+     * upper bound) renders wider and may get clipped by the notification's
+     * own width rather than wrapping — an accepted degradation rather than
+     * shrinking every more-common shorter code to accommodate the rare long
+     * one.
      */
-    private fun buildOtpDigitsBitmap(context: Context, code: String): Bitmap {
+    private fun buildOtpDigitsBitmap(context: Context, code: String, compact: Boolean): Bitmap {
         val density = context.resources.displayMetrics.density
         fun dp(v: Float) = v * density
 
-        val boxWidth = dp(34f)
-        val boxHeight = dp(44f)
-        val gap = dp(6f)
+        val boxWidth = dp(if (compact) 24f else 34f)
+        val boxHeight = dp(if (compact) 30f else 44f)
+        val gap = dp(if (compact) 4f else 6f)
         val padding = dp(4f)
-        val corner = dp(8f)
+        val corner = dp(if (compact) 6f else 8f)
+        // Named distinctly from Paint's own `strokeWidth` property — inside
+        // an `apply {}` block on a Paint receiver, `strokeWidth =
+        // strokeWidth` would resolve the right-hand side to the receiver's
+        // own (still-default) property rather than this local value, a
+        // silent self-assignment that leaves the stroke at its default
+        // (invisible-thin) width.
+        val boxStrokeWidth = dp(if (compact) 1.5f else 1.75f)
+        val dashOn = dp(if (compact) 3.5f else 5f)
+        val dashOff = dp(if (compact) 2.5f else 3.5f)
+        val textSizePx = dp(if (compact) 13f else 18f)
 
         val width = (boxWidth * code.length + gap * (code.length - 1) + padding * 2).toInt().coerceAtLeast(1)
         val height = (boxHeight + padding * 2).toInt().coerceAtLeast(1)
@@ -493,13 +521,13 @@ object IncomingSmsNotifier {
 
         val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = dp(1.75f)
+            strokeWidth = boxStrokeWidth
             color = ACCENT_COLOR
-            pathEffect = DashPathEffect(floatArrayOf(dp(5f), dp(3.5f)), 0f)
+            pathEffect = DashPathEffect(floatArrayOf(dashOn, dashOff), 0f)
         }
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = ACCENT_COLOR
-            textSize = dp(18f)
+            textSize = textSizePx
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
