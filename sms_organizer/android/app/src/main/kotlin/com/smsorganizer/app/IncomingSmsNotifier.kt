@@ -8,7 +8,6 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -469,76 +468,65 @@ object IncomingSmsNotifier {
     }
 
     /**
-     * Wraps [buildOtpDigitsBitmap] in the RemoteViews layout that hosts it —
+     * Wraps [buildOtpBubbleBitmap] in the RemoteViews layout that hosts it —
      * see notification_otp_digits.xml. [compact], when true, renders a
-     * smaller version of the same boxes for the collapsed/heads-up custom
+     * smaller version of the same bubble for the collapsed/heads-up custom
      * content view, which System UI gives a much tighter height budget than
      * the fully expanded big content view.
      */
     private fun buildOtpDigitsView(context: Context, code: String, compact: Boolean): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.notification_otp_digits)
-        views.setImageViewBitmap(R.id.otp_digits_image, buildOtpDigitsBitmap(context, code, compact))
+        views.setImageViewBitmap(R.id.otp_digits_image, buildOtpBubbleBitmap(context, code, compact))
         return views
     }
 
     /**
-     * Renders [code] as individual dashed boxes, one per character — the
-     * same "draw it ourselves with a Canvas" approach [buildDefaultAvatarIcon]
-     * already uses, needed here for the same underlying reason: a `<shape>`
-     * drawable's dashed `<stroke>` renders solid once hardware-accelerated,
-     * which is exactly how RemoteViews content draws inside the System UI
-     * process. Pre-rendering into a software-drawn bitmap sidesteps that.
-     * Sized for the common 4-6 digit case; an 8-char code (OtpExtractor's
-     * upper bound) renders wider and may get clipped by the notification's
-     * own width rather than wrapping — an accepted degradation rather than
-     * shrinking every more-common shorter code to accommodate the rare long
-     * one.
+     * Renders [code] as a single solid black "sent message" bubble with
+     * white text — the same "draw it ourselves with a Canvas" approach
+     * [buildDefaultAvatarIcon] already uses, needed here for the same
+     * underlying reason: RemoteViews content draws inside the
+     * hardware-accelerated System UI process, so building the bubble as a
+     * bitmap keeps full control over its look regardless of what any given
+     * OEM's notification host does with an inflated `<shape>`. Sized for the
+     * common 4-6 digit case; an 8-char code (OtpExtractor's upper bound)
+     * renders wider and may get clipped by the notification's own width
+     * rather than wrapping — an accepted degradation rather than shrinking
+     * every more-common shorter code to accommodate the rare long one.
      */
-    private fun buildOtpDigitsBitmap(context: Context, code: String, compact: Boolean): Bitmap {
+    private fun buildOtpBubbleBitmap(context: Context, code: String, compact: Boolean): Bitmap {
         val density = context.resources.displayMetrics.density
         fun dp(v: Float) = v * density
 
-        val boxWidth = dp(if (compact) 24f else 34f)
-        val boxHeight = dp(if (compact) 30f else 44f)
-        val gap = dp(if (compact) 4f else 6f)
-        val padding = dp(4f)
-        val corner = dp(if (compact) 6f else 8f)
-        // Named distinctly from Paint's own `strokeWidth` property — inside
-        // an `apply {}` block on a Paint receiver, `strokeWidth =
-        // strokeWidth` would resolve the right-hand side to the receiver's
-        // own (still-default) property rather than this local value, a
-        // silent self-assignment that leaves the stroke at its default
-        // (invisible-thin) width.
-        val boxStrokeWidth = dp(if (compact) 1.5f else 1.75f)
-        val dashOn = dp(if (compact) 3.5f else 5f)
-        val dashOff = dp(if (compact) 2.5f else 3.5f)
-        val textSizePx = dp(if (compact) 13f else 18f)
+        val textSizePx = dp(if (compact) 15f else 20f)
+        val horizontalPadding = dp(if (compact) 14f else 18f)
+        val verticalPadding = dp(if (compact) 8f else 10f)
+        val corner = dp(if (compact) 14f else 18f)
 
-        val width = (boxWidth * code.length + gap * (code.length - 1) + padding * 2).toInt().coerceAtLeast(1)
-        val height = (boxHeight + padding * 2).toInt().coerceAtLeast(1)
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-
-        val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = boxStrokeWidth
-            color = ACCENT_COLOR
-            pathEffect = DashPathEffect(floatArrayOf(dashOn, dashOff), 0f)
-        }
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = ACCENT_COLOR
+            color = Color.WHITE
             textSize = textSizePx
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            letterSpacing = if (compact) 0.12f else 0.16f
         }
 
-        for ((index, char) in code.withIndex()) {
-            val left = padding + index * (boxWidth + gap)
-            val rect = RectF(left, padding, left + boxWidth, padding + boxHeight)
-            canvas.drawRoundRect(rect, corner, corner, boxPaint)
-            val textY = rect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2f
-            canvas.drawText(char.toString(), rect.centerX(), textY, textPaint)
+        val textWidth = textPaint.measureText(code)
+        val fontMetrics = textPaint.fontMetrics
+        val textHeight = fontMetrics.descent - fontMetrics.ascent
+
+        val width = (textWidth + horizontalPadding * 2).toInt().coerceAtLeast(1)
+        val height = (textHeight + verticalPadding * 2).toInt().coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+
+        val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = Color.BLACK
         }
+        canvas.drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), corner, corner, bubblePaint)
+
+        val textY = height / 2f - (fontMetrics.descent + fontMetrics.ascent) / 2f
+        canvas.drawText(code, width / 2f, textY, textPaint)
         return bitmap
     }
 
