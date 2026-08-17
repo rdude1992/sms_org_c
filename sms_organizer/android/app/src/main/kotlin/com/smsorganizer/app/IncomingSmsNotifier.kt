@@ -254,16 +254,21 @@ object IncomingSmsNotifier {
     /**
      * OTP layout: content title is the sender, and both the
      * collapsed/heads-up peek and the expanded body show [buildOtpDigitsView]
-     * — the code rendered as individual boxed digits, like a PIN-entry field
-     * (a smaller rendering for the collapsed state, which System UI gives a
-     * much tighter height budget). [formatOtpMessage]'s enlarged/bold/
-     * accent-colored inline text is kept as [NotificationCompat.Builder]'s
-     * plain contentText fallback — used on pre-24 devices where
-     * DecoratedCustomViewStyle isn't supported, and by accessibility
-     * services/Wear that read contentText rather than rendering the custom
-     * view. Only Copy and Delete actions — see
+     * — the code rendered as a single "sent message" bubble (a smaller
+     * rendering for the collapsed state, which System UI gives a much
+     * tighter height budget). Only Copy and Delete actions — see
      * [configureConversationNotification] for why Reply/Mark read are
      * skipped here.
+     *
+     * Deliberately does NOT put the raw code into contentText the way
+     * [formatOtpMessage] would — Android's own notification handling scans a
+     * notification's plain text content for OTP-shaped strings and, when it
+     * finds one, adds its own "Copy" suggestion chip independent of
+     * anything the app does. Since the code is already both visible (in the
+     * bubble bitmap, which isn't plain text the OS can scan) and copyable
+     * (our own explicit action below), leaving a second copy of the code in
+     * contentText only bought a second, redundant system-generated copy
+     * affordance for no benefit.
      */
     private fun configureOtpNotification(
         context: Context,
@@ -275,29 +280,30 @@ object IncomingSmsNotifier {
         builder.setContentTitle(displayName).setPriority(NotificationCompat.PRIORITY_HIGH)
 
         val lastIncoming = history.lastOrNull { !it.fromMe }?.text
-        if (lastIncoming != null) {
-            builder.setContentText(formatOtpMessage(lastIncoming) ?: lastIncoming)
-        }
-
         val otpCode = lastIncoming?.let(OtpExtractor::extract)
+
         if (otpCode != null) {
             builder
+                .setContentText("One-time code")
                 .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-                // Both states get the boxed-digit view, not just the
-                // expanded one — a smaller rendering for the
-                // collapsed/heads-up row (which System UI gives a much
-                // tighter height budget than the fully expanded view) so
-                // the boxes are what's visible the moment the notification
-                // pops up, not only after pulling it down.
+                // Both states get the bubble view, not just the expanded
+                // one — a smaller rendering for the collapsed/heads-up row
+                // (which System UI gives a much tighter height budget than
+                // the fully expanded view) so the bubble is what's visible
+                // the moment the notification pops up, not only after
+                // pulling it down.
                 .setCustomContentView(buildOtpDigitsView(context, otpCode, compact = true))
                 .setCustomBigContentView(buildOtpDigitsView(context, otpCode, compact = false))
                 .addAction(buildCopyOtpAction(context, threadId, otpCode))
         } else if (lastIncoming != null) {
             // No code found by OtpExtractor (rare — the two extractors
-            // aren't identical) — fall back to a plain expandable text view
-            // so the message is still fully readable rather than silently
-            // truncated to one line with no boxes and no way to see more.
-            builder.setStyle(NotificationCompat.BigTextStyle().bigText(lastIncoming))
+            // aren't identical) — there's no bubble to fall back on, so the
+            // raw text is the only way to show anything at all; showing it
+            // plainly (and accepting whatever the OS does with it) beats an
+            // empty-looking notification.
+            builder
+                .setContentText(formatOtpMessage(lastIncoming) ?: lastIncoming)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(lastIncoming))
         }
 
         builder.addAction(buildDeleteAction(context, threadId))

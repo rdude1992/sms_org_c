@@ -1,42 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Body for an OTP notification (see IncomingSmsNotifier.configureOtpNotification
-  / buildOtpDigitsView) — a small "OTP" caption next to a bitmap of the code
-  rendered as a solid black "sent message" bubble with white text. Reused for
-  both the collapsed/heads-up custom content view (a smaller bitmap) and the
-  expanded custom big content view (a larger one) — margins are kept tight so
-  it still fits the collapsed state's limited height budget. The bubble
-  itself is drawn onto the bitmap with a Canvas (buildOtpBubbleBitmap), not
-  as an inflated child view, so its look doesn't depend on how any given
-  OEM's notification host renders an inflated `<shape>`. android:textColor
-  (the "OTP" caption only — the bubble's own text is always white, drawn
-  into the bitmap) uses the platform's own secondary-text theme attribute
-  so it stays legible against both the light and dark notification-shade
-  backgrounds System UI inflates this under.
+  / buildOtpDigitsView) — a bitmap of the code rendered as a solid black
+  "sent message" bubble with white text. Reused for both the
+  collapsed/heads-up custom content view (a smaller bitmap) and the expanded
+  custom big content view (a larger one). The bubble itself is drawn onto
+  the bitmap with a Canvas (buildOtpBubbleBitmap), not as an inflated child
+  view, so its look doesn't depend on how any given OEM's notification host
+  renders an inflated `<shape>`.
 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ImageView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/otp_digits_image"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_marginTop="2dp"
     android:layout_marginBottom="4dp"
-    android:orientation="horizontal"
-    android:gravity="center_vertical">
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginEnd="10dp"
-        android:text="OTP"
-        android:textSize="12sp"
-        android:textStyle="bold"
-        android:textColor="?android:attr/textColorSecondary" />
-
-    <ImageView
-        android:id="@+id/otp_digits_image"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:adjustViewBounds="true"
-        android:scaleType="fitStart"
-        android:contentDescription="@null" />
-
-</LinearLayout>
+    android:adjustViewBounds="true"
+    android:scaleType="fitStart"
+    android:contentDescription="@null" />
