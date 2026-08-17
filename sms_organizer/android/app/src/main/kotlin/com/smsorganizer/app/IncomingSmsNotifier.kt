@@ -252,13 +252,14 @@ object IncomingSmsNotifier {
     }
 
     /**
-     * OTP layout: content title is the sender, and both the
-     * collapsed/heads-up peek and the expanded body show [buildOtpDigitsView]
-     * — the code rendered as a single "sent message" bubble (a smaller
-     * rendering for the collapsed state, which System UI gives a much
-     * tighter height budget). Only Copy and Delete actions — see
-     * [configureConversationNotification] for why Reply/Mark read are
-     * skipped here.
+     * OTP layout: content title is the sender. The collapsed/heads-up peek
+     * shows just [buildOtpDigitsView]'s bubble (System UI gives that state a
+     * much tighter height budget, no room for the full message too); the
+     * expanded body shows the same bubble via [buildOtpExpandedView] plus
+     * the full raw SMS text below it, so pulling the notification down
+     * gives the complete message rather than just the isolated code. Only
+     * Copy and Delete actions — see [configureConversationNotification] for
+     * why Reply/Mark read are skipped here.
      *
      * Deliberately does NOT put the raw code into contentText the way
      * [formatOtpMessage] would — Android's own notification handling scans a
@@ -280,30 +281,25 @@ object IncomingSmsNotifier {
         builder.setContentTitle(displayName).setPriority(NotificationCompat.PRIORITY_HIGH)
 
         val lastIncoming = history.lastOrNull { !it.fromMe }?.text
-        val otpCode = lastIncoming?.let(OtpExtractor::extract)
-
-        if (otpCode != null) {
-            builder
-                .setContentText("One-time code")
-                .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-                // Both states get the bubble view, not just the expanded
-                // one — a smaller rendering for the collapsed/heads-up row
-                // (which System UI gives a much tighter height budget than
-                // the fully expanded view) so the bubble is what's visible
-                // the moment the notification pops up, not only after
-                // pulling it down.
-                .setCustomContentView(buildOtpDigitsView(context, otpCode, compact = true))
-                .setCustomBigContentView(buildOtpDigitsView(context, otpCode, compact = false))
-                .addAction(buildCopyOtpAction(context, threadId, otpCode))
-        } else if (lastIncoming != null) {
-            // No code found by OtpExtractor (rare — the two extractors
-            // aren't identical) — there's no bubble to fall back on, so the
-            // raw text is the only way to show anything at all; showing it
-            // plainly (and accepting whatever the OS does with it) beats an
-            // empty-looking notification.
-            builder
-                .setContentText(formatOtpMessage(lastIncoming) ?: lastIncoming)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(lastIncoming))
+        if (lastIncoming != null) {
+            val otpCode = OtpExtractor.extract(lastIncoming)
+            if (otpCode != null) {
+                builder
+                    .setContentText("One-time code")
+                    .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+                    .setCustomContentView(buildOtpDigitsView(context, otpCode, compact = true))
+                    .setCustomBigContentView(buildOtpExpandedView(context, otpCode, lastIncoming))
+                    .addAction(buildCopyOtpAction(context, threadId, otpCode))
+            } else {
+                // No code found by OtpExtractor (rare — the two extractors
+                // aren't identical) — there's no bubble to fall back on, so
+                // the raw text is the only way to show anything at all;
+                // showing it plainly (and accepting whatever the OS does
+                // with it) beats an empty-looking notification.
+                builder
+                    .setContentText(formatOtpMessage(lastIncoming) ?: lastIncoming)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(lastIncoming))
+            }
         }
 
         builder.addAction(buildDeleteAction(context, threadId))
@@ -487,6 +483,18 @@ object IncomingSmsNotifier {
     }
 
     /**
+     * The expanded (pulled-down) body: the full-size bubble on top, plus the
+     * complete raw SMS [message] below it — see notification_otp_digits_expanded.xml
+     * — so expanding shows the whole message, not just the isolated code.
+     */
+    private fun buildOtpExpandedView(context: Context, code: String, message: String): RemoteViews {
+        val views = RemoteViews(context.packageName, R.layout.notification_otp_digits_expanded)
+        views.setImageViewBitmap(R.id.otp_digits_image, buildOtpBubbleBitmap(context, code, compact = false))
+        views.setTextViewText(R.id.otp_message_text, message)
+        return views
+    }
+
+    /**
      * Renders [code] as a single solid black "sent message" bubble with
      * white text — the same "draw it ourselves with a Canvas" approach
      * [buildDefaultAvatarIcon] already uses, needed here for the same
@@ -498,22 +506,25 @@ object IncomingSmsNotifier {
      * renders wider and may get clipped by the notification's own width
      * rather than wrapping — an accepted degradation rather than shrinking
      * every more-common shorter code to accommodate the rare long one.
+     * [compact]'s box/font sizes are close to (not much smaller than) the
+     * full size — the collapsed/heads-up row is still readable at a glance,
+     * just slightly tighter to respect that state's smaller height budget.
      */
     private fun buildOtpBubbleBitmap(context: Context, code: String, compact: Boolean): Bitmap {
         val density = context.resources.displayMetrics.density
         fun dp(v: Float) = v * density
 
-        val textSizePx = dp(if (compact) 15f else 20f)
-        val horizontalPadding = dp(if (compact) 14f else 18f)
-        val verticalPadding = dp(if (compact) 8f else 10f)
-        val corner = dp(if (compact) 14f else 18f)
+        val textSizePx = dp(if (compact) 19f else 20f)
+        val horizontalPadding = dp(if (compact) 17f else 18f)
+        val verticalPadding = dp(10f)
+        val corner = dp(if (compact) 17f else 18f)
 
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textSize = textSizePx
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-            letterSpacing = if (compact) 0.12f else 0.16f
+            letterSpacing = if (compact) 0.15f else 0.16f
         }
 
         val textWidth = textPaint.measureText(code)
