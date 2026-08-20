@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Body for an OTP notification (see IncomingSmsNotifier.configureOtpNotification
+  / buildOtpDigitsView) — a bitmap of the code rendered as a solid black
+  "sent message" bubble with white text. Reused for both the
+  collapsed/heads-up custom content view (a smaller bitmap) and the expanded
+  custom big content view (a larger one). The bubble itself is drawn onto
+  the bitmap with a Canvas (buildOtpBubbleBitmap), not as an inflated child
+  view, so its look doesn't depend on how any given OEM's notification host
+  renders an inflated `<shape>`.
+-->
+<ImageView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/otp_digits_image"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="2dp"
+    android:layout_marginBottom="4dp"
+    android:adjustViewBounds="true"
+    android:scaleType="fitStart"
+    android:contentDescription="@null" />

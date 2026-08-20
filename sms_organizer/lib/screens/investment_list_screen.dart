@@ -675,21 +675,29 @@ class _AmcListViewState extends State<_AmcListView> {
     }).toList();
     final filteredProviders = _groupByProvider(filteredInvestments);
 
-    return ListView(
-      children: [
-        _AmcAnalytics(
-          range: _range,
-          onRangeSelected: (r) => setState(() => _range = r),
-          allInvestments: widget.allInvestments,
-        ),
-        ...withRowDividers(
-          context,
-          [
-            for (final p in filteredProviders)
-              _ProviderRow(provider: p, allInvestments: widget.allInvestments),
-          ],
-        ),
-      ],
+    // Mirrors _InvestmentListView's RefreshIndicator: widget.allInvestments
+    // (and providers/filteredInvestments derived from it) is re-derived from
+    // SmsProvider on every rebuild via InvestmentListScreen.build, so a
+    // pull-triggered refresh() here flows straight through to this tab too.
+    return RefreshIndicator(
+      onRefresh: context.read<SmsProvider>().refresh,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          _AmcAnalytics(
+            range: _range,
+            onRangeSelected: (r) => setState(() => _range = r),
+            allInvestments: widget.allInvestments,
+          ),
+          ...withRowDividers(
+            context,
+            [
+              for (final p in filteredProviders)
+                _ProviderRow(provider: p, allInvestments: widget.allInvestments),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

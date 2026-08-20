@@ -295,6 +295,7 @@ class TransactionTile extends StatelessWidget {
       rawBody: t.rawBody,
       details: details,
       onEdit: () => showTransactionEditSheet(context, provider, t),
+      onSetCategory: () => showQuickSpendCategorySheet(context, provider, t),
       onViewThread: message == null
           ? null
           : () => Navigator.push(
