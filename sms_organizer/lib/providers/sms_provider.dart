@@ -1376,6 +1376,36 @@ class SmsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Writes [messages] into the actual Android SMS store (content://sms) —
+  /// unlike [restoreFromBackup], which only repopulates this app's own
+  /// cache. Requires this app to already be the default SMS app (the OS
+  /// rejects arbitrary TYPE/DATE writes otherwise); throws a
+  /// [StateError] if not, so callers should check [isDefaultSmsApp] and run
+  /// [requestDefaultSmsRole] first.
+  ///
+  /// If [clearExisting] is true, every existing message in the device's SMS
+  /// store is deleted before restoring — irreversible. The caller (Settings
+  /// UI) is responsible for getting explicit user confirmation before
+  /// passing true; this method itself performs no confirmation.
+  ///
+  /// Returns the number of messages actually inserted. Refreshes the app's
+  /// view afterwards so the newly-written messages show up immediately.
+  Future<int> restoreMessagesToDeviceStore(
+    List<SmsMessage> messages, {
+    required bool clearExisting,
+  }) async {
+    if (!isDefaultSmsApp) {
+      throw StateError('SmartSMS must be the default SMS app to restore messages to the device.');
+    }
+    if (clearExisting) {
+      await _platform.clearAllDeviceMessages();
+    }
+    final inserted =
+        await _platform.restoreMessagesToDevice(messages.map((m) => m.toPlatformMap()).toList());
+    await refresh();
+    return inserted;
+  }
+
   @override
   void dispose() {
     _incomingSub?.cancel();

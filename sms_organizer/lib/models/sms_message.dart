@@ -119,6 +119,54 @@ class SmsMessage {
         'status': status.name,
       };
 
+  /// Inverse of [fromPlatformMap] — encodes this message back into the raw
+  /// Android content://sms column shape, for writing a backup's messages
+  /// into the device SMS store on restore (see
+  /// SmsPlatformService.restoreMessagesToDevice). threadId/id are omitted:
+  /// the provider auto-assigns a fresh id and derives thread_id from
+  /// address on insert, same as [SmsRepository.sendSms] on the native side.
+  Map<String, dynamic> toPlatformMap() => {
+        'address': address,
+        'body': body,
+        'date': date.millisecondsSinceEpoch,
+        'dateSent': date.millisecondsSinceEpoch,
+        'type': _androidType,
+        'read': read,
+        'status': _androidStatus,
+      };
+
+  int get _androidType {
+    switch (box) {
+      case SmsBoxType.inbox:
+        return 1;
+      case SmsBoxType.sent:
+        return 2;
+      case SmsBoxType.draft:
+        return 3;
+      case SmsBoxType.outbox:
+        return 4;
+      case SmsBoxType.failed:
+        return 5;
+      case SmsBoxType.queued:
+        return 6;
+      case SmsBoxType.unknown:
+        return 1;
+    }
+  }
+
+  int get _androidStatus {
+    switch (status) {
+      case SmsDeliveryStatus.delivered:
+        return 0; // Telephony.Sms.STATUS_COMPLETE
+      case SmsDeliveryStatus.pending:
+        return 32; // Telephony.Sms.STATUS_PENDING
+      case SmsDeliveryStatus.failed:
+        return 64; // Telephony.Sms.STATUS_FAILED
+      case SmsDeliveryStatus.none:
+        return -1; // Telephony.Sms.STATUS_NONE
+    }
+  }
+
   factory SmsMessage.fromJson(Map<String, dynamic> json) {
     final msg = SmsMessage(
       id: json['id'] as int,

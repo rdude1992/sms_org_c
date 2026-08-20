@@ -132,6 +132,21 @@ class MainActivity : FlutterFragmentActivity() {
                     val ids = call.argument<List<Long>>("ids") ?: emptyList()
                     result.success(SmsRepository.deleteMessages(this, ids))
                 }
+                "restoreMessagesToDevice" -> {
+                    if (!SmsRepository.isDefaultSmsApp(this)) {
+                        result.error("NOT_DEFAULT_SMS_APP", "App must be the default SMS app to restore.", null)
+                    } else {
+                        val messages = call.argument<List<Map<String, Any?>>>("messages") ?: emptyList()
+                        result.success(SmsRepository.restoreMessages(this, messages))
+                    }
+                }
+                "clearAllDeviceMessages" -> {
+                    if (!SmsRepository.isDefaultSmsApp(this)) {
+                        result.error("NOT_DEFAULT_SMS_APP", "App must be the default SMS app to clear messages.", null)
+                    } else {
+                        result.success(SmsRepository.deleteAllMessages(this))
+                    }
+                }
                 else -> result.notImplemented()
             }
         }

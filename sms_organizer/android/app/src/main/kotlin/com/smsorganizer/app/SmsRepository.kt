@@ -2,6 +2,7 @@ package com.smsorganizer.app
 
 import android.app.PendingIntent
 import android.app.role.RoleManager
+import android.content.ContentProviderOperation
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
@@ -322,5 +323,73 @@ object SmsRepository {
         }
         val uri = context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values)
         return uri?.lastPathSegment?.toLongOrNull() ?: -1L
+    }
+
+    // Chunk size for restoreMessages' applyBatch calls — Android's Binder IPC
+    // caps a single transaction at ~1MB, and a large backup (thousands of
+    // messages) would blow past that in one batch. 300 rows stays comfortably
+    // under the limit even for long message bodies.
+    private const val RESTORE_BATCH_SIZE = 300
+
+    /**
+     * Bulk-inserts messages from a JSON backup back into content://sms,
+     * preserving each one's original address/body/date/type/read-state
+     * rather than treating them as newly-arriving messages. Inserted via
+     * the base CONTENT_URI (not the Inbox/Sent convenience URIs) so Android
+     * still auto-assigns thread_id from the address, same as [sendSms].
+     *
+     * Only the current default SMS app is allowed to write arbitrary
+     * TYPE/DATE values into this provider — the OS silently drops/rejects
+     * such writes from a non-default app. Callers must already have
+     * confirmed [isDefaultSmsApp] before invoking this; it is not re-checked
+     * here since MainActivity's method channel handler is the single caller
+     * and Dart-side (SmsProvider.restoreMessagesToDeviceStore) already gates
+     * on it.
+     *
+     * Batched (rather than one insert() per row) both for speed on a
+     * thousands-of-messages backup and to stay under the IPC transaction
+     * size limit — see [RESTORE_BATCH_SIZE]. A chunk that fails outright
+     * (malformed rows, provider hiccup) is skipped rather than aborting the
+     * whole restore, so the caller gets a partial count back instead of an
+     * all-or-nothing failure.
+     */
+    fun restoreMessages(context: Context, messages: List<Map<String, Any?>>): Int {
+        var inserted = 0
+        for (chunk in messages.chunked(RESTORE_BATCH_SIZE)) {
+            val ops = ArrayList<ContentProviderOperation>(chunk.size)
+            for (m in chunk) {
+                val values = ContentValues().apply {
+                    put(Telephony.Sms.ADDRESS, m["address"] as? String ?: "")
+                    put(Telephony.Sms.BODY, m["body"] as? String ?: "")
+                    put(Telephony.Sms.DATE, (m["date"] as? Number)?.toLong() ?: System.currentTimeMillis())
+                    put(Telephony.Sms.DATE_SENT, (m["dateSent"] as? Number)?.toLong() ?: 0L)
+                    put(Telephony.Sms.TYPE, (m["type"] as? Number)?.toInt() ?: Telephony.Sms.MESSAGE_TYPE_INBOX)
+                    put(Telephony.Sms.READ, if (m["read"] == true) 1 else 0)
+                    put(Telephony.Sms.SEEN, 1)
+                    put(Telephony.Sms.STATUS, (m["status"] as? Number)?.toInt() ?: -1)
+                }
+                ops.add(ContentProviderOperation.newInsert(Telephony.Sms.CONTENT_URI).withValues(values).build())
+            }
+            try {
+                val authority = Telephony.Sms.CONTENT_URI.authority ?: "sms"
+                val results = context.contentResolver.applyBatch(authority, ops)
+                inserted += results.count { it.uri != null }
+            } catch (_: Exception) {
+                // Skip this chunk; partial progress is still reported below.
+            }
+        }
+        return inserted
+    }
+
+    /**
+     * Deletes every row in content://sms (inbox + sent + draft + outbox) —
+     * the destructive half of "clear device SMS store and restore from
+     * backup". Meaningful only as the default SMS app; a non-default app's
+     * bulk delete on this provider is rejected by the OS. As with
+     * [restoreMessages], the default-app check is the caller's
+     * responsibility (see SmsProvider.restoreMessagesToDeviceStore).
+     */
+    fun deleteAllMessages(context: Context): Int {
+        return context.contentResolver.delete(Telephony.Sms.CONTENT_URI, null, null)
     }
 }

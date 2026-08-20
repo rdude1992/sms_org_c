@@ -221,7 +221,14 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
               ListTile(
                 leading: const Icon(Icons.file_open_outlined),
                 title: const Text('Restore from backup file'),
+                subtitle: const Text('Repopulates this app\'s cache only — device SMS store untouched'),
                 onTap: () => _restoreBackup(context),
+              ),
+              ListTile(
+                leading: const Icon(Icons.sms_outlined),
+                title: const Text('Restore SMS to device'),
+                subtitle: const Text('Writes backed-up messages into your phone\'s SMS store'),
+                onTap: () => _restoreToDeviceStore(context),
               ),
             ],
           ),
@@ -365,7 +372,129 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
       }
     }
   }
+
+  /// Restores a backup file's messages into the actual Android SMS store
+  /// (content://sms), not just this app's cache — see [_restoreBackup] for
+  /// that. Requires being the default SMS app; if the device's SMS store
+  /// already has messages, asks whether to add the backup alongside them
+  /// (risking duplicates if the backup came from this same device) or wipe
+  /// the store first and replace it entirely, with a second, explicit
+  /// confirmation before anything destructive happens.
+  Future<void> _restoreToDeviceStore(BuildContext context) async {
+    final provider = context.read<SmsProvider>();
+
+    if (!provider.isDefaultSmsApp) {
+      final setDefault = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Default SMS app required'),
+          content: const Text(
+            'Writing messages into your phone\'s SMS store requires SmartSMS '
+            'to be the default SMS app first.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Set default')),
+          ],
+        ),
+      );
+      if (setDefault != true) return;
+      final became = await provider.requestDefaultSmsRole();
+      if (!became) return;
+    }
+
+    try {
+      const typeGroup = XTypeGroup(label: 'JSON', extensions: ['json']);
+      final file = await openFile(acceptedTypeGroups: [typeGroup]);
+      if (file == null) return;
+      final bundle = await provider.backup.restoreFromFile(File(file.path));
+      if (bundle.messages.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('Backup has no messages to restore.')));
+        }
+        return;
+      }
+
+      var clearExisting = false;
+      if (provider.allMessages.isNotEmpty) {
+        if (!context.mounted) return;
+        final choice = await showDialog<_DeviceRestoreChoice>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Messages already on this device'),
+            content: Text(
+              'Your phone\'s SMS store already has ${provider.allMessages.length} '
+              'messages. The backup has ${bundle.messages.length}.\n\n'
+              '"Add to existing" keeps both — this can create duplicates if the '
+              'backup was taken from this same device.\n\n'
+              '"Clear & replace" permanently deletes every message currently on '
+              'the device first, then restores only the backup. This cannot be '
+              'undone.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, _DeviceRestoreChoice.cancel),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, _DeviceRestoreChoice.merge),
+                child: const Text('Add to existing'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+                onPressed: () => Navigator.pop(ctx, _DeviceRestoreChoice.clearAndReplace),
+                child: const Text('Clear & replace'),
+              ),
+            ],
+          ),
+        );
+        if (choice == null || choice == _DeviceRestoreChoice.cancel) return;
+        clearExisting = choice == _DeviceRestoreChoice.clearAndReplace;
+      }
+
+      if (clearExisting) {
+        if (!context.mounted) return;
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Clear all SMS on this device?'),
+            content: const Text(
+              'This permanently deletes every message currently in your phone\'s '
+              'SMS store, then restores only what\'s in the backup file. This '
+              'cannot be undone.',
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Clear & restore'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+      }
+
+      final inserted = await provider.restoreMessagesToDeviceStore(
+        bundle.messages,
+        clearExisting: clearExisting,
+      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Restored $inserted messages to the device SMS store.')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Restore failed: $e')));
+      }
+    }
+  }
 }
+
+enum _DeviceRestoreChoice { cancel, merge, clearAndReplace }
 
 class _SectionHeader extends StatelessWidget {
   final String title;
