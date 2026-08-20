@@ -487,11 +487,16 @@ from the second sync onward.
   underlying SMS/transactions always stay visible in the inbox and
   transaction lists; only aggregate totals (Insights, Cards & Accounts,
   merchant breakdown) suppress the redundant one.
-- **Backup/restore is app-data-only.** It exports/imports this app's view of
-  your messages + parsed data as JSON. Restoring does **not** write messages
-  back into the Android SMS provider (silently mass-inserting SMS into a
-  user's inbox on restore would be a surprising thing for an app to do) —
-  it repopulates the app's own cache/insights.
+- **Backup/restore exports this app's view of your messages + parsed data as
+  JSON.** Settings → "Restore from backup file" only repopulates the app's
+  own cache/insights (never touches the device SMS store). Settings →
+  "Restore SMS to device" is the separate, explicit, user-confirmed action
+  that writes a backup's messages into the actual Android SMS provider —
+  requires SmartSMS to be the default SMS app, and offers a "clear the
+  device SMS store first, then replace it with the backup" option (behind
+  its own destructive-action confirmation) for when the device's store
+  already has messages that would otherwise end up duplicated alongside the
+  restored ones.
 - **Placeholder app icon.** `res/mipmap-*/ic_launcher.png` are simple
   generated placeholders — swap in real branding before shipping.
 - **"Estimated current value" is only ever as fresh as the last SMS that
