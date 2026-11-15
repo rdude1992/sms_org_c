@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Centered "nothing here" placeholder — a muted icon in a soft circle
 /// above a title and optional supporting line. Used wherever a list can
@@ -24,7 +24,7 @@ class EmptyState extends StatelessWidget {
             Container(
               width: 56,
               height: 56,
-              decoration: BoxDecoration(color: scheme.surfaceVariant, shape: BoxShape.circle),
+              decoration: BoxDecoration(color: scheme.surfaceContainerHighest, shape: BoxShape.circle),
               child: Icon(icon, size: 26, color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 16),

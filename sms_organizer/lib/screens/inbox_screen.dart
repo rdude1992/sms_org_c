@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import '../models/category.dart';
 import '../models/sms_message.dart';
@@ -626,7 +626,7 @@ class _DateHeaderDelegate extends SliverPersistentHeaderDelegate {
                 const SizedBox(width: 8),
                 Text(
                   '$count message${count == 1 ? '' : 's'}',
-                  style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant.withOpacity(0.7)),
+                  style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant.withValues(alpha: 0.7)),
                 ),
               ],
             ],
@@ -681,7 +681,7 @@ class _MessageRow extends StatelessWidget {
     final row = ListTile(
       key: ValueKey(m.id),
       selected: selected,
-      selectedTileColor: scheme.primary.withOpacity(0.06),
+      selectedTileColor: scheme.primary.withValues(alpha: 0.06),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       minVerticalPadding: 8,
       dense: true,
@@ -755,7 +755,7 @@ class _MessageRow extends StatelessWidget {
         body: m.body,
         query: provider.searchQuery,
         baseStyle: TextStyle(
-          color: unread ? scheme.onSurface.withOpacity(0.85) : scheme.onSurfaceVariant,
+          color: unread ? scheme.onSurface.withValues(alpha: 0.85) : scheme.onSurfaceVariant,
           fontWeight: unread ? FontWeight.w600 : FontWeight.normal,
           fontSize: 12.5,
         ),

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../utils/formatters.dart';
 
 class DateSeparator extends StatelessWidget {
@@ -15,7 +15,7 @@ class DateSeparator extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           decoration: BoxDecoration(
-            color: scheme.surfaceVariant,
+            color: scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Text(

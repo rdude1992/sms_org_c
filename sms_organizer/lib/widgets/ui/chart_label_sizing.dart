@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Measures [text]'s rendered width under [style] — used to size a trend
 /// chart's axis reserved space to the actual label content instead of a

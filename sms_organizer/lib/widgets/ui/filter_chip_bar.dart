@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Horizontally scrolling row of pill filter chips — shared by the inbox
 /// category filter and the insights date-range filter, which previously
@@ -25,7 +25,7 @@ class FilterChipBar<T> extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         itemCount: values.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
           final value = values[index];
           return ChoiceChip(

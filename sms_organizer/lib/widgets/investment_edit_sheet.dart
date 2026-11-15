@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
 
@@ -98,7 +98,7 @@ class _InvestmentEditSheetState extends State<_InvestmentEditSheet> {
               ),
               const SizedBox(height: 20),
               DropdownButtonFormField<InvestmentKind>(
-                value: _kind,
+                initialValue: _kind,
                 decoration: const InputDecoration(labelText: 'Type'),
                 items: [
                   for (final kind in InvestmentKind.values)
@@ -250,7 +250,7 @@ class _BulkInvestmentEditSheetState extends State<_BulkInvestmentEditSheet> {
               ),
               const SizedBox(height: 20),
               DropdownButtonFormField<InvestmentKind?>(
-                value: _kind,
+                initialValue: _kind,
                 decoration: const InputDecoration(labelText: 'Type'),
                 items: [
                   const DropdownMenuItem(value: null, child: Text('No change')),

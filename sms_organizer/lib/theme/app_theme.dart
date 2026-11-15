@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'app_colors.dart';
 
 /// App-wide [ThemeData] for light and dark mode, built to read like
@@ -108,8 +108,8 @@ class AppTheme {
 
       chipTheme: ChipThemeData(
         backgroundColor: muted,
-        selectedColor: scheme.primary.withOpacity(0.14),
-        disabledColor: muted.withOpacity(0.5),
+        selectedColor: scheme.primary.withValues(alpha: 0.14),
+        disabledColor: muted.withValues(alpha: 0.5),
         labelStyle: TextStyle(color: onSurface, fontSize: 13, fontWeight: FontWeight.w600),
         secondaryLabelStyle: TextStyle(color: scheme.primary, fontSize: 13, fontWeight: FontWeight.w600),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -121,13 +121,13 @@ class AppTheme {
 
       inputDecorationTheme: InputDecorationThemeData(
         filled: true,
-        fillColor: isDark ? muted.withOpacity(0.4) : surface,
+        fillColor: isDark ? muted.withValues(alpha: 0.4) : surface,
         hintStyle: TextStyle(color: mutedForeground, fontWeight: FontWeight.normal),
         labelStyle: TextStyle(color: mutedForeground),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         border: outlineBorder,
         enabledBorder: outlineBorder,
-        disabledBorder: outlineBorder.copyWith(borderSide: BorderSide(color: border.withOpacity(0.6))),
+        disabledBorder: outlineBorder.copyWith(borderSide: BorderSide(color: border.withValues(alpha: 0.6))),
         focusedBorder: outlineBorder.copyWith(
           borderSide: BorderSide(color: scheme.primary, width: 1.5),
         ),
@@ -184,7 +184,7 @@ class AppTheme {
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: surface,
         surfaceTintColor: Colors.transparent,
-        indicatorColor: scheme.primary.withOpacity(0.14),
+        indicatorColor: scheme.primary.withValues(alpha: 0.14),
         elevation: 0,
         height: 64,
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
@@ -258,7 +258,7 @@ class AppTheme {
         iconColor: mutedForeground,
         textColor: onSurface,
         selectedColor: scheme.primary,
-        selectedTileColor: scheme.primary.withOpacity(0.06),
+        selectedTileColor: scheme.primary.withValues(alpha: 0.06),
       ),
 
       switchTheme: SwitchThemeData(
@@ -267,7 +267,7 @@ class AppTheme {
           return isDark ? AppColors.stone400 : Colors.white;
         }),
         trackColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) return scheme.primary.withOpacity(0.3);
+          if (states.contains(WidgetState.selected)) return scheme.primary.withValues(alpha: 0.3);
           return muted;
         }),
         trackOutlineColor: WidgetStateProperty.resolveWith((states) {

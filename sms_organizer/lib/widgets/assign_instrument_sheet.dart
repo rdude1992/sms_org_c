@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
@@ -81,14 +81,15 @@ Future<void> showAssignInstrumentSheet(
                 child: ListView.builder(
                   shrinkWrap: true,
                   itemCount: candidates.length,
-                  // Named _tileContext (not `context`) deliberately: it's
-                  // scoped to a ListTile that's about to be popped away, so
-                  // using it (or an accidentally-shadowed `context`) for the
+                  // The builder's context is discarded (`_`), not named
+                  // `context`, deliberately: it's scoped to a ListTile that's
+                  // about to be popped away, so using it (or an
+                  // accidentally-shadowed `context`) for the
                   // follow-up "apply to similar" sheet below would silently
                   // no-op once that tile is disposed. The outer [context] —
                   // the screen that opened this sheet, which outlives it —
                   // is what the follow-up flow actually needs.
-                  itemBuilder: (_tileContext, index) {
+                  itemBuilder: (_, index) {
                     final s = candidates[index];
                     return ListTile(
                       leading: Icon(_iconFor(s.primaryType), color: scheme.primary),

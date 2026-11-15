@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// The app's one standard thin separator between rows in a compact list —
 /// originated with Recent transactions' compact rows, now reused everywhere
@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 Widget buildRowDivider(BuildContext context) => Divider(
       height: 1,
       thickness: 1,
-      color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.4),
+      color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
     );
 
 /// Interspersed with [buildRowDivider] between each pair of [children] (none

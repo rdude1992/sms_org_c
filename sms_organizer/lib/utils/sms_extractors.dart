@@ -15,7 +15,7 @@
 ///   DateTime.parse is strict ISO-8601), so [extractBillDueDate] uses a
 ///   small hand-written parser instead of a literal port — see
 ///   [tryParseFlexibleDate].
-library sms_extractors;
+library;
 
 // ---------------------------------------------------------------------------
 // extractCardType

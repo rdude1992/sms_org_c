@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
@@ -368,7 +368,7 @@ class _InvestmentListScreenState extends State<InvestmentListScreen>
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    color: scheme.surfaceVariant.withOpacity(0.4),
+                    color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
                     child: Row(
                       children: [
                         Expanded(
@@ -396,7 +396,7 @@ class _InvestmentListScreenState extends State<InvestmentListScreen>
                                   fontSize: 12,
                                   color: scheme.onSurfaceVariant,
                                   decoration: TextDecoration.underline,
-                                  decorationColor: scheme.onSurfaceVariant.withOpacity(0.4),
+                                  decorationColor: scheme.onSurfaceVariant.withValues(alpha: 0.4),
                                 ),
                               ),
                             ),
@@ -540,7 +540,7 @@ class _InvestmentListView extends StatelessWidget {
                     onLongPress: selecting ? () => onToggleSelected(i.smsId) : null,
                     onSelectStart: () => onToggleSelected(i.smsId),
                   ),
-                  Divider(height: 1, thickness: 1, color: scheme.outlineVariant.withOpacity(0.4)),
+                  Divider(height: 1, thickness: 1, color: scheme.outlineVariant.withValues(alpha: 0.4)),
                 ],
               );
             },

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../models/transaction.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';

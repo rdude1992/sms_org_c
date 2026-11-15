@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../models/category.dart';
 import '../models/sms_message.dart';
 import '../theme/app_colors.dart';
@@ -52,7 +52,7 @@ class ConversationTile extends StatelessWidget {
     final previewMessage = conversation.previewFor(query);
 
     return Material(
-      color: selected ? scheme.primary.withOpacity(0.08) : Colors.transparent,
+      color: selected ? scheme.primary.withValues(alpha: 0.08) : Colors.transparent,
       child: Column(
         children: [
           InkWell(
@@ -80,7 +80,7 @@ class ConversationTile extends StatelessWidget {
                       onTap: onAvatarTap,
                       child: CircleAvatar(
                         radius: 18,
-                        backgroundColor: latest.category.color.withOpacity(0.15),
+                        backgroundColor: latest.category.color.withValues(alpha: 0.15),
                         child: Text(
                           displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
                           style: TextStyle(
@@ -142,7 +142,7 @@ class ConversationTile extends StatelessWidget {
                                 query: query,
                                 baseStyle: TextStyle(
                                   color:
-                                      unread ? scheme.onSurface.withOpacity(0.85) : scheme.onSurfaceVariant,
+                                      unread ? scheme.onSurface.withValues(alpha: 0.85) : scheme.onSurfaceVariant,
                                   fontWeight: unread ? FontWeight.w600 : FontWeight.normal,
                                   fontSize: 13,
                                 ),

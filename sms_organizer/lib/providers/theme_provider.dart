@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ThemeProvider extends ChangeNotifier {
@@ -50,7 +50,7 @@ class ThemeProvider extends ChangeNotifier {
     if (color == null) {
       await prefs.remove(_accentPrefKey);
     } else {
-      await prefs.setInt(_accentPrefKey, color.value);
+      await prefs.setInt(_accentPrefKey, color.toARGB32());
     }
   }
 }

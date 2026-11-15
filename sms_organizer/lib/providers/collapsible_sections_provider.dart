@@ -8,7 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// resetting to expanded every time the screen is rebuilt.
 ///
 /// Keyed by a caller-supplied stable string (e.g. "insights.by_merchant",
-/// "amc_holding.<key>") rather than position, so adding/reordering/removing
+/// `"amc_holding.<key>"`) rather than position, so adding/reordering/removing
 /// sections never shuffles unrelated saved state onto the wrong section.
 class CollapsibleSectionsProvider extends ChangeNotifier {
   static const _prefKey = 'collapsed_sections';

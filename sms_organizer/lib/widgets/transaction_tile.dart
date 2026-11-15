@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
@@ -125,7 +125,7 @@ class TransactionTile extends StatelessWidget {
           transaction.issuer ??
           (isNeutral ? _instrumentLabel(transaction.instrument) : (isCredit ? 'CREDIT' : 'DEBIT'));
       return Material(
-        color: selected ? scheme.primary.withOpacity(0.08) : Colors.transparent,
+        color: selected ? scheme.primary.withValues(alpha: 0.08) : Colors.transparent,
         child: InkWell(
           onTap: onTap ?? () => _showDetails(context),
           onLongPress: onLongPress ?? () => _showActions(context),
@@ -167,7 +167,7 @@ class TransactionTile extends StatelessWidget {
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           minVerticalPadding: 10,
           selected: selected,
-          selectedTileColor: scheme.primary.withOpacity(0.06),
+          selectedTileColor: scheme.primary.withValues(alpha: 0.06),
           onTap: onTap ?? () => _showDetails(context),
           onLongPress: onLongPress ?? () => _showActions(context),
           leading: selectionMode
@@ -182,7 +182,7 @@ class TransactionTile extends StatelessWidget {
                     children: [
                       CircleAvatar(
                         radius: 20,
-                        backgroundColor: color.withOpacity(0.12),
+                        backgroundColor: color.withValues(alpha: 0.12),
                         child: Icon(icon, color: color, size: 18),
                       ),
                       if (onToggleExpand != null)
@@ -453,7 +453,7 @@ class _ExpandedTransactionPanel extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: scheme.surfaceVariant.withOpacity(0.4),
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(

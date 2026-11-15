@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// A muted, gently pulsing placeholder block — the building unit for
 /// skeleton loading states below.
@@ -40,7 +40,7 @@ class _SkeletonBoxState extends State<SkeletonBox> with SingleTickerProviderStat
         width: widget.width,
         height: widget.height,
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceVariant,
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
           borderRadius: widget.borderRadius,
         ),
       ),
@@ -89,7 +89,7 @@ class SkeletonList extends StatelessWidget {
     return ListView.builder(
       physics: const NeverScrollableScrollPhysics(),
       itemCount: count,
-      itemBuilder: (_, __) => const SkeletonListTile(),
+      itemBuilder: (_, _) => const SkeletonListTile(),
     );
   }
 }

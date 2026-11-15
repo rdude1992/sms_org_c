@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../models/category.dart';
 
 class CategoryBadge extends StatelessWidget {
@@ -34,10 +34,10 @@ class CategoryBadge extends StatelessWidget {
           ? EdgeInsets.symmetric(horizontal: compact ? 6 : 10, vertical: compact ? 2 : 4)
           : EdgeInsets.all(resolvedIconSize / 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         shape: showLabel ? BoxShape.rectangle : BoxShape.circle,
         borderRadius: showLabel ? BorderRadius.circular(999) : null,
-        border: showLabel ? Border.all(color: color.withOpacity(0.24)) : null,
+        border: showLabel ? Border.all(color: color.withValues(alpha: 0.24)) : null,
       ),
       child: showLabel
           ? Row(

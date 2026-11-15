@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
@@ -55,7 +55,7 @@ class UncategorisedReviewScreen extends StatelessWidget {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            color: scheme.surfaceVariant.withOpacity(0.4),
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
             child: Text(
               '${uncategorised.length} transaction${uncategorised.length == 1 ? '' : 's'} '
               '(${Formatters.currency(totalAmount)}) across ${sortedGroups.length} '

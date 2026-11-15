@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import '../models/category.dart';
 import '../models/sms_message.dart';
@@ -74,7 +74,7 @@ class MessageBubble extends StatelessWidget {
     // the same way a chat app's own sent-bubble color usually stays fixed
     // regardless of system theme, rather than the accent-tinted bubble this
     // used to be.
-    final bubbleColor = isOutgoing ? AppColors.stone900 : scheme.surfaceVariant;
+    final bubbleColor = isOutgoing ? AppColors.stone900 : scheme.surfaceContainerHighest;
     final textColor = isOutgoing ? AppColors.darkOnSurface : scheme.onSurface;
 
     // Computed on demand rather than cached on the model — only otp-tagged
@@ -100,7 +100,7 @@ class MessageBubble extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       child: Container(
-        color: selected ? scheme.primary.withOpacity(0.14) : Colors.transparent,
+        color: selected ? scheme.primary.withValues(alpha: 0.14) : Colors.transparent,
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
           children: [
@@ -140,7 +140,7 @@ class MessageBubble extends StatelessWidget {
                         ),
                         border: Border.all(
                           color:
-                              (highlighted || selected) ? scheme.primary : scheme.primary.withOpacity(0),
+                              (highlighted || selected) ? scheme.primary : scheme.primary.withValues(alpha: 0),
                           width: 2,
                         ),
                       ),
@@ -175,13 +175,13 @@ class MessageBubble extends StatelessWidget {
                               const SizedBox(width: 6),
                               Text(
                                 Formatters.timeOfDay(message.date),
-                                style: TextStyle(color: textColor.withOpacity(0.7), fontSize: 10),
+                                style: TextStyle(color: textColor.withValues(alpha: 0.7), fontSize: 10),
                               ),
                               if (message.simSlot != null) ...[
                                 const SizedBox(width: 6),
                                 Text(
                                   '·',
-                                  style: TextStyle(color: textColor.withOpacity(0.5), fontSize: 10),
+                                  style: TextStyle(color: textColor.withValues(alpha: 0.5), fontSize: 10),
                                 ),
                                 const SizedBox(width: 6),
                                 // Same per-slot colour as SimPicker, so which
@@ -200,7 +200,7 @@ class MessageBubble extends StatelessWidget {
                                 Text(
                                   'SIM ${message.simSlot! + 1}',
                                   style: TextStyle(
-                                    color: textColor.withOpacity(0.7),
+                                    color: textColor.withValues(alpha: 0.7),
                                     fontSize: 10,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -312,7 +312,7 @@ class _CopyOtpButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          border: Border.all(color: fg.withOpacity(0.4)),
+          border: Border.all(color: fg.withValues(alpha: 0.4)),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
@@ -397,18 +397,18 @@ class _SendStatusIndicator extends StatelessWidget {
           child: SizedBox(
             width: 10,
             height: 10,
-            child: CircularProgressIndicator(strokeWidth: 1.5, color: textColor.withOpacity(0.7)),
+            child: CircularProgressIndicator(strokeWidth: 1.5, color: textColor.withValues(alpha: 0.7)),
           ),
         );
       case OutgoingSendState.sent:
         return Tooltip(
           message: 'Sent',
-          child: Icon(Icons.done, size: 13, color: textColor.withOpacity(0.7)),
+          child: Icon(Icons.done, size: 13, color: textColor.withValues(alpha: 0.7)),
         );
       case OutgoingSendState.delivered:
         return Tooltip(
           message: 'Delivered',
-          child: Icon(Icons.done_all, size: 13, color: textColor.withOpacity(0.7)),
+          child: Icon(Icons.done_all, size: 13, color: textColor.withValues(alpha: 0.7)),
         );
       case OutgoingSendState.notDelivered:
         return Tooltip(

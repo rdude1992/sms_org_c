@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import '../providers/sms_provider.dart';
@@ -105,7 +105,7 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
                 width: 64,
                 height: 64,
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
+                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Icon(Icons.forum_outlined, size: 30, color: Theme.of(context).colorScheme.primary),

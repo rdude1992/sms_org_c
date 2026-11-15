@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../models/transaction.dart';
 import '../services/holdings_service.dart';
 import '../services/insights_service.dart';
@@ -90,7 +90,7 @@ class _AmcDetailScreenState extends State<AmcDetailScreen> {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            color: scheme.surfaceVariant.withOpacity(0.4),
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
             child: Row(
               children: [
                 Expanded(child: TotalStat(label: 'Invested', value: totalInvested, color: scheme.primary)),
@@ -222,7 +222,7 @@ class _HoldingSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Divider(color: scheme.outlineVariant.withOpacity(0.5)),
+          Divider(color: scheme.outlineVariant.withValues(alpha: 0.5)),
           const SizedBox(height: 8),
           CollapsibleSection(
             // A fund/folio can be renamed by an AMC and reappear under a new
@@ -244,7 +244,7 @@ class _HoldingSection extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: kLossColor.withOpacity(0.12),
+                      color: kLossColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(

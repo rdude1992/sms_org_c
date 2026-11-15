@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
@@ -311,7 +311,7 @@ class _TransactionListScreenState extends State<TransactionListScreen>
     final totalsHeader = Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      color: scheme.surfaceVariant.withOpacity(0.4),
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
       child: Row(
         children: [
           Expanded(
@@ -540,7 +540,7 @@ class _TransactionListView extends StatelessWidget {
                     onLongPress: selecting ? () => onToggleSelected(t.smsId) : null,
                     onSelectStart: () => onToggleSelected(t.smsId),
                   ),
-                  Divider(height: 1, thickness: 1, color: scheme.outlineVariant.withOpacity(0.4)),
+                  Divider(height: 1, thickness: 1, color: scheme.outlineVariant.withValues(alpha: 0.4)),
                 ],
               );
             },

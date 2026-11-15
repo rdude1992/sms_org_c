@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import '../../providers/collapsible_sections_provider.dart';
 
@@ -10,7 +10,7 @@ import '../../providers/collapsible_sections_provider.dart';
 /// of state.
 ///
 /// [prefKey] must be a stable, globally-unique string (e.g.
-/// "insights.by_merchant", "amc_holding.<holding.key>") — collapsed state
+/// "insights.by_merchant", `"amc_holding.<holding.key>"`) — collapsed state
 /// persists across app restarts via [CollapsibleSectionsProvider], keyed on
 /// this string rather than the section's position, so adding/reordering/
 /// removing sections elsewhere never shuffles a saved state onto the wrong
@@ -61,7 +61,7 @@ class CollapsibleSection extends StatelessWidget {
                 ),
               ),
             ),
-            if (trailing != null) trailing!,
+            ?trailing,
           ],
         ),
         AnimatedSize(
