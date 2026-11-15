@@ -757,7 +757,11 @@ class _TotalsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    // Same height for both cards, whichever has more lines (the Spent card's
+    // footnote, a trend badge on only one side).
+    return IntrinsicHeight(
+      child: Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
           child: _TotalCard(
@@ -786,12 +790,13 @@ class _TotalsRow extends StatelessWidget {
             // For spend, going up is bad.
             increaseIsGood: false,
             footnote: (summary.totalDebit - summary.totalSpend).abs() >= 1
-                ? 'Debited ${Formatters.currency(summary.totalDebit)} incl. card bills, transfers & investments'
+                ? 'of ${Formatters.currency(summary.totalDebit)} debited'
                 : null,
             onTap: () => onTapDirection(TxnDirection.debit),
           ),
         ),
       ],
+      ),
     );
   }
 }
@@ -851,6 +856,8 @@ class _TotalCard extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(
                   footnote!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ],
