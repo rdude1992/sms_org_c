@@ -8,6 +8,7 @@ import '../models/sim_info.dart';
 import '../models/sms_message.dart';
 import '../models/transaction.dart';
 import '../services/backup_service.dart';
+import '../services/budget_service.dart';
 import '../services/categorization_service.dart';
 import '../services/contact_service.dart';
 import '../services/database_service.dart';
@@ -16,6 +17,7 @@ import '../services/investment_dedup_service.dart';
 import '../services/sms_platform_service.dart';
 import '../services/spend_category_detector.dart';
 import '../services/transaction_parser_service.dart';
+import '../utils/formatters.dart';
 
 enum LoadState { idle, loading, ready, error }
 
@@ -250,9 +252,16 @@ class SmsProvider extends ChangeNotifier {
 
   @override
   void notifyListeners() {
+    _invalidateDerived();
+    super.notifyListeners();
+  }
+
+  /// Drops caches derived from transactions/investments. Called on every
+  /// notify, and directly wherever data changes before the notify (refresh
+  /// checks budget alerts in between).
+  void _invalidateDerived() {
     _summaryCache.clear();
     _dedupedInvestments = null;
-    super.notifyListeners();
   }
 
   InsightsSummary insightsSummary({
@@ -312,6 +321,7 @@ class SmsProvider extends ChangeNotifier {
     // pass below.
     _merchantCategoryRules = await _db.loadMerchantCategoryRules();
     _merchantNameRules = await _db.loadMerchantNameRules();
+    _budgets = await _db.loadBudgets();
     await refresh();
     await _backfillSpendCategories();
     await _applyMerchantRulesToUncategorised();
@@ -346,6 +356,78 @@ class SmsProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_inboxViewPrefKey, view.name);
+  }
+
+  // ---- Budgets ----
+
+  Map<SpendCategory, double> _budgets = {};
+
+  /// Monthly limit per spend category.
+  Map<SpendCategory, double> get budgets => Map.unmodifiable(_budgets);
+
+  Future<void> setBudget(SpendCategory category, double monthlyLimit) async {
+    _budgets = {..._budgets, category: monthlyLimit};
+    notifyListeners();
+    await _db.saveBudget(category, monthlyLimit);
+    // You're looking at the bar right now: record thresholds already
+    // crossed as seen instead of notifying about them.
+    await _checkBudgetAlerts(notify: false);
+  }
+
+  Future<void> removeBudget(SpendCategory category) async {
+    _budgets = Map.of(_budgets)..remove(category);
+    notifyListeners();
+    await _db.deleteBudget(category);
+  }
+
+  /// This calendar month's progress for every budget, most-used first.
+  /// Uses the same de-duplicated, debit-only per-category totals as the
+  /// Insights spend breakdown.
+  List<BudgetStatus> currentBudgetStatuses({DateTime? now}) {
+    if (_budgets.isEmpty) return const [];
+    final n = now ?? DateTime.now();
+    final summary = insightsSummary(from: DateTime(n.year, n.month), to: n);
+    final spent = <SpendCategory, double>{
+      for (final c in summary.byCategory)
+        if (c.category != null) c.category!: c.totalDebit,
+    };
+    return budgetStatuses(_budgets, spent);
+  }
+
+  /// Posts one notification per budget per threshold per month (80%, then
+  /// 100%). Runs after each sync, so alerts arrive when the app syncs
+  /// (opened, or running in the background), since spend categories are
+  /// assigned in Dart.
+  Future<void> _checkBudgetAlerts({bool notify = true}) async {
+    if (_budgets.isEmpty) return;
+    final now = DateTime.now();
+    final month = '${now.year}${now.month.toString().padLeft(2, '0')}';
+    final prefs = await SharedPreferences.getInstance();
+    for (final status in currentBudgetStatuses(now: now)) {
+      String key(int t) => 'budget_alerted_${month}_${status.category.name}_$t';
+      final alerted = {
+        for (final t in kBudgetAlertThresholds)
+          if (prefs.getBool(key(t)) ?? false) t,
+      };
+      final threshold = thresholdToAlert(status, alerted);
+      if (threshold == null) continue;
+      // Mark this and every lower threshold, so a later sync doesn't send
+      // the 80% alert after the 100% one.
+      for (final t in kBudgetAlertThresholds) {
+        if (t <= threshold) await prefs.setBool(key(t), true);
+      }
+      if (!notify) continue;
+      final label = status.category.label;
+      try {
+        await _platform.postAppNotification(
+          tag: 'budget_${status.category.name}',
+          title: threshold >= 100 ? '$label budget exceeded' : '$label budget ${status.percent}% used',
+          body: '${Formatters.currency(status.spent)} of ${Formatters.currency(status.limit)} spent this month.',
+        );
+      } catch (_) {
+        // Best effort: a failed alert must never break a sync.
+      }
+    }
   }
 
   Future<void> _loadPinnedAndStarred() async {
@@ -729,6 +811,8 @@ class SmsProvider extends ChangeNotifier {
       await _prunePinnedAndStarred(rawIds);
       state = LoadState.ready;
       error = null;
+      _invalidateDerived();
+      await _checkBudgetAlerts();
     } catch (e) {
       state = LoadState.error;
       error = e.toString();

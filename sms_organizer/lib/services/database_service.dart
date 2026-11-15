@@ -27,7 +27,7 @@ class DatabaseService {
     final path = p.join(dbPath, 'sms_organizer.db');
     return openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE message_categories (
@@ -91,6 +91,7 @@ class DatabaseService {
             corrected_merchant TEXT NOT NULL
           )
         ''');
+        await db.execute(_createBudgetsTable);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -178,6 +179,11 @@ class DatabaseService {
               corrected_merchant TEXT NOT NULL
             )
           ''');
+        }
+        if (oldVersion < 10) {
+          // Monthly spend limits per SpendCategory (see SmsProvider budgets).
+          // User-set data, so never touched by clearAll.
+          await db.execute(_createBudgetsTable);
         }
       },
     );
@@ -401,6 +407,37 @@ class DatabaseService {
   /// SmsProvider._rememberMerchantCategory for how a rule gets learned and
   /// SmsProvider._applyMerchantRulesToUncategorised for how it then spreads
   /// to every other still-uncategorised transaction from that merchant.
+  static const _createBudgetsTable = '''
+    CREATE TABLE IF NOT EXISTS budgets (
+      spend_category TEXT PRIMARY KEY,
+      monthly_limit REAL NOT NULL
+    )
+  ''';
+
+  Future<Map<SpendCategory, double>> loadBudgets() async {
+    final db = await database;
+    final rows = await db.query('budgets');
+    return {
+      for (final row in rows)
+        for (final c in SpendCategory.values.where((c) => c.name == row['spend_category']))
+          c: (row['monthly_limit'] as num).toDouble(),
+    };
+  }
+
+  Future<void> saveBudget(SpendCategory category, double monthlyLimit) async {
+    final db = await database;
+    await db.insert(
+      'budgets',
+      {'spend_category': category.name, 'monthly_limit': monthlyLimit},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> deleteBudget(SpendCategory category) async {
+    final db = await database;
+    await db.delete('budgets', where: 'spend_category = ?', whereArgs: [category.name]);
+  }
+
   Future<Map<String, SpendCategory>> loadMerchantCategoryRules() async {
     final db = await database;
     final rows = await db.query('merchant_category_rules');

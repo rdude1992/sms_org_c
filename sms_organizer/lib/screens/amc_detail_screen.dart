@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
 import '../services/holdings_service.dart';
+import '../utils/xirr.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/ui/collapsible_section.dart';
@@ -314,6 +315,19 @@ class _HoldingSection extends StatelessWidget {
                 // like this — see holdings_service.dart's valueAsOf — so
                 // show where that figure came from rather than leaving it
                 // looking like a plain units×NAV estimate.
+                if (holding.isNavStale)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      'NAV is over 30 days old, so the value may be out of date.',
+                      style: const TextStyle(fontSize: 12, color: Color(0xFFF59E0B)),
+                    ),
+                  ),
+                if (holding.xirrAsOf(DateTime.now()) case final r?)
+                  Text(
+                    'Annualised return (XIRR): ${formatXirr(r)}',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: r >= 0 ? kGainColor : kLossColor),
+                  ),
                 if (holding.latestValuation != null)
                   Text(
                     'Confirmed value ${Formatters.currency(holding.latestValuation!.value)} '

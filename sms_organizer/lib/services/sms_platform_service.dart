@@ -107,6 +107,12 @@ class SmsPlatformService {
     await _methodChannel.invokeMethod('setMutedCategories', {'categories': categories.toList()});
   }
 
+  /// Posts a non-SMS app notification (e.g. a budget alert). [tag]
+  /// identifies it: posting the same tag again replaces the earlier one.
+  Future<void> postAppNotification({required String tag, required String title, required String body}) async {
+    await _methodChannel.invokeMethod('postAppNotification', {'tag': tag, 'title': title, 'body': body});
+  }
+
   /// Per-conversation mutes as thread id -> muted-until. Expired entries are
   /// already filtered out natively. "Always" comes back as a far-future date.
   Future<Map<int, DateTime>> getThreadMutes() async {

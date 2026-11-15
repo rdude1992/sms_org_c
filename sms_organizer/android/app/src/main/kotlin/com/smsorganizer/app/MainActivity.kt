@@ -114,6 +114,15 @@ class MainActivity : FlutterFragmentActivity() {
                     NotificationChannels.syncMuteState(this)
                     result.success(null)
                 }
+                "postAppNotification" -> {
+                    AppNotifier.post(
+                        this,
+                        call.argument<String>("tag") ?: "app",
+                        call.argument<String>("title") ?: "",
+                        call.argument<String>("body") ?: ""
+                    )
+                    result.success(null)
+                }
                 "getThreadMutes" ->
                     // Keys as strings: the codec has no Long-keyed map guarantee.
                     result.success(
