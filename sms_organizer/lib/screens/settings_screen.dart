@@ -8,8 +8,10 @@ import '../providers/notification_settings_provider.dart';
 import '../providers/security_settings_provider.dart';
 import '../providers/sms_provider.dart';
 import '../providers/theme_provider.dart';
+import '../services/otp_retention.dart';
 import '../services/sms_platform_service.dart';
 import '../theme/app_colors.dart';
+import '../utils/formatters.dart';
 import '../widgets/ui/grouped_card.dart';
 import 'uncategorised_review_screen.dart';
 
@@ -196,6 +198,21 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                 onTap: () => _confirmRecalculate(context),
               ),
               ListTile(
+                leading: const Icon(Icons.auto_delete_outlined),
+                title: const Text('Delete old OTPs'),
+                enabled: smsProvider.isDefaultSmsApp,
+                subtitle: Text(
+                  !smsProvider.isDefaultSmsApp
+                      ? 'Needs SmartSMS to be the default SMS app: Android only lets the default app delete messages.'
+                      : smsProvider.otpRetentionDays == 0
+                          ? 'Off'
+                          : 'Older than ${_retentionLabel(smsProvider.otpRetentionDays)}'
+                              '${smsProvider.lastOtpSweep == null ? '' : ' · last cleanup ${Formatters.dayMonth(smsProvider.lastOtpSweep!)}: '
+                                  '${smsProvider.lastOtpSweepCount} deleted'}',
+                ),
+                onTap: () => _chooseOtpRetention(context),
+              ),
+              ListTile(
                 leading: const Icon(Icons.label_off_outlined),
                 title: const Text('Review uncategorised transactions'),
                 subtitle: Text(
@@ -380,6 +397,65 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   /// (risking duplicates if the backup came from this same device) or wipe
   /// the store first and replace it entirely, with a second, explicit
   /// confirmation before anything destructive happens.
+  static String _retentionLabel(int days) => days == 1 ? '1 day' : '$days days';
+
+  /// Picks an OTP retention window. Turning it on (or shortening it) first
+  /// shows how many messages that deletes right now.
+  Future<void> _chooseOtpRetention(BuildContext context) async {
+    final provider = context.read<SmsProvider>();
+    final picked = await showDialog<int>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Delete OTPs older than'),
+        children: [
+          for (final days in kOtpRetentionChoices)
+            ListTile(
+              title: Text(days == 0 ? 'Off (keep all)' : _retentionLabel(days)),
+              trailing: provider.otpRetentionDays == days ? const Icon(Icons.check) : null,
+              onTap: () => Navigator.pop(ctx, days),
+            ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 8, 24, 0),
+            child: Text(
+              'Only messages detected as OTPs. Starred messages, ones you re-categorised '
+              'yourself, and anything you sent are never deleted.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (picked == null || picked == provider.otpRetentionDays || !context.mounted) return;
+
+    if (picked > 0) {
+      final count = provider.otpsDeletableWith(picked);
+      if (count > 0) {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Delete old OTPs?'),
+            content: Text(
+              'This permanently deletes $count OTP message${count == 1 ? '' : 's'} older than '
+              '${_retentionLabel(picked)} now, then keeps cleaning up once a day.',
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+            ],
+          ),
+        );
+        if (ok != true || !context.mounted) return;
+      }
+    }
+    final deleted = await provider.setOtpRetentionDays(picked);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(picked == 0
+          ? 'OTP auto-delete is off.'
+          : 'Deleted $deleted old OTP${deleted == 1 ? '' : 's'}.'),
+    ));
+  }
+
   Future<void> _restoreToDeviceStore(BuildContext context) async {
     final provider = context.read<SmsProvider>();
 
