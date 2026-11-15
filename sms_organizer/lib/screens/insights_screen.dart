@@ -757,7 +757,11 @@ class _TotalsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    // Same height for both cards, whichever has more lines (the Spent card's
+    // trend badge on only one side).
+    return IntrinsicHeight(
+      child: Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
           child: _TotalCard(
@@ -785,13 +789,13 @@ class _TotalsRow extends StatelessWidget {
             icon: Icons.arrow_upward,
             // For spend, going up is bad.
             increaseIsGood: false,
-            footnote: (summary.totalDebit - summary.totalSpend).abs() >= 1
-                ? 'Debited ${Formatters.currency(summary.totalDebit)} incl. card bills, transfers & investments'
-                : null,
+            info: 'Spent leaves out card-bill payments, transfers between your own accounts '
+                'and investments. Total debited: ${Formatters.currency(summary.totalDebit)}.',
             onTap: () => onTapDirection(TxnDirection.debit),
           ),
         ),
       ],
+      ),
     );
   }
 }
@@ -804,7 +808,8 @@ class _TotalCard extends StatelessWidget {
   final IconData icon;
   final bool increaseIsGood;
   final VoidCallback onTap;
-  final String? footnote;
+  /// Shown in a tooltip from an ⓘ next to the label (tap or long-press).
+  final String? info;
 
   const _TotalCard({
     required this.label,
@@ -814,7 +819,7 @@ class _TotalCard extends StatelessWidget {
     required this.icon,
     required this.increaseIsGood,
     required this.onTap,
-    this.footnote,
+    this.info,
   });
 
   @override
@@ -836,6 +841,19 @@ class _TotalCard extends StatelessWidget {
                     label,
                     style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13),
                   ),
+                  if (info != null) ...[
+                    const SizedBox(width: 4),
+                    Tooltip(
+                      message: info!,
+                      triggerMode: TooltipTriggerMode.tap,
+                      showDuration: const Duration(seconds: 6),
+                      child: Icon(
+                        Icons.info_outline,
+                        size: 15,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: 10),
@@ -847,13 +865,7 @@ class _TotalCard extends StatelessWidget {
                 const SizedBox(height: 6),
                 _TrendBadge(current: value, previous: previousValue!, increaseIsGood: increaseIsGood),
               ],
-              if (footnote != null) ...[
-                const SizedBox(height: 6),
-                Text(
-                  footnote!,
-                  style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                ),
-              ],
+
             ],
           ),
         ),

@@ -1,7 +1,7 @@
 name: sms_organizer
 description: SmartSMS — smart SMS organiser with categorisation, expense & investment insights.
 publish_to: 'none'
-version: 2.2.0
+version: 2.2.1
 
 environment:
   sdk: ^3.13.0
