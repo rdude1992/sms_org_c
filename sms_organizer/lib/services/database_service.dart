@@ -4,7 +4,6 @@ import 'package:path/path.dart' as p;
 // below — hidden since this file never references sqflite's directly.
 import 'package:sqflite/sqflite.dart' hide Transaction;
 import '../models/category.dart';
-import '../models/sms_message.dart';
 import '../models/transaction.dart';
 
 /// Local cache layer. The Android SMS provider (content://sms) remains the

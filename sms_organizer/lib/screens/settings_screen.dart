@@ -329,7 +329,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true || !context.mounted) return;
 
     final provider = context.read<SmsProvider>();
     await provider.recalculateAll();
