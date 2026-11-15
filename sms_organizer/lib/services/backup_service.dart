@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/sms_message.dart';
@@ -34,11 +36,32 @@ class BackupService {
       'investments': investments.map((i) => i.toJson()).toList(),
     };
 
-    final dir = await getApplicationDocumentsDirectory();
+    // Written to the temp dir, not app documents: the file holds every SMS
+    // body (OTPs, bank alerts) in plain text and only needs to live long
+    // enough for the share sheet's target app to read it. Older exports are
+    // removed on each new one, so copies don't pile up.
+    final dir = await getTemporaryDirectory();
+    await _deleteOldBackups(dir);
+    // Exports from older versions were left in the documents dir forever.
+    await _deleteOldBackups(await getApplicationDocumentsDirectory());
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final file = File(p_join(dir.path, 'sms_organizer_backup_$timestamp.json'));
+    final file = File(p.join(dir.path, '$_filePrefix$timestamp.json'));
     await file.writeAsString(jsonEncode(payload));
     return file;
+  }
+
+  static const _filePrefix = 'sms_organizer_backup_';
+
+  Future<void> _deleteOldBackups(Directory dir) async {
+    try {
+      await for (final entity in dir.list()) {
+        if (entity is File && p.basename(entity.path).startsWith(_filePrefix)) {
+          await entity.delete();
+        }
+      }
+    } on FileSystemException {
+      // Best-effort cleanup; never block an export on it.
+    }
   }
 
   Future<void> exportAndShare({
@@ -58,22 +81,38 @@ class BackupService {
 
   Future<BackupBundle> restoreFromFile(File file) async {
     final content = await file.readAsString();
-    final json = jsonDecode(content) as Map<String, dynamic>;
+    // Large backups (tens of thousands of messages) take noticeable time to
+    // decode, so this runs off the UI isolate.
+    return Isolate.run(() => _decodeBundle(content));
+  }
+}
 
-    final messages = (json['messages'] as List<dynamic>? ?? [])
-        .map((e) => SmsMessage.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList();
-    final transactions = (json['transactions'] as List<dynamic>? ?? [])
-        .map((e) => Transaction.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList();
-    final investments = (json['investments'] as List<dynamic>? ?? [])
-        .map((e) => InvestmentEvent.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList();
-
-    return BackupBundle(messages: messages, transactions: transactions, investments: investments);
+/// Top-level so the isolate closure captures nothing but [content].
+BackupBundle _decodeBundle(String content) {
+  final decoded = jsonDecode(content);
+  if (decoded is! Map<String, dynamic> || decoded['messages'] is! List) {
+    throw const FormatException('Not a SmartSMS backup file.');
+  }
+  final json = decoded;
+  final version = json['formatVersion'];
+  // Absent in the earliest exports, which were all format 1.
+  if (version != null && (version is! int || version > BackupService._formatVersion)) {
+    throw FormatException(
+      'Unsupported backup format version $version. Update SmartSMS to restore this backup.',
+    );
   }
 
-  String p_join(String a, String b) => a.endsWith('/') ? '$a$b' : '$a/$b';
+  final messages = (json['messages'] as List<dynamic>? ?? [])
+      .map((e) => SmsMessage.fromJson(Map<String, dynamic>.from(e as Map)))
+      .toList();
+  final transactions = (json['transactions'] as List<dynamic>? ?? [])
+      .map((e) => Transaction.fromJson(Map<String, dynamic>.from(e as Map)))
+      .toList();
+  final investments = (json['investments'] as List<dynamic>? ?? [])
+      .map((e) => InvestmentEvent.fromJson(Map<String, dynamic>.from(e as Map)))
+      .toList();
+
+  return BackupBundle(messages: messages, transactions: transactions, investments: investments);
 }
 
 class BackupBundle {

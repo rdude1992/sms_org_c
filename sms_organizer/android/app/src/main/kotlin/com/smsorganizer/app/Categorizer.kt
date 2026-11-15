@@ -23,18 +23,42 @@ object Categorizer {
 
     private val amountRegex = Regex("(?:rs\\.?|inr|₹)\\s*[\\d,]+(?:\\.\\d{1,2})?", RegexOption.IGNORE_CASE)
     private val suffixRegex = Regex("-([PSTG])$", RegexOption.IGNORE_CASE)
-    private val otpIsYourOtpRegex = Regex("is your otp", RegexOption.IGNORE_CASE)
     private val digitCodeRegex = Regex("\\b\\d{4,8}\\b")
     private val willBeDebitedCreditedRegex = Regex("will\\s+be\\s+(?:debited|credited)", RegexOption.IGNORE_CASE)
     private val scheduledRegex = Regex("scheduled", RegexOption.IGNORE_CASE)
     private val initiatedRegex = Regex("initiated", RegexOption.IGNORE_CASE)
-    private val cardEndingRegex = Regex("card.*(?:ending|xxxx|xx\\d{4})", RegexOption.IGNORE_CASE)
-    // 'nfo' (New Fund Offer) as a bare substring also matches inside the
-    // ordinary word "info"/"Info:" — a field label many routine bank
-    // debit/credit alerts use (e.g. "Info: ACH D-..."). Word-bounded so it
-    // only matches the standalone "NFO" abbreviation — mirrors the fix in
-    // lib/services/categorization_service.dart's isPromotion check.
     private val nfoWordRegex = Regex("\\bnfo\\b", RegexOption.IGNORE_CASE)
+    private val pendingRequestRegex =
+        Regex("has\\s+requested\\s+(?:Rs\\.?|INR|₹|money)", RegexOption.IGNORE_CASE)
+
+    // Mirrors CategorizationService._otpWarning / _explicitOtp / _moneyMoved /
+    // _strongBankAlert / _paymentReceived — see the Dart side for rationale.
+    private val otpWarningRegex = Regex(
+        "\\b(?:never|do\\s+not|don'?t|pls\\s+do\\s+not|please\\s+do\\s+not)\\s+(?:share|disclose|tell|give)\\b[^.!\\n]*"
+    )
+    private val explicitOtpRegex = Regex(
+        "\\b(?:otp|one time password|verification code|passcode)\\b[^.]{0,40}?\\b\\d{4,8}\\b" +
+            "|\\b\\d{4,8}\\b[^.]{0,30}?\\b(?:otp|one time password|verification code)\\b"
+    )
+    private val moneyMovedRegex =
+        Regex("\\b(?:debited|credited|spent|withdrawn|paid|sent|received|transferred)\\b")
+    private val strongBankAlertRegex = Regex("\\b(?:debited|credited)\\b")
+    private val paymentReceivedRegex =
+        Regex("(?:payment|amount)[^.]{0,60}\\b(?:received|credited)\\b|received\\s+towards")
+    private val phonePrefixRegex = Regex("^\\+?91")
+    private val nonDigitRegex = Regex("\\D")
+    private val tenDigitsRegex = Regex("^\\d{10}$")
+
+    // Mirrors CategorizationService._boundaryKeywords.
+    private val boundaryKeywords: Map<String, Regex> =
+        listOf(
+            "win", "bus", "sip", "nav", "train", "order", "free", "deal", "sale",
+            "data", "cab", "ride", "grab", "limit", "points", "card", "units"
+        ).associateWith { Regex("\\b$it(?:s|es)?\\b") } +
+            ("ack" to Regex("\\back(?:nowledg\\w*)?\\b"))
+
+    private fun hasKeyword(lower: String, kw: String): Boolean =
+        boundaryKeywords[kw]?.containsMatchIn(lower) ?: lower.contains(kw)
 
     private val otpKeywords = listOf(
         "otp", "verification code", "verify", "code is", "passcode", "pin is",
@@ -69,12 +93,34 @@ object Categorizer {
         "bill generated", "invoice", "due date", "statement", "plan expire"
     )
 
+    fun isPhoneNumberAddress(sender: String): Boolean =
+        tenDigitsRegex.matches(sender.replaceFirst(phonePrefixRegex, "").replace(nonDigitRegex, ""))
+
     fun categorize(sender: String, content: String): Category {
         val contentLower = content.lowercase()
         val senderLower = sender.lowercase()
         val senderUpper = sender.uppercase()
 
-        // 0. Updates/Notifications (highest priority).
+        val otpScan = contentLower.replace(otpWarningRegex, " ")
+        val hasOtpKeyword = otpKeywords.any { otpScan.contains(it) }
+        val hasDigitCode = digitCodeRegex.containsMatchIn(otpScan)
+        val hasAmount = amountRegex.containsMatchIn(content)
+        val isOtp = otpScan.contains("is your otp") ||
+            explicitOtpRegex.containsMatchIn(otpScan) ||
+            (hasOtpKeyword && hasDigitCode && !(hasAmount && moneyMovedRegex.containsMatchIn(otpScan)))
+
+        if (isPhoneNumberAddress(sender) && !suffixRegex.containsMatchIn(sender)) {
+            if (isOtp) return Category.OTP
+            if (hasAmount && strongBankAlertRegex.containsMatchIn(contentLower) &&
+                (contentLower.contains("a/c") || contentLower.contains("account") || contentLower.contains("upi"))
+            ) {
+                return Category.TRANSACTIONAL
+            }
+            return Category.PERSONAL
+        }
+
+        val isPaymentReceived = paymentReceivedRegex.containsMatchIn(contentLower)
+
         if (contentLower.contains("view statement") ||
             contentLower.contains("account statement") ||
             contentLower.contains("a/c statement") ||
@@ -84,8 +130,8 @@ object Categorizer {
             (contentLower.contains("stmt") &&
                 (contentLower.contains("view") || contentLower.contains("click") || contentLower.contains("check"))) ||
             (contentLower.contains("redemption transaction") && contentLower.contains("processed")) ||
-            (contentLower.contains("due") &&
-                (contentLower.contains("debit") || contentLower.contains("payment") || contentLower.contains("sip"))) ||
+            (contentLower.contains("due") && !isPaymentReceived &&
+                (contentLower.contains("debit") || contentLower.contains("payment") || hasKeyword(contentLower, "sip"))) ||
             contentLower.contains("nomination") ||
             contentLower.contains("nominee") ||
             contentLower.contains("thank you for choosing")
@@ -113,8 +159,9 @@ object Categorizer {
             return Category.UPDATES
         }
 
-        val suffixMatch = suffixRegex.find(sender)
-        val suffixCategory: Category? = suffixMatch?.groupValues?.get(1)?.uppercase()?.let { suffix ->
+        if (contentLower.contains("reported your fund bal")) return Category.UPDATES
+
+        val suffixCategory: Category? = suffixRegex.find(sender)?.groupValues?.get(1)?.uppercase()?.let { suffix ->
             when (suffix) {
                 "P" -> Category.PROMOTIONAL
                 "S", "G" -> Category.UPDATES
@@ -123,21 +170,15 @@ object Categorizer {
             }
         }
 
-        // 1. OTP detection.
-        val hasOtpKeyword = otpKeywords.any { contentLower.contains(it) }
-        val hasDigitCode = digitCodeRegex.containsMatchIn(content)
-        if ((hasOtpKeyword && hasDigitCode) || otpIsYourOtpRegex.containsMatchIn(content)) {
-            return Category.OTP
-        }
+        if (isOtp) return Category.OTP
 
-        // 2. Transaction detection.
         val isPromotion = promoKeywords.any { kw ->
             when {
                 kw == "data" && contentLower.contains("data wallet") -> false
                 (kw == "recharge" || kw == "validity") &&
                     (contentLower.contains("fastag") || senderUpper.contains("FASTAG")) -> false
                 kw == "nfo" -> nfoWordRegex.containsMatchIn(content)
-                else -> contentLower.contains(kw)
+                else -> hasKeyword(contentLower, kw)
             }
         }
 
@@ -145,33 +186,32 @@ object Categorizer {
             scheduledRegex.containsMatchIn(contentLower) ||
             initiatedRegex.containsMatchIn(contentLower)
 
+        val isPendingPaymentRequest =
+            pendingRequestRegex.containsMatchIn(content) && contentLower.contains("from you")
+
         val isRequestNotification = (contentLower.contains("request") &&
             (contentLower.contains("receipt") || contentLower.contains("received") ||
                 contentLower.contains("recd") || contentLower.contains("cancel") || contentLower.contains("redemption"))) ||
             (contentLower.contains("feedback") && contentLower.contains("important")) ||
-            (contentLower.contains("ack") && contentLower.contains("receipt"))
-
-        val hasAmount = amountRegex.containsMatchIn(content)
+            (hasKeyword(contentLower, "ack") && contentLower.contains("receipt")) ||
+            isPendingPaymentRequest
 
         if (suffixCategory == Category.TRANSACTIONAL) return Category.TRANSACTIONAL
 
-        // EPFO passbook SMS ("... Contribution of Rs.X for due month
-        // Feb-26 has been received.") name the contribution's *due
-        // period*, not an unpaid bill — keep in sync with
-        // categorization_service.dart's isEpfoContribution.
         val isEpfoContribution = contentLower.contains("contribution") &&
             (contentLower.contains("epfo") || contentLower.contains("provident fund") ||
                 contentLower.contains("passbook balance"))
 
         if (hasAmount &&
-            (transactionKeywords.any { contentLower.contains(it) } ||
+            (transactionKeywords.any { hasKeyword(contentLower, it) } ||
                 bankSenders.any { senderLower.contains(it) } ||
                 content.contains("Pluxee", ignoreCase = true) ||
                 content.contains("FASTag", ignoreCase = true) ||
                 senderUpper.contains("FASTAG"))
         ) {
             val isBillNotification = (contentLower.contains("due") || contentLower.contains("bill")) &&
-                !contentLower.contains("paid") && !contentLower.contains("debited") && !isEpfoContribution
+                !contentLower.contains("paid") && !contentLower.contains("debited") &&
+                !isPaymentReceived && !isEpfoContribution
             val isMandateNotification = contentLower.contains("mandate registered") ||
                 (contentLower.contains("mandate") && contentLower.contains("creation"))
 
@@ -181,12 +221,12 @@ object Categorizer {
         }
 
         if (!isFutureTransaction && !isRequestNotification && !isPromotion) {
-            if (contentLower.contains("sip") &&
+            if (hasKeyword(contentLower, "sip") &&
                 (contentLower.contains("processed") || contentLower.contains("due") || contentLower.contains("installment"))
             ) {
                 return Category.TRANSACTIONAL
             }
-            if (contentLower.contains("units") &&
+            if (hasKeyword(contentLower, "units") &&
                 (contentLower.contains("nav") || contentLower.contains("allotted") || contentLower.contains("credited"))
             ) {
                 return Category.TRANSACTIONAL
@@ -197,22 +237,16 @@ object Categorizer {
 
         // 3. Updates.
         if (suffixCategory == Category.UPDATES) return Category.UPDATES
-        if (updateKeywords.any { contentLower.contains(it) }) return Category.UPDATES
+        if (updateKeywords.any { hasKeyword(contentLower, it) }) return Category.UPDATES
 
         // 4. Promotional.
         if (suffixCategory == Category.PROMOTIONAL) return Category.PROMOTIONAL
-        // Same 'nfo'-inside-"info" word-boundary fix as the isPromotion check
-        // above — a separate keyword scan, not a reuse of that result.
-        if (promoKeywords.any { kw -> if (kw == "nfo") nfoWordRegex.containsMatchIn(content) else contentLower.contains(kw) }) {
+        if (promoKeywords.any { kw -> if (kw == "nfo") nfoWordRegex.containsMatchIn(content) else hasKeyword(contentLower, kw) }) {
             return Category.PROMOTIONAL
         }
         if (contentLower.contains("unsubscribe") || contentLower.contains("opt-out") || contentLower.contains("t&c")) {
             return Category.PROMOTIONAL
         }
-
-        // Personal: only plain 10-digit senders.
-        val cleanedNumber = sender.replaceFirst(Regex("^\\+?91"), "").replace(Regex("\\D"), "")
-        if (Regex("^\\d{10}$").matches(cleanedNumber)) return Category.PERSONAL
 
         return Category.UPDATES
     }

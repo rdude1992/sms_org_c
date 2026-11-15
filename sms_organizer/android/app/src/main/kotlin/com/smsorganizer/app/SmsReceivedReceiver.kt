@@ -11,6 +11,9 @@ import android.provider.Telephony
  * so we don't insert anything — we just notify Flutter to refresh, if it's
  * running. This keeps the UI reasonably live even before the user grants
  * the default-app role.
+ *
+ * It does NOT post a notification: the actual default SMS app already does,
+ * and a second, near-identical one for every message is noise.
  */
 class SmsReceivedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -24,7 +27,7 @@ class SmsReceivedReceiver : BroadcastReceiver() {
         val timestamp = messages[0].timestampMillis
         val fullBody = messages.joinToString(separator = "") { it.messageBody ?: "" }
 
-        MainActivity.eventSink?.success(
+        MainActivity.emitEvent(
             mapOf(
                 "id" to -1L, // not our row id — Dart should re-sync to get the real one
                 "address" to address,
@@ -32,7 +35,5 @@ class SmsReceivedReceiver : BroadcastReceiver() {
                 "date" to timestamp
             )
         )
-
-        IncomingSmsNotifier.notify(context, address, fullBody)
     }
 }

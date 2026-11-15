@@ -35,11 +35,22 @@ class NotificationActionReceiver : BroadcastReceiver() {
         val threadId = intent.getLongExtra(EXTRA_THREAD_ID, -1L)
         if (threadId == -1L) return
 
-        when (intent.action) {
-            ACTION_REPLY -> handleReply(context, intent, threadId)
-            ACTION_MARK_READ -> handleMarkRead(context, threadId)
-            ACTION_COPY_OTP -> handleCopyOtp(context, intent)
-            ACTION_DELETE -> handleDelete(context, threadId)
+        if (intent.action == ACTION_COPY_OTP) {
+            // Clipboard writes are cheap and must not wait behind a queued send.
+            handleCopyOtp(context, intent)
+            return
+        }
+        // Reply/mark-read/delete hit the SMS provider (and the radio), so
+        // keep them off the main thread — see ReceiverAsync.kt.
+        val appContext = context.applicationContext
+        runAsync("NotificationAction") {
+            when (intent.action) {
+                ACTION_REPLY -> handleReply(appContext, intent, threadId)
+                ACTION_MARK_READ -> handleMarkRead(appContext, threadId)
+                ACTION_DELETE -> handleDelete(appContext, threadId)
+            }
+            // Keep a running app's list in sync with what the action changed.
+            MainActivity.emitEvent(mapOf("type" to "changed", "threadId" to threadId))
         }
     }
 
