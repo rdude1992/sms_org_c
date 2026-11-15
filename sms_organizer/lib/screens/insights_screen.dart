@@ -4,6 +4,7 @@ import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
+import '../widgets/budgets_card.dart';
 import '../widgets/spend_category_row.dart';
 import '../widgets/transaction_tile.dart';
 import '../widgets/ui/breakdown_donut.dart';
@@ -368,6 +369,26 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 const SizedBox(height: 16),
                                 _UpcomingBillsCard(bills: upcomingBills),
                               ],
+                              const SizedBox(height: 16),
+                              // Always this calendar month, whatever range is selected:
+                              // budgets are monthly.
+                              BudgetsCard(
+                                onOpenCategory: (category) {
+                                  final monthStart = DateTime(now.year, now.month);
+                                  _openDrilldown(
+                                    context,
+                                    title: category.label,
+                                    subtitle: 'This month',
+                                    transactions: provider.transactions
+                                        .where((t) =>
+                                            t.direction == TxnDirection.debit &&
+                                            t.spendCategory == category &&
+                                            !t.date.isBefore(monthStart))
+                                        .toList()
+                                      ..sort((a, b) => b.date.compareTo(a.date)),
+                                  );
+                                },
+                              ),
                               const SizedBox(height: 20),
                               // Recent transactions right after the summary, ahead of
                               // the detailed breakdowns below — "what happened lately"

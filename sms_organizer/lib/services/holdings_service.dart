@@ -1,4 +1,5 @@
 import '../models/transaction.dart';
+import '../utils/xirr.dart';
 import 'insights_service.dart' show TrendGranularity, bucketStartsBetween;
 
 /// A holding's state immediately after processing one of its cash-flow
@@ -91,6 +92,39 @@ class FundHolding {
   /// (cost basis) as a last resort — see [valueAsOf], which this is just
   /// evaluated as of now.
   double get estimatedValue => valueAsOf(DateTime.now());
+
+  /// Whether [estimatedValue] reflects a market value (units × NAV, a
+  /// provider value statement, or a full redemption) rather than just cost
+  /// basis. A return computed against cost basis is ~0% by construction and
+  /// would mislead, so returns are only shown when this is true.
+  bool get hasMarketValue =>
+      (unitsHeld > 0 && latestNav != null) ||
+      valuations.isNotEmpty ||
+      (unitsHeld <= 1e-6 && _unitsTracked && events.any((e) => e.kind.isRedemption));
+
+  /// The NAV is more than 30 days old, so the value estimate is stale.
+  bool get isNavStale {
+    final d = latestNavDate;
+    return d != null && unitsHeld > 0 && DateTime.now().difference(d).inDays > 30;
+  }
+
+  /// Cash flows for [xirr]: buys negative, redemptions positive, plus
+  /// today's estimated value as the final positive flow.
+  List<(DateTime, double)> cashFlows(DateTime asOf) => [
+        for (final e in events)
+          if (!e.kind.isValuationOnly && !e.date.isAfter(asOf))
+            (e.date, e.kind.isRedemption ? e.amount : -e.amount),
+        if (valueAsOf(asOf) > 0) (asOf, valueAsOf(asOf)),
+      ];
+
+  /// Annualised return, or null when it would mislead: under 30 days of
+  /// history, or only a cost-basis value (see [hasMarketValue]).
+  double? xirrAsOf(DateTime asOf) {
+    if (!hasMarketValue || events.isEmpty) return null;
+    final first = events.map((e) => e.date).reduce((a, b) => a.isBefore(b) ? a : b);
+    if (asOf.difference(first).inDays < 30) return null;
+    return xirr(cashFlows(asOf));
+  }
 
   double get estimatedGain => estimatedValue - netInvested;
   double? get estimatedGainPct => netInvested <= 0 ? null : (estimatedGain / netInvested) * 100;
@@ -359,4 +393,58 @@ SipInfo? detectSip(FundHolding holding) {
     installments: sorted.length,
     lastInstallment: sorted.last.date,
   );
+}
+
+/// Portfolio-wide annualised return across [holdings] that have a market
+/// value (see [FundHolding.hasMarketValue]); null if there are none or the
+/// combined history is under 30 days.
+double? portfolioXirr(List<FundHolding> holdings, {DateTime? asOf}) {
+  final now = asOf ?? DateTime.now();
+  final valued = holdings.where((h) => h.hasMarketValue && h.events.isNotEmpty).toList();
+  if (valued.isEmpty) return null;
+  final first = valued
+      .expand((h) => h.events)
+      .map((e) => e.date)
+      .reduce((a, b) => a.isBefore(b) ? a : b);
+  if (now.difference(first).inDays < 30) return null;
+  return xirr([for (final h in valued) ...h.cashFlows(now)]);
+}
+
+/// Broad asset classes for the allocation donut.
+enum AssetClass { mutualFunds, stocks, nps, ppfSsy, other }
+
+extension AssetClassX on AssetClass {
+  String get label => switch (this) {
+        AssetClass.mutualFunds => 'Mutual funds',
+        AssetClass.stocks => 'Stocks',
+        AssetClass.nps => 'NPS',
+        AssetClass.ppfSsy => 'PPF / SSY',
+        AssetClass.other => 'Other',
+      };
+}
+
+/// Classifies a holding from its event kinds and provider/scheme names.
+/// Name keywords win over kinds: NPS contributions are parsed as purchases.
+AssetClass assetClassOf(FundHolding h) {
+  final name = '${h.amc} ${h.fundOrScheme ?? ''}'.toLowerCase();
+  if (RegExp(r'\b(nps|protean|pension|pfrda|tier[ -]?i)\b').hasMatch(name)) return AssetClass.nps;
+  if (RegExp(r'\b(ppf|sukanya|ssy|public provident)\b').hasMatch(name)) return AssetClass.ppfSsy;
+  if (h.events.any((e) => e.kind == InvestmentKind.stockTrade)) return AssetClass.stocks;
+  if (h.events.any((e) => e.kind == InvestmentKind.mutualFundSip ||
+      e.kind == InvestmentKind.mutualFundPurchase ||
+      e.kind == InvestmentKind.mutualFundRedemption)) {
+    return AssetClass.mutualFunds;
+  }
+  return AssetClass.other;
+}
+
+/// Current estimated value per asset class, largest first, zero classes omitted.
+List<(AssetClass, double)> allocationByClass(List<FundHolding> holdings) {
+  final totals = <AssetClass, double>{};
+  for (final h in holdings) {
+    final v = h.estimatedValue;
+    if (v <= 0) continue;
+    totals[assetClassOf(h)] = (totals[assetClassOf(h)] ?? 0) + v;
+  }
+  return [for (final e in totals.entries) (e.key, e.value)]..sort((a, b) => b.$2.compareTo(a.$2));
 }

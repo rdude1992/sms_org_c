@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
 import '../services/holdings_service.dart';
+import '../utils/xirr.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/category_picker_sheet.dart';
@@ -872,6 +873,8 @@ class _AmcAnalytics extends StatelessWidget {
     final totalGain = totalValue - totalInvested;
     final totalGainPct = totalInvested <= 0 ? null : (totalGain / totalInvested) * 100;
     final valueTrend = buildValueTrend(holdings, range.trendGranularity, from, to);
+    final portfolioReturn = portfolioXirr(holdings);
+    final allocation = allocationByClass(holdings);
 
     String valueAxisLabel(DateTime date) {
       switch (range.trendGranularity) {
@@ -949,6 +952,36 @@ class _AmcAnalytics extends StatelessWidget {
         child:
             Text(kInvestmentEstimateNote, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
       ),
+      if (portfolioReturn != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Text(
+            'Annualised return (XIRR): ${formatXirr(portfolioReturn)}',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: portfolioReturn >= 0 ? kGainColor : kLossColor,
+            ),
+          ),
+        ),
+      if (allocation.length >= 2) ...[
+        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text('Allocation', style: Theme.of(context).textTheme.titleSmall),
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: BreakdownDonut(
+            labels: [for (final a in allocation) a.$1.label],
+            keys: [for (final a in allocation) a.$1.name],
+            values: [for (final a in allocation) a.$2],
+            onTapKey: (_) {},
+            centerLabel: 'est. value',
+          ),
+        ),
+      ],
       const SizedBox(height: 10),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
