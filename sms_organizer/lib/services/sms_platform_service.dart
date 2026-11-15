@@ -107,6 +107,33 @@ class SmsPlatformService {
     await _methodChannel.invokeMethod('setMutedCategories', {'categories': categories.toList()});
   }
 
+  /// Per-conversation mutes as thread id -> muted-until. Expired entries are
+  /// already filtered out natively. "Always" comes back as a far-future date.
+  Future<Map<int, DateTime>> getThreadMutes() async {
+    final raw = await _methodChannel.invokeMethod<Map<dynamic, dynamic>>('getThreadMutes');
+    final result = <int, DateTime>{};
+    raw?.forEach((k, v) {
+      final id = int.tryParse(k.toString());
+      if (id == null || v is! int) return;
+      // "Always" is Long.MAX_VALUE natively, beyond DateTime's range
+      // (±8.64e15 ms), so clamp it to the latest representable instant.
+      const maxMillis = 8640000000000000;
+      result[id] = DateTime.fromMillisecondsSinceEpoch(v > maxMillis ? maxMillis : v);
+    });
+    return result;
+  }
+
+  /// Silences notifications for [threadId] until [until] (they still appear
+  /// in the shade, without sound or a pop-up). [forever] mutes until undone;
+  /// passing neither unmutes.
+  Future<void> setThreadMute(int threadId, {DateTime? until, bool forever = false}) async {
+    await _methodChannel.invokeMethod('setThreadMute', {
+      'threadId': threadId,
+      // Long.MAX_VALUE natively means "always".
+      'until': forever ? 0x7FFFFFFFFFFFFFFF : until?.millisecondsSinceEpoch,
+    });
+  }
+
   /// The channel's real current importance as configured in Android system
   /// settings (which the user may have changed directly there, independent
   /// of this app's own mute toggle) — see [NotificationImportance].

@@ -28,6 +28,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         const val EXTRA_THREAD_ID = "thread_id"
         const val EXTRA_ADDRESS = "address"
         const val EXTRA_OTP_CODE = "otp_code"
+        const val EXTRA_SUBSCRIPTION_ID = "subscription_id"
         const val KEY_REPLY_TEXT = "key_reply_text"
     }
 
@@ -62,15 +63,17 @@ class NotificationActionReceiver : BroadcastReceiver() {
             ?.trim()
         if (replyText.isNullOrEmpty()) return
 
+        // Reply from the SIM that received the message, not the device default.
+        val subscriptionId = intent.getIntExtra(EXTRA_SUBSCRIPTION_ID, -1)
         try {
-            SmsRepository.sendSms(context, address, replyText)
+            SmsRepository.sendSms(context, address, replyText, subscriptionId.takeIf { it >= 0 })
         } catch (_: Exception) {
             // Sending failed (no signal, SmsManager error, etc.) — leave the
             // notification as-is rather than falsely showing the reply as
             // sent; the user can still open the app and retry from there.
             return
         }
-        IncomingSmsNotifier.notifyAfterReply(context, threadId, address, replyText)
+        IncomingSmsNotifier.notifyAfterReply(context, threadId, address, replyText, subscriptionId)
     }
 
     private fun handleMarkRead(context: Context, threadId: Long) {

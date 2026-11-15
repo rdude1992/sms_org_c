@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import '../models/category.dart';
 import '../models/sms_message.dart';
+import '../providers/notification_settings_provider.dart';
 import '../providers/sms_provider.dart';
 import '../utils/formatters.dart';
 import '../utils/search_snippet.dart';
@@ -344,6 +345,7 @@ class _ConversationListViewState extends State<_ConversationListView> {
             final conversation = conversations[index];
             final selected = provider.selectedIds.contains(conversation.latest.id);
             final pinned = provider.isPinned(conversation.threadId);
+            final muted = context.watch<NotificationSettingsProvider>().isThreadMuted(conversation.threadId);
             return ConversationTile(
               key: ValueKey(conversation.threadId),
               conversation: conversation,
@@ -351,6 +353,7 @@ class _ConversationListViewState extends State<_ConversationListView> {
               selected: selected,
               selectionMode: provider.isSelecting,
               pinned: pinned,
+              muted: muted,
               searchQuery: provider.chatSearchQuery,
               expanded: _expandedThreadIds.contains(conversation.threadId),
               onAvatarTap: () => _toggleExpanded(conversation.threadId),

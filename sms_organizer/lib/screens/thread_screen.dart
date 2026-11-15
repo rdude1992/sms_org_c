@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/category.dart';
 import '../models/sim_info.dart';
 import '../models/sms_message.dart';
+import '../providers/notification_settings_provider.dart';
 import '../providers/sms_provider.dart';
 import '../utils/address_utils.dart';
 import '../utils/formatters.dart';
@@ -93,10 +94,73 @@ class _ThreadScreenState extends State<ThreadScreen> {
     });
   }
 
-  void _initSelectedSim(List<SimInfo> sims) {
+  /// Defaults the reply SIM to the one the latest incoming message in this
+  /// thread arrived on, so replying to a message received on SIM 2 goes out
+  /// on SIM 2. Falls back to the first active SIM.
+  void _initSelectedSim(List<SimInfo> sims, List<SmsMessage> messages) {
     if (_simInitialized) return;
     _simInitialized = true;
-    if (sims.isNotEmpty) _selectedSubscriptionId = sims.first.subscriptionId;
+    if (sims.isEmpty) return;
+    int? slot;
+    for (final m in messages) {
+      if (m.isIncoming && m.simSlot != null) {
+        // `messages` is newest-first (SmsConversation sorts it that way).
+        slot = m.simSlot;
+        break;
+      }
+    }
+    final match = sims.where((s) => s.slotIndex == slot);
+    _selectedSubscriptionId = (match.isNotEmpty ? match.first : sims.first).subscriptionId;
+  }
+
+  Future<void> _showMuteSheet(BuildContext context, int threadId) async {
+    final settings = context.read<NotificationSettingsProvider>();
+    final until = settings.mutedUntil(threadId);
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+              child: Text(
+                until == null
+                    ? 'Mute notifications. New messages still arrive and show in the '
+                        'notification shade, just without sound or a pop-up.'
+                    : settings.isMutedForever(threadId)
+                        ? 'Muted until you unmute it.'
+                        : 'Muted until ${Formatters.muteUntil(until)}.',
+                style: Theme.of(ctx).textTheme.bodyMedium,
+              ),
+            ),
+            if (until != null)
+              ListTile(
+                leading: const Icon(Icons.notifications_active_outlined),
+                title: const Text('Unmute'),
+                onTap: () {
+                  settings.unmuteThread(threadId);
+                  Navigator.pop(ctx);
+                },
+              ),
+            for (final (label, duration) in const [
+              ('8 hours', Duration(hours: 8)),
+              ('1 week', Duration(days: 7)),
+              ('Always', null),
+            ])
+              ListTile(
+                leading: const Icon(Icons.notifications_off_outlined),
+                title: Text(label),
+                onTap: () {
+                  settings.muteThread(threadId, duration);
+                  Navigator.pop(ctx);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// Pre-fills the reply box from a saved draft the first time [provider]
@@ -288,7 +352,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
         final initialAlignment = highlightIndex != -1 ? 0.4 : 1.0;
 
         _scrollToHighlightIfNeeded(messages);
-        _initSelectedSim(provider.activeSims);
+        _initSelectedSim(provider.activeSims, conversation.messages);
 
         final visibleIds = messages.map((m) => m.id).toList();
         final allSelected = visibleIds.isNotEmpty && visibleIds.every(provider.selectedIds.contains);
@@ -381,6 +445,18 @@ class _ThreadScreenState extends State<ThreadScreen> {
                               tooltip: 'Call ${conversation.address}',
                               onPressed: () => _callNumber(context, conversation.address),
                             ),
+                          Builder(builder: (context) {
+                            final muted = context
+                                .watch<NotificationSettingsProvider>()
+                                .isThreadMuted(conversation.threadId);
+                            return IconButton(
+                              icon: Icon(muted
+                                  ? Icons.notifications_off
+                                  : Icons.notifications_none_outlined),
+                              tooltip: muted ? 'Muted' : 'Mute notifications',
+                              onPressed: () => _showMuteSheet(context, conversation.threadId),
+                            );
+                          }),
                           IconButton(
                             icon: Icon(
                               provider.isPinned(conversation.threadId)

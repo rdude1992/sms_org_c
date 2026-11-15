@@ -12,6 +12,9 @@ class ConversationTile extends StatelessWidget {
   final bool selected;
   final bool selectionMode;
   final bool pinned;
+
+  /// Notifications for this thread are muted (see NotificationSettingsProvider).
+  final bool muted;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -39,6 +42,7 @@ class ConversationTile extends StatelessWidget {
     required this.expanded,
     required this.onAvatarTap,
     this.pinned = false,
+    this.muted = false,
     this.searchQuery,
   });
 
@@ -108,6 +112,10 @@ class ConversationTile extends StatelessWidget {
                             ],
                             if (pinned) ...[
                               Icon(Icons.push_pin, size: 13, color: scheme.onSurfaceVariant),
+                              const SizedBox(width: 4),
+                            ],
+                            if (muted) ...[
+                              Icon(Icons.notifications_off, size: 13, color: scheme.onSurfaceVariant),
                               const SizedBox(width: 4),
                             ],
                             Expanded(

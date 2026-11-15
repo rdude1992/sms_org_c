@@ -324,7 +324,11 @@ object SmsRepository {
         val values = ContentValues().apply {
             put(Telephony.Sms.ADDRESS, address)
             put(Telephony.Sms.BODY, body)
-            put(Telephony.Sms.DATE, timestamp)
+            // DATE is when it arrived on this phone; the network's own
+            // timestamp (which can be skewed by a wrong carrier clock) is
+            // kept in DATE_SENT. Same as the stock messaging app, so a skewed
+            // network clock can't file a new message out of order.
+            put(Telephony.Sms.DATE, System.currentTimeMillis())
             put(Telephony.Sms.DATE_SENT, timestamp)
             put(Telephony.Sms.READ, 0)
             put(Telephony.Sms.SEEN, 0)

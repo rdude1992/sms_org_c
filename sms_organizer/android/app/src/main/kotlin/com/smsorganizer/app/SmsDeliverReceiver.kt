@@ -41,7 +41,7 @@ class SmsDeliverReceiver : BroadcastReceiver() {
 
             // Runs entirely natively — works even if this receiver fired with
             // no Flutter engine alive to receive the event above.
-            IncomingSmsNotifier.notify(appContext, address, fullBody)
+            IncomingSmsNotifier.notify(appContext, address, fullBody, subscriptionId)
         }
     }
 }

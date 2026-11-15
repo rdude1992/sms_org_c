@@ -67,21 +67,30 @@ object IncomingSmsNotifier {
 
     private val indianAmountFormat: NumberFormat = NumberFormat.getIntegerInstance(Locale("en", "IN"))
 
-    fun notify(context: Context, address: String?, body: String?) {
+    /**
+     * [subscriptionId] is the SIM that received the message (-1 if unknown).
+     * It is carried into the quick-reply action so a reply goes out on the
+     * same SIM, rather than the device default. Texting your own second SIM
+     * would otherwise reply to yourself on the first one.
+     */
+    fun notify(context: Context, address: String?, body: String?, subscriptionId: Int = -1) {
         if (address.isNullOrEmpty() || body.isNullOrEmpty()) return
         if (!hasNotificationPermission(context)) return
 
         val category = Categorizer.categorize(address, body)
+        // A muted category means no notification at all; a muted thread (below)
+        // still shows one, just silently.
         val muted = NotificationPrefsRepository.getMuted(context)
         if (muted.contains(category.prefKey)) return
 
         val threadId = Telephony.Threads.getOrCreateThreadId(context, address)
+        val silent = NotificationPrefsRepository.isThreadMuted(context, threadId)
         val history = ConversationHistoryStore.append(
             context,
             threadId,
             ConversationHistoryStore.Entry(body, System.currentTimeMillis(), fromMe = false)
         )
-        postNotification(context, threadId, address, body, category, history)
+        postNotification(context, threadId, address, body, category, history, silent, subscriptionId)
     }
 
     /**
@@ -89,7 +98,7 @@ object IncomingSmsNotifier {
      * from its inline-reply action, so the shade reflects the exchange
      * (the appended "you" message) instead of just disappearing.
      */
-    fun notifyAfterReply(context: Context, threadId: Long, address: String, body: String) {
+    fun notifyAfterReply(context: Context, threadId: Long, address: String, body: String, subscriptionId: Int = -1) {
         if (!hasNotificationPermission(context)) return
         val category = Categorizer.categorize(address, body)
         val history = ConversationHistoryStore.append(
@@ -97,7 +106,8 @@ object IncomingSmsNotifier {
             threadId,
             ConversationHistoryStore.Entry(body, System.currentTimeMillis(), fromMe = true)
         )
-        postNotification(context, threadId, address, body, category, history)
+        // Always silent: this only re-renders the shade with your own reply.
+        postNotification(context, threadId, address, body, category, history, silent = true, subscriptionId = subscriptionId)
     }
 
     /**
@@ -117,17 +127,19 @@ object IncomingSmsNotifier {
         address: String,
         body: String,
         category: Categorizer.Category,
-        history: List<ConversationHistoryStore.Entry>
+        history: List<ConversationHistoryStore.Entry>,
+        silent: Boolean,
+        subscriptionId: Int
     ) {
         try {
-            postRichNotification(context, threadId, address, category, history)
+            postRichNotification(context, threadId, address, category, history, silent, subscriptionId)
         } catch (e: Exception) {
             // Logged at ERROR (not silently swallowed) specifically so this
             // is greppable in logcat — `adb logcat | grep IncomingSmsNotif`
             // around an incoming SMS shows exactly what's throwing here,
             // rather than just "it fell back to the plain notification".
             Log.e("IncomingSmsNotif", "Rich notification failed, falling back to plain", e)
-            postFallbackNotification(context, threadId, address, body, category)
+            postFallbackNotification(context, threadId, address, body, category, silent)
         }
     }
 
@@ -136,7 +148,9 @@ object IncomingSmsNotifier {
         threadId: Long,
         address: String,
         category: Categorizer.Category,
-        history: List<ConversationHistoryStore.Entry>
+        history: List<ConversationHistoryStore.Entry>,
+        silent: Boolean,
+        subscriptionId: Int
     ) {
         NotificationChannels.ensureCreated(context)
         val displayName = ContactsRepository.lookupDisplayName(context, address) ?: address
@@ -167,6 +181,9 @@ object IncomingSmsNotifier {
             .setGroup(GROUP_KEY)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
+            // Muted thread: still listed in the shade, but no sound,
+            // vibration or heads-up pop-up.
+            .setSilent(silent)
         applyLockScreenPrivacy(context, builder, channelId, category)
 
         // OTP gets its own plain, purpose-built layout (title + boxed-digit
@@ -176,7 +193,7 @@ object IncomingSmsNotifier {
         if (category == Categorizer.Category.OTP) {
             configureOtpNotification(context, builder, threadId, displayName, history)
         } else {
-            configureConversationNotification(context, builder, threadId, address, displayName, history, openIntent)
+            configureConversationNotification(context, builder, threadId, address, displayName, history, openIntent, subscriptionId)
         }
 
         try {
@@ -202,7 +219,8 @@ object IncomingSmsNotifier {
         address: String,
         displayName: String,
         history: List<ConversationHistoryStore.Entry>,
-        openIntent: Intent
+        openIntent: Intent,
+        subscriptionId: Int
     ) {
         val contactIcon = ContactsRepository.lookupPhotoIcon(context, address)
         val avatarIcon = contactIcon ?: buildDefaultAvatarIcon(displayName)
@@ -245,7 +263,7 @@ object IncomingSmsNotifier {
             .setStyle(style)
             .setShortcutId(shortcutId)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .addAction(buildReplyAction(context, threadId, address))
+            .addAction(buildReplyAction(context, threadId, address, subscriptionId))
             .addAction(buildMarkReadAction(context, threadId))
             .addAction(buildDeleteAction(context, threadId))
 
@@ -343,7 +361,8 @@ object IncomingSmsNotifier {
         threadId: Long,
         address: String,
         body: String,
-        category: Categorizer.Category
+        category: Categorizer.Category,
+        silent: Boolean
     ) {
         try {
             NotificationChannels.ensureCreated(context)
@@ -374,6 +393,7 @@ object IncomingSmsNotifier {
                 )
                 .setAutoCancel(true)
                 .setContentIntent(contentIntent)
+                .setSilent(silent)
                 .also { applyLockScreenPrivacy(context, it, fallbackChannelId, category) }
                 .build()
 
@@ -567,7 +587,9 @@ object IncomingSmsNotifier {
 
         val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
-            color = Color.BLACK
+            // Black on a light shade, the app accent on a dark one, where black
+            // barely shows. See res/values{,-night}/colors.xml.
+            color = context.getColor(R.color.otp_bubble)
         }
         canvas.drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), corner, corner, bubblePaint)
 
@@ -576,7 +598,12 @@ object IncomingSmsNotifier {
         return bitmap
     }
 
-    private fun buildReplyAction(context: Context, threadId: Long, address: String): NotificationCompat.Action {
+    private fun buildReplyAction(
+        context: Context,
+        threadId: Long,
+        address: String,
+        subscriptionId: Int
+    ): NotificationCompat.Action {
         val remoteInput = RemoteInput.Builder(NotificationActionReceiver.KEY_REPLY_TEXT)
             .setLabel("Reply")
             .build()
@@ -584,6 +611,7 @@ object IncomingSmsNotifier {
             action = NotificationActionReceiver.ACTION_REPLY
             putExtra(NotificationActionReceiver.EXTRA_THREAD_ID, threadId)
             putExtra(NotificationActionReceiver.EXTRA_ADDRESS, address)
+            putExtra(NotificationActionReceiver.EXTRA_SUBSCRIPTION_ID, subscriptionId)
         }
         // RemoteInput actions must carry a mutable PendingIntent — Android
         // rejects the reply otherwise on API 31+.

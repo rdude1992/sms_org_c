@@ -114,6 +114,22 @@ class MainActivity : FlutterFragmentActivity() {
                     NotificationChannels.syncMuteState(this)
                     result.success(null)
                 }
+                "getThreadMutes" ->
+                    // Keys as strings: the codec has no Long-keyed map guarantee.
+                    result.success(
+                        NotificationPrefsRepository.getThreadMutes(this)
+                            .mapKeys { it.key.toString() }
+                    )
+                "setThreadMute" -> {
+                    val threadId = (call.argument<Any>("threadId") as? Number)?.toLong()
+                    val until = (call.argument<Any>("until") as? Number)?.toLong()
+                    if (threadId == null) {
+                        result.error("BAD_ARGS", "threadId is required", null)
+                    } else {
+                        NotificationPrefsRepository.setThreadMute(this, threadId, until)
+                        result.success(null)
+                    }
+                }
                 "getChannelImportance" -> {
                     val channelId = call.argument<String>("channelId") ?: ""
                     result.success(NotificationChannels.channelImportance(this, channelId))
