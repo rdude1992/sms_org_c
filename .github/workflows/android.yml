@@ -34,9 +34,13 @@ jobs:
           java-version: '17'
           cache: gradle
 
+      # Pinned rather than floating on "stable": a new stable can raise the
+      # minimum Gradle/AGP versions overnight (3.50 requires AGP 9) and break
+      # the build. Bump this deliberately, together with android/ tooling.
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.47.9
           cache: true
 
       - name: Write local.properties
