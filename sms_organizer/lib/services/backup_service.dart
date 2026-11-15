@@ -6,15 +6,18 @@ import '../models/sms_message.dart';
 import '../models/transaction.dart';
 
 /// Exports the current in-memory dataset (messages + parsed transactions +
-/// investments) to a single JSON file the user can save/share, and restores
-/// from one.
+/// investments) to a single JSON file the user can save/share, and parses
+/// one back into a [BackupBundle].
 ///
 /// Note on scope: this backs up the app's *view* of the data (categories,
 /// parsed transactions/investments, and message metadata/content as read
-/// from the SMS provider at export time). Restoring re-populates the app's
-/// local cache; it does not write messages back into the Android SMS
-/// provider itself, since silently mass-inserting SMS into a user's inbox
-/// on restore would be surprising and is deliberately avoided here.
+/// from the SMS provider at export time). What restoring *does* with the
+/// parsed bundle is the caller's choice, not this service's: repopulating
+/// the app's own local cache (SmsProvider.restoreFromBackup) is silent and
+/// always safe; writing the messages back into the actual Android SMS
+/// store (SmsProvider.restoreMessagesToDeviceStore) is a separate,
+/// explicit, user-confirmed action — see SettingsScreen — since silently
+/// mass-inserting SMS into a user's inbox would be surprising.
 class BackupService {
   static const _formatVersion = 1;
 

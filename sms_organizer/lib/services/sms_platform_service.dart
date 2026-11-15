@@ -173,6 +173,25 @@ class SmsPlatformService {
     return result ?? 0;
   }
 
+  /// Bulk-writes backed-up messages back into content://sms, preserving
+  /// each one's original address/body/date/type/read-state. Only succeeds
+  /// as the default SMS app — throws a [PlatformException] with code
+  /// `NOT_DEFAULT_SMS_APP` otherwise, so callers should check
+  /// [isDefaultSmsApp] first. See BackupService/SmsProvider for the flow
+  /// this backs.
+  Future<int> restoreMessagesToDevice(List<Map<String, dynamic>> messages) async {
+    final result =
+        await _methodChannel.invokeMethod<int>('restoreMessagesToDevice', {'messages': messages});
+    return result ?? 0;
+  }
+
+  /// Deletes every message currently in the device's SMS store
+  /// (content://sms) — irreversible. Only succeeds as the default SMS app.
+  Future<int> clearAllDeviceMessages() async {
+    final result = await _methodChannel.invokeMethod<int>('clearAllDeviceMessages');
+    return result ?? 0;
+  }
+
   /// Fires whenever a new SMS arrives while the app is running (see
   /// SmsDeliverReceiver / SmsReceivedReceiver on the native side). Purely
   /// for keeping the in-app list live — notification posting itself is now
