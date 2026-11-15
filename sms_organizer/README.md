@@ -449,6 +449,60 @@ from the second sync onward.
 
 
 
+## CI & releases (GitHub Actions)
+
+`.github/workflows/android.yml` runs on every push and pull request:
+`flutter pub get` → `flutter analyze` → `flutter test` → release APKs
+(per-ABI + universal) → Kotlin unit tests (`./gradlew :app:testDebugUnitTest`).
+The APKs are uploaded as the run's artifact.
+
+**Signing.** Set these repository secrets (Settings → Secrets and variables →
+Actions):
+
+| Secret | Value |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 upload-keystore.jks` |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore password |
+| `ANDROID_KEY_PASSWORD` | key password (same as the store password for PKCS12) |
+| `ANDROID_KEY_ALIAS` | key alias |
+
+Generate a keystore with:
+
+```sh
+keytool -genkeypair -keystore upload-keystore.jks -storetype PKCS12 \
+  -keyalg RSA -keysize 4096 -validity 10000 -alias smartsms -dname "CN=SmartSMS"
+```
+
+Back the `.jks` up somewhere safe. An APK signed with a different key can't
+be installed over an existing install.
+
+Without the secrets, branch and PR builds fall back to the debug key, and the
+artifact is named `smartsms-apks-unsigned-preview`.
+
+**Releases.** A push to `main` whose `version:` in `pubspec.yaml` hasn't been
+released yet publishes a GitHub Release `v<version>` with the signed APKs and
+`SHA256SUMS.txt`. GitHub creates the tag on the built commit, so nobody has to
+push tags. To ship: bump `version:` on a branch, then merge its PR. Pushes to
+`main` without a version bump only build. Builds on `main` never fall back to
+the debug key: the workflow sets `CI_REQUIRE_RELEASE_SIGNING=true`, and Gradle
+fails if `android/key.properties` is missing.
+
+For a local signed build, create `android/key.properties` (git-ignored):
+
+```properties
+storeFile=upload-keystore.jks
+storePassword=...
+keyPassword=...
+keyAlias=smartsms
+```
+
+with the keystore at `android/app/upload-keystore.jks`.
+
+**Classifier parity.** `test/fixtures/categorization_cases.tsv` is shared by
+`test/categorization_service_test.dart` (Dart) and
+`android/app/src/test/.../CategorizerParityTest.kt` (native). When you change
+either classifier, add a case there; CI fails if the two disagree.
+
 ## Known limitations / scope cut for this MVP
 
 - **MMS is not parsed.** `MmsReceiver.kt` exists only to satisfy Android's
@@ -507,9 +561,11 @@ from the second sync onward.
   heuristic, not a flag read from the SMS — a SIP that changed amount
   partway through, or fewer than 3 installments so far, won't be
   recognised as recurring.
-- **No release signing config.** `android/app/build.gradle` currently signs
-  release builds with the debug key — set up a real `key.properties` /
-  keystore before publishing anywhere.
+- **Personal-sender gate.** Messages from plain 10-digit numbers are
+  treated as personal unless they're an unmistakable OTP or bank alert, so
+  spam sent from ordinary mobile numbers lands in Personal, not Promotions.
+  That trade-off is deliberate: misfiling a friend's message as
+  promotional is worse.
 
 ## Testing the default-SMS-app flow safely
 

@@ -109,8 +109,17 @@ class _ComposeScreenState extends State<ComposeScreen> {
     setState(() => _sending = true);
     final provider = context.read<SmsProvider>();
     final ok = await provider.sendSms(address, body, subscriptionId: _selectedSubscriptionId);
+    if (!mounted) return;
     setState(() => _sending = false);
-    if (!ok || !mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(provider.lastSendError ?? 'Message could not be sent.')),
+      );
+      return;
+    }
+    // A sent message supersedes any draft saved for this recipient.
+    await provider.discardDraftFor(address);
+    if (!mounted) return;
 
     // The message just sent means this address now has a thread (new or
     // pre-existing) — hand off to it so sending continues like any other

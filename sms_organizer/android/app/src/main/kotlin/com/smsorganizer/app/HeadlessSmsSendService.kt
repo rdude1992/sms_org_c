@@ -12,16 +12,25 @@ class HeadlessSmsSendService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val address = intent?.data?.schemeSpecificPart
-        val body = intent?.getStringExtra(Intent.EXTRA_TEXT)
-        if (address != null && body != null) {
-            try {
-                SmsRepository.sendSms(this, address, body)
-            } catch (_: Exception) {
-                // Best-effort: quick-reply failures shouldn't crash a background service.
-            }
+        val parsed = SmsUriParser.parse(intent)
+        val address = parsed.address
+        val body = parsed.body
+        if (address.isNullOrBlank() || body.isNullOrBlank()) {
+            stopSelf(startId)
+            return START_NOT_STICKY
         }
-        stopSelf()
+        // Off the main thread: provider insert + radio call. "a;b" lists
+        // send one message per recipient, as the stock messaging app does.
+        Thread {
+            for (recipient in address.split(';').map { it.trim() }.filter { it.isNotEmpty() }) {
+                try {
+                    SmsRepository.sendSms(applicationContext, recipient, body)
+                } catch (_: Exception) {
+                    // Best-effort: quick-reply failures shouldn't crash a background service.
+                }
+            }
+            stopSelf(startId)
+        }.start()
         return START_NOT_STICKY
     }
 }

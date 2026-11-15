@@ -4,6 +4,8 @@ import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.provider.Telephony
 import androidx.annotation.NonNull
@@ -11,6 +13,8 @@ import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 // FlutterFragmentActivity (not plain FlutterActivity) is required by the
 // local_auth plugin's Android implementation — it shows the system
@@ -25,7 +29,41 @@ class MainActivity : FlutterFragmentActivity() {
 
         // Held statically so the broadcast receiver (which is not an Activity)
         // can push newly-arrived messages straight to Dart while the app is running.
+        // Only ever read/written on the main thread — use [emitEvent] from
+        // background threads.
         var eventSink: EventChannel.EventSink? = null
+
+        private val mainHandler = Handler(Looper.getMainLooper())
+
+        /** Thread-safe: EventSink must only be called on the platform (main) thread. */
+        fun emitEvent(event: Map<String, Any?>) {
+            mainHandler.post { eventSink?.success(event) }
+        }
+
+        // Single background thread for content-provider work, so a large
+        // inbox read/restore never blocks the UI thread (jank/ANR), while
+        // calls still run in the order Dart issued them.
+        private val ioExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    }
+
+    /**
+     * Runs [work] off the main thread and replies on the main thread, as
+     * MethodChannel.Result requires. Exceptions become a Dart PlatformException
+     * with [errorCode] instead of crashing the app.
+     */
+    private fun runInBackground(
+        result: MethodChannel.Result,
+        errorCode: String = "NATIVE_ERROR",
+        work: () -> Any?
+    ) {
+        ioExecutor.execute {
+            try {
+                val value = work()
+                mainHandler.post { result.success(value) }
+            } catch (e: Exception) {
+                mainHandler.post { result.error(errorCode, e.message, null) }
+            }
+        }
     }
 
     private var pendingRoleResult: MethodChannel.Result? = null
@@ -50,11 +88,14 @@ class MainActivity : FlutterFragmentActivity() {
             when (call.method) {
                 "isDefaultSmsApp" -> result.success(SmsRepository.isDefaultSmsApp(this))
                 "requestDefaultSmsApp" -> {
+                    // A second request while the picker is still open would
+                    // otherwise orphan the first caller's Future forever.
+                    pendingRoleResult?.success(SmsRepository.isDefaultSmsApp(this))
                     pendingRoleResult = result
                     requestDefaultSmsRole()
                 }
-                "getAllMessages" -> result.success(SmsRepository.getAllMessages(this))
-                "getContacts" -> result.success(ContactsRepository.getAllContacts(this))
+                "getAllMessages" -> runInBackground(result) { SmsRepository.getAllMessages(applicationContext) }
+                "getContacts" -> runInBackground(result) { ContactsRepository.getAllContacts(applicationContext) }
                 "openContact" -> {
                     val number = call.argument<String>("number") ?: ""
                     result.success(openContact(number))
@@ -110,41 +151,43 @@ class MainActivity : FlutterFragmentActivity() {
                     val address = call.argument<String>("address") ?: ""
                     val body = call.argument<String>("body") ?: ""
                     val subscriptionId = call.argument<Int>("subscriptionId")
-                    try {
-                        SmsRepository.sendSms(this, address, body, subscriptionId)
-                        result.success(true)
-                    } catch (e: Exception) {
-                        result.error("SEND_FAILED", e.message, null)
+                    if (address.isBlank() || body.isEmpty()) {
+                        result.error("SEND_FAILED", "Recipient and message must not be empty.", null)
+                    } else {
+                        runInBackground(result, "SEND_FAILED") {
+                            SmsRepository.sendSms(applicationContext, address, body, subscriptionId)
+                            true
+                        }
                     }
                 }
                 "saveDraft" -> {
                     val address = call.argument<String>("address") ?: ""
                     val body = call.argument<String>("body") ?: ""
                     val id = call.argument<Int>("id")
-                    result.success(SmsRepository.saveDraft(this, address, body, id))
+                    runInBackground(result) { SmsRepository.saveDraft(applicationContext, address, body, id) }
                 }
                 "markRead" -> {
-                    val ids = call.argument<List<Long>>("ids") ?: emptyList()
+                    val ids = longList(call.argument<List<Any?>>("ids"))
                     val read = call.argument<Boolean>("read") ?: true
-                    result.success(SmsRepository.markRead(this, ids, read))
+                    runInBackground(result) { SmsRepository.markRead(applicationContext, ids, read) }
                 }
                 "deleteMessages" -> {
-                    val ids = call.argument<List<Long>>("ids") ?: emptyList()
-                    result.success(SmsRepository.deleteMessages(this, ids))
+                    val ids = longList(call.argument<List<Any?>>("ids"))
+                    runInBackground(result) { SmsRepository.deleteMessages(applicationContext, ids) }
                 }
                 "restoreMessagesToDevice" -> {
                     if (!SmsRepository.isDefaultSmsApp(this)) {
                         result.error("NOT_DEFAULT_SMS_APP", "App must be the default SMS app to restore.", null)
                     } else {
                         val messages = call.argument<List<Map<String, Any?>>>("messages") ?: emptyList()
-                        result.success(SmsRepository.restoreMessages(this, messages))
+                        runInBackground(result) { SmsRepository.restoreMessages(applicationContext, messages) }
                     }
                 }
                 "clearAllDeviceMessages" -> {
                     if (!SmsRepository.isDefaultSmsApp(this)) {
                         result.error("NOT_DEFAULT_SMS_APP", "App must be the default SMS app to clear messages.", null)
                     } else {
-                        result.success(SmsRepository.deleteAllMessages(this))
+                        runInBackground(result) { SmsRepository.deleteAllMessages(applicationContext) }
                     }
                 }
                 else -> result.notImplemented()
@@ -162,6 +205,13 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             })
     }
+
+    /**
+     * Dart's StandardMessageCodec sends small ints as java.lang.Integer and
+     * large ones as Long, so a List<Long> cast is not safe — normalise here.
+     */
+    private fun longList(raw: List<Any?>?): List<Long> =
+        raw?.mapNotNull { (it as? Number)?.toLong() } ?: emptyList()
 
     /**
      * Warm case: the app is already running (backgrounded, not killed) and

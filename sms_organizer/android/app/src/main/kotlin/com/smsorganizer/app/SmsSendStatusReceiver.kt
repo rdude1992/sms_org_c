@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -67,18 +68,16 @@ class SmsSendStatusReceiver : BroadcastReceiver() {
         ): PendingIntent {
             val intent = Intent(context, SmsSendStatusReceiver::class.java).apply {
                 this.action = action
+                // The data URI makes each (row, part) PendingIntent distinct
+                // through Intent.filterEquals. A hashed requestCode alone can
+                // collide, and FLAG_UPDATE_CURRENT would then overwrite another
+                // message's row id, so its status report lands on the wrong row.
+                data = Uri.parse("smsorganizer://send-status/$rowId/$partIndex")
                 putExtra(EXTRA_ROW_ID, rowId)
             }
-            // Distinct per (row, part, phase) so the system doesn't collapse
-            // different parts'/phases' callbacks into a single PendingIntent
-            // — rowId alone can exceed Int range over a long-lived provider,
-            // so it's folded down rather than used directly as the code.
-            var requestCode = rowId.hashCode()
-            requestCode = requestCode * 31 + partIndex
-            requestCode = requestCode * 31 + if (delivered) 1 else 0
             return PendingIntent.getBroadcast(
                 context,
-                requestCode,
+                if (delivered) 1 else 0,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
@@ -100,11 +99,11 @@ class SmsSendStatusReceiver : BroadcastReceiver() {
         when (intent.action) {
             ACTION_SMS_SENT -> onPartReported(sentTrackers, rowId, partSucceeded) { allSucceeded ->
                 SmsRepository.markSentResult(context, rowId, allSucceeded)
-                MainActivity.eventSink?.success(mapOf("type" to "sendStatus", "id" to rowId))
+                MainActivity.emitEvent(mapOf("type" to "sendStatus", "id" to rowId))
             }
             ACTION_SMS_DELIVERED -> onPartReported(deliveredTrackers, rowId, partSucceeded) { allDelivered ->
                 SmsRepository.markDeliveryResult(context, rowId, allDelivered)
-                MainActivity.eventSink?.success(mapOf("type" to "sendStatus", "id" to rowId))
+                MainActivity.emitEvent(mapOf("type" to "sendStatus", "id" to rowId))
             }
         }
     }

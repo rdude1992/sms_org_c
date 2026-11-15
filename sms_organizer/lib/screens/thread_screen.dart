@@ -487,11 +487,19 @@ class _ThreadScreenState extends State<ThreadScreen> {
                               provider.deleteMessage(_draftId!);
                               _draftId = null;
                             }
-                            await provider.sendSms(
+                            final messenger = ScaffoldMessenger.of(context);
+                            final ok = await provider.sendSms(
                               conversation.address,
                               text,
                               subscriptionId: _selectedSubscriptionId,
                             );
+                            // A failed send normally leaves a "failed" bubble
+                            // with a retry action, but say so explicitly too.
+                            if (!ok) {
+                              messenger.showSnackBar(
+                                SnackBar(content: Text(provider.lastSendError ?? 'Message could not be sent.')),
+                              );
+                            }
                           },
                         ),
                       ],

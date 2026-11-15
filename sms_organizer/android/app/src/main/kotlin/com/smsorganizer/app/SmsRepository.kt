@@ -231,23 +231,27 @@ object SmsRepository {
      * ones the user has already caught up on.
      */
     fun markRead(context: Context, ids: List<Long>, read: Boolean): Int {
+        if (ids.isEmpty()) return 0
         var updated = 0
         val affectedThreadIds = mutableSetOf<Long>()
         val values = ContentValues().apply { put(Telephony.Sms.READ, if (read) 1 else 0) }
-        for (id in ids) {
-            val uri = Uri.withAppendedPath(Telephony.Sms.CONTENT_URI, id.toString())
+        // One query + one update per chunk instead of two provider round
+        // trips per message. Selecting all threads of a 500-message batch was
+        // seconds of IPC before.
+        for (chunk in ids.chunked(ID_CHUNK_SIZE)) {
+            val (selection, args) = idInSelection(chunk)
             if (read) {
                 context.contentResolver.query(
-                    uri,
+                    Telephony.Sms.CONTENT_URI,
                     arrayOf(Telephony.Sms.THREAD_ID),
-                    null,
-                    null,
+                    selection,
+                    args,
                     null
                 )?.use { cursor ->
-                    if (cursor.moveToFirst()) affectedThreadIds.add(cursor.getLong(0))
+                    while (cursor.moveToNext()) affectedThreadIds.add(cursor.getLong(0))
                 }
             }
-            updated += context.contentResolver.update(uri, values, null, null)
+            updated += context.contentResolver.update(Telephony.Sms.CONTENT_URI, values, selection, args)
         }
         if (read) {
             for (threadId in affectedThreadIds) {
@@ -258,6 +262,14 @@ object SmsRepository {
             }
         }
         return updated
+    }
+
+    // Stays well under SQLite's bound-variable limit (999 on older devices).
+    private const val ID_CHUNK_SIZE = 500
+
+    private fun idInSelection(ids: List<Long>): Pair<String, Array<String>> {
+        val placeholders = ids.joinToString(",") { "?" }
+        return "${Telephony.Sms._ID} IN ($placeholders)" to ids.map { it.toString() }.toTypedArray()
     }
 
     /**
@@ -286,9 +298,9 @@ object SmsRepository {
 
     fun deleteMessages(context: Context, ids: List<Long>): Int {
         var deleted = 0
-        for (id in ids) {
-            val uri = Uri.withAppendedPath(Telephony.Sms.CONTENT_URI, id.toString())
-            deleted += context.contentResolver.delete(uri, null, null)
+        for (chunk in ids.chunked(ID_CHUNK_SIZE)) {
+            val (selection, args) = idInSelection(chunk)
+            deleted += context.contentResolver.delete(Telephony.Sms.CONTENT_URI, selection, args)
         }
         return deleted
     }
@@ -363,7 +375,17 @@ object SmsRepository {
                     put(Telephony.Sms.BODY, m["body"] as? String ?: "")
                     put(Telephony.Sms.DATE, (m["date"] as? Number)?.toLong() ?: System.currentTimeMillis())
                     put(Telephony.Sms.DATE_SENT, (m["dateSent"] as? Number)?.toLong() ?: 0L)
-                    put(Telephony.Sms.TYPE, (m["type"] as? Number)?.toInt() ?: Telephony.Sms.MESSAGE_TYPE_INBOX)
+                    // Outbox/queued rows were mid-send when backed up. Restored
+                    // as-is they'd show "Sending…" forever, since nothing will
+                    // ever report a status for them, so restore them as failed
+                    // (retryable) instead.
+                    val rawType = (m["type"] as? Number)?.toInt() ?: Telephony.Sms.MESSAGE_TYPE_INBOX
+                    val type = when (rawType) {
+                        Telephony.Sms.MESSAGE_TYPE_OUTBOX, Telephony.Sms.MESSAGE_TYPE_QUEUED ->
+                            Telephony.Sms.MESSAGE_TYPE_FAILED
+                        else -> rawType
+                    }
+                    put(Telephony.Sms.TYPE, type)
                     put(Telephony.Sms.READ, if (m["read"] == true) 1 else 0)
                     put(Telephony.Sms.SEEN, 1)
                     put(Telephony.Sms.STATUS, (m["status"] as? Number)?.toInt() ?: -1)

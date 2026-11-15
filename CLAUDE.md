@@ -25,7 +25,13 @@ The Flutter project root is `sms_organizer/`, not the repo root — `cd` there f
 - `flutter pub get` — install dependencies; also regenerates `gradlew`,
   `gradlew.bat`, and `gradle-wrapper.jar`, which aren't checked in.
 - `flutter analyze` — static analysis (`flutter_lints`).
-- `flutter test` — unit/widget tests. No `test/` directory exists yet.
+- `flutter test` — unit tests in `test/`. `test/fixtures/categorization_cases.tsv`
+  is shared with the native `CategorizerParityTest.kt` (`./gradlew :app:testDebugUnitTest`
+  from `android/`). Add a case there whenever either classifier changes.
+- CI: `.github/workflows/android.yml` (analyze, test, signed release APKs). A push to
+  `main` with a not-yet-released `pubspec.yaml` version publishes a GitHub Release, so
+  bump `version:` in any PR meant to ship. Flutter is pinned in the workflow; bump it
+  deliberately with the android/ toolchain. Signing secrets are documented in the README.
 - `flutter run` — run on a connected device or emulator. Test on a real
   device or an emulator with working SIM/SMS simulation — SMS behavior
   doesn't work meaningfully on most bare emulators (Android Studio
@@ -121,4 +127,4 @@ See `sms_organizer/README.md` for the full architecture file map, the
 contact-name-resolution flow, notification cold-start/warm-tap handling,
 and the "Known limitations" section (MMS not parsed, native/Dart
 categorizer drift risk, one notification per thread not per message,
-backup is app-data-only, no release signing configured).
+backup is app-data-only).

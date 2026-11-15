@@ -9,3 +9,8 @@ android/.gradle/
 android/local.properties
 android/**/gradle-wrapper.jar
 *.log
+android/key.properties
+*.jks
+*.keystore
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+dist/

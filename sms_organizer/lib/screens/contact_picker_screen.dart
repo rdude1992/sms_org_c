@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/sms_provider.dart';
-import '../services/contact_service.dart';
 import '../widgets/ui/empty_state.dart';
 
 /// Full-screen searchable contact list. Pops with the selected contact's

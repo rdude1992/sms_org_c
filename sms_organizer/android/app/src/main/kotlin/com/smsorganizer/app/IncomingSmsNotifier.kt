@@ -167,6 +167,7 @@ object IncomingSmsNotifier {
             .setGroup(GROUP_KEY)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
+        applyLockScreenPrivacy(context, builder, channelId, category)
 
         // OTP gets its own plain, purpose-built layout (title + boxed-digit
         // code + Copy/Delete only) rather than the chat-style Conversation
@@ -311,6 +312,32 @@ object IncomingSmsNotifier {
      * fancier) — the safety net [postNotification] falls back to if
      * anything in [postRichNotification] throws.
      */
+    /**
+     * OTPs and bank/card alerts are the most sensitive messages a phone gets:
+     * a lock-screen preview of "123456 is your OTP" or a balance helps anyone
+     * holding the locked device. Mark them VISIBILITY_PRIVATE, with a redacted
+     * public version, so the lock screen only shows that a message arrived.
+     * Other categories keep the user's system-wide lock-screen setting.
+     */
+    private fun applyLockScreenPrivacy(
+        context: Context,
+        builder: NotificationCompat.Builder,
+        channelId: String,
+        category: Categorizer.Category
+    ) {
+        if (category != Categorizer.Category.OTP && category != Categorizer.Category.TRANSACTIONAL) return
+        val publicTitle = if (category == Categorizer.Category.OTP) "Verification code received" else "New bank message"
+        val publicVersion = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.drawable.ic_stat_notify)
+            .setColor(ACCENT_COLOR)
+            .setContentTitle(publicTitle)
+            .setContentText("Unlock to view")
+            .build()
+        builder
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicVersion)
+    }
+
     private fun postFallbackNotification(
         context: Context,
         threadId: Long,
@@ -334,7 +361,8 @@ object IncomingSmsNotifier {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            val notification = NotificationCompat.Builder(context, "sms_${category.prefKey}")
+            val fallbackChannelId = "sms_${category.prefKey}"
+            val notification = NotificationCompat.Builder(context, fallbackChannelId)
                 .setSmallIcon(R.drawable.ic_stat_notify)
                 .setColor(ACCENT_COLOR)
                 .setContentTitle(displayName)
@@ -346,6 +374,7 @@ object IncomingSmsNotifier {
                 )
                 .setAutoCancel(true)
                 .setContentIntent(contentIntent)
+                .also { applyLockScreenPrivacy(context, it, fallbackChannelId, category) }
                 .build()
 
             NotificationManagerCompat.from(context).notify(threadId.toInt(), notification)

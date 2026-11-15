@@ -1,0 +1,19 @@
+# Shared classifier test vectors: expected<TAB>sender<TAB>body
+# Read by test/categorization_service_test.dart (Dart classifier) AND by
+# android/app/src/test/.../CategorizerParityTest.kt (native classifier), so
+# the two hand-mirrored implementations cannot drift apart unnoticed.
+# Keep amounts in "Rs"/"INR"/"₹" form: the native amount regex is simpler.
+otp	VM-HDFCBK	482913 is your OTP for login. Do not share it with anyone.
+otp	AX-SBIINB	OTP for your transaction of Rs.2,000.00 at AMAZON is 739204. Valid for 10 mins.
+otp	+918527000000	Use 556677 to verify your WhatsApp account.
+transactional	AD-HDFCBK	Rs.500.00 debited from A/c XX1234 on 12-11-26 to VPA abc@okaxis. Not you? Call 1800 258 6161. Never share your OTP or PIN with anyone.
+transactional	AD-ICICIB	Payment of Rs 15,000.00 received towards your ICICI Bank Credit Card XX5678. Total due Rs 0.00.
+transactional	+919000000000	Rs.1,200 credited to your A/c XX9012 via UPI.
+personal	+919876543210	Are you free tonight? Let's grab dinner and catch the bus back.
+personal	9876543210	I paid Rs 500 for dinner, send me your share
+promotional	VK-MYNTRA	Flat 50% OFF on top brands! Shop now at myntra.com. T&C apply
+promotional	VM-PROMOS-P	Big savings this weekend at our stores.
+updates	JD-AMAZON	Your order #405-1234 has been shipped and will arrive by Friday.
+updates	JM-ACMECO	Your window seat preference has been saved to your profile.
+updates	AD-CREDCL	Rahul has requested Rs.250 from you on CRED. To authorize debit from your account please login.
+updates	VM-HDFCBK	Your HDFC Bank Credit Card statement is ready. Total due Rs 4,520. Min due Rs 230 by 20-Nov.

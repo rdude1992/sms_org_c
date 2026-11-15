@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:isolate';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/category.dart';
 import '../models/sim_info.dart';
@@ -30,7 +32,6 @@ const Object keepSpendCategory = Object();
 
 class SmsProvider extends ChangeNotifier {
   final SmsPlatformService _platform = SmsPlatformService.instance;
-  final CategorizationService _categorizer = CategorizationService();
   final TransactionParserService _txnParser = TransactionParserService();
   final InsightsService _insights = InsightsService();
   final DatabaseService _db = DatabaseService.instance;
@@ -581,9 +582,43 @@ class SmsProvider extends ChangeNotifier {
     return isDefaultSmsApp;
   }
 
-  Future<void> refresh() async {
-    state = LoadState.loading;
-    notifyListeners();
+  // refresh() coalescing: at most one sync runs at a time. Calls made while
+  // one is running (each incoming SMS fires one, each sent SMS fires two or
+  // more send-status events) set [_refreshQueued], and all of them share one
+  // follow-up sync instead of overlapping full rescans racing each other's
+  // DB writes.
+  Future<void>? _refreshInFlight;
+  bool _refreshQueued = false;
+
+  /// Re-syncs from content://sms. Shows the loading state only when there is
+  /// nothing on screen yet, so live updates don't flash the skeleton.
+  Future<void> refresh() {
+    if (_refreshInFlight != null) {
+      _refreshQueued = true;
+      return _refreshInFlight!;
+    }
+    final completer = Completer<void>();
+    _refreshInFlight = completer.future;
+    () async {
+      try {
+        do {
+          _refreshQueued = false;
+          await _refreshOnce();
+        } while (_refreshQueued);
+      } finally {
+        _refreshInFlight = null;
+        completer.complete();
+      }
+    }();
+    return completer.future;
+  }
+
+  Future<void> _refreshOnce() async {
+    final showSpinner = state != LoadState.ready || _allMessages.isEmpty;
+    if (showSpinner) {
+      state = LoadState.loading;
+      notifyListeners();
+    }
     try {
       // Raw content always comes fresh from content://sms — we don't cache
       // message bodies/addresses/dates, only the derived data below. This
@@ -604,75 +639,44 @@ class SmsProvider extends ChangeNotifier {
       final cachedTxnIds = cachedTransactions.map((t) => t.smsId).toSet();
       final cachedInvIds = cachedInvestments.map((i) => i.smsId).toSet();
 
-      final newCategories = <int, SmsCategory>{};
-      final newTransactions = <Transaction>[];
-      final newInvestments = <InvestmentEvent>[];
-
+      final toClassify = <SmsMessage>[];
+      final toParse = <SmsMessage>[];
       for (final m in messages) {
         final cached = cachedCategories[m.id];
-        if (cached != null) {
-          m.category = cached;
-          m.isCategoryOverridden = overriddenIds.contains(m.id);
-          // A cached transactional category can end up without any parsed
-          // transaction/investment row — e.g. a manual override just made it
-          // transactional (see setMessageCategory), or it survived a
-          // classifier-version-bump wipe that cleared parsed data but kept
-          // overridden categories (see DatabaseService.clearAll). Parse it
-          // now rather than leaving it silently missing from Insights forever.
-          if (cached == SmsCategory.transactional &&
-              !cachedTxnIds.contains(m.id) &&
-              !cachedInvIds.contains(m.id)) {
-            final inv = _txnParser.parseInvestment(m);
-            if (inv != null) {
-              newInvestments.add(inv);
-            } else {
-              final txn = _txnParser.parseTransaction(m);
-              if (txn != null) {
-                newTransactions.add(_applyLearnedMerchantCategory(_applyLearnedMerchantName(txn)));
-              }
-            }
-          } else if (cached == SmsCategory.updates && !cachedInvIds.contains(m.id)) {
-            // A periodic investment value statement (NPS/Protean's
-            // "Investment value ... as on ... is Rs X") — categorized
-            // updates, not transactional, since no money moved, but still
-            // worth recording as an InvestmentEvent so holdings_service.dart
-            // can use it as a value checkpoint. See parseInvestmentValuation.
-            final valuation = _txnParser.parseInvestmentValuation(m);
-            if (valuation != null) newInvestments.add(valuation);
-          }
-          continue; // already processed in a previous sync
+        if (cached == null) {
+          toClassify.add(m);
+          continue;
         }
-
-        m.category = _categorizer.categorize(m);
-        newCategories[m.id] = m.category;
-
-        if (m.category == SmsCategory.transactional) {
-          // Investment first, generic transaction only as a fallback: a SIP/
-          // mutual-fund/stock-trade confirmation (the AMC or broker's own
-          // SMS, not the bank's separate debit alert for the same money)
-          // always also has an amount, so it would otherwise pass
-          // parseTransaction's bare "has an amount" gate too — recording it
-          // as BOTH a generic Transaction (counted in Debited/By-card
-          // totals) AND an InvestmentEvent (counted in Invested totals)
-          // double-counts every rupee ever invested. The bank-side debit
-          // alert for the same real-world payment is a separate SMS with
-          // its own account/UPI language, not SIP/folio/NAV wording, so it
-          // never matches parseInvestment and still comes through as a
-          // normal Transaction below.
-          final inv = _txnParser.parseInvestment(m);
-          if (inv != null) {
-            newInvestments.add(inv);
-          } else {
-            final txn = _txnParser.parseTransaction(m);
-            if (txn != null) {
-              newTransactions.add(_applyLearnedMerchantCategory(_applyLearnedMerchantName(txn)));
-            }
-          }
-        } else if (m.category == SmsCategory.updates) {
-          final valuation = _txnParser.parseInvestmentValuation(m);
-          if (valuation != null) newInvestments.add(valuation);
+        m.category = cached;
+        m.isCategoryOverridden = overriddenIds.contains(m.id);
+        // A cached transactional category can end up without any parsed
+        // transaction/investment row — e.g. a manual override just made it
+        // transactional (see setMessageCategory), or it survived a
+        // classifier-version-bump wipe that cleared parsed data but kept
+        // overridden categories (see DatabaseService.clearAll). Parse it
+        // now rather than leaving it silently missing from Insights forever.
+        // Likewise a cached "updates" message may be an NPS/Protean
+        // valuation statement that holdings_service.dart uses as a value
+        // checkpoint (see parseInvestmentValuation).
+        if ((cached == SmsCategory.transactional &&
+                !cachedTxnIds.contains(m.id) &&
+                !cachedInvIds.contains(m.id)) ||
+            (cached == SmsCategory.updates && !cachedInvIds.contains(m.id))) {
+          toParse.add(m);
         }
       }
+
+      final output = await _runClassification(_ClassifyInput(toClassify, toParse));
+
+      final newCategories = output.categories;
+      for (final m in toClassify) {
+        m.category = newCategories[m.id] ?? m.category;
+      }
+      final newTransactions = [
+        for (final t in output.transactions)
+          _applyLearnedMerchantCategory(_applyLearnedMerchantName(t)),
+      ];
+      final newInvestments = output.investments;
 
       // Persist only what's new — no point rewriting rows that haven't
       // changed on every single refresh.
@@ -727,16 +731,20 @@ class SmsProvider extends ChangeNotifier {
     await _applyMerchantRulesToUncategorised();
   }
 
+  Timer? _incomingDebounce;
+
   void _listenForIncoming() {
     _incomingSub = _platform.onIncomingSms.listen((_) {
       // Any live event triggers a full re-sync rather than trying to
-      // incrementally patch state — simpler and cheap enough for typical
-      // inbox sizes, and avoids drift between the provider's cache and
-      // the OS-owned SMS table. Notification posting itself happens
-      // entirely natively now (see IncomingSmsNotifier.kt) so it works
-      // even when this Dart code isn't running at all — this listener is
-      // purely about keeping the in-app UI live when it is.
-      refresh();
+      // incrementally patch state — simpler, and avoids drift between the
+      // provider's cache and the OS-owned SMS table. Notification posting
+      // happens entirely natively (IncomingSmsNotifier.kt); this listener is
+      // purely about keeping the in-app UI live.
+      //
+      // Debounced: a multipart send fires several status events back-to-back,
+      // and a burst of incoming SMS should cost one sync, not one each.
+      _incomingDebounce?.cancel();
+      _incomingDebounce = Timer(const Duration(milliseconds: 300), refresh);
     });
   }
 
@@ -908,9 +916,24 @@ class SmsProvider extends ChangeNotifier {
 
   // ---- Sending / drafts ----
 
+  /// Why the last [sendSms] failed, for the UI to show. Null after a success.
+  String? lastSendError;
+
+  /// Never throws: a native SEND_FAILED (no SIM, airplane mode, permission
+  /// revoked) comes back as `false` with [lastSendError] set, so callers
+  /// can't get stuck in a "sending" state on an uncaught PlatformException.
   Future<bool> sendSms(String address, String body, {int? subscriptionId}) async {
-    final ok = await _platform.sendSms(address, body, subscriptionId: subscriptionId);
-    if (ok) await refresh();
+    bool ok;
+    try {
+      ok = await _platform.sendSms(address, body, subscriptionId: subscriptionId);
+      lastSendError = ok ? null : 'Message could not be sent.';
+    } on PlatformException catch (e) {
+      ok = false;
+      lastSendError = e.message ?? 'Message could not be sent.';
+    }
+    // Refresh either way: a failed send can still have written a "failed"
+    // row the user should see (and retry).
+    await refresh();
     return ok;
   }
 
@@ -927,13 +950,46 @@ class SmsProvider extends ChangeNotifier {
       final sim = _activeSims.where((s) => s.slotIndex == message.simSlot);
       if (sim.isNotEmpty) subscriptionId = sim.first.subscriptionId;
     }
-    await _platform.deleteMessages([message.id]);
-    return sendSms(message.address, message.body, subscriptionId: subscriptionId);
+    // Send first, then drop the failed row: deleting first would lose the
+    // message entirely if the resend also fails.
+    final ok = await sendSms(message.address, message.body, subscriptionId: subscriptionId);
+    if (ok) {
+      await _platform.deleteMessages([message.id]);
+      await refresh();
+    }
+    return ok;
   }
 
   Future<void> saveDraft(String address, String body, {int? existingId}) async {
+    // Without an explicit id, overwrite this address's existing draft rather
+    // than piling up a new one on every save.
+    existingId ??= draftFor(address)?.id;
     await _platform.saveDraft(address, body, existingId: existingId);
     await refresh();
+  }
+
+  /// The saved draft addressed to [address], if any. Compares normalised
+  /// numbers, so "+91 98765 43210" and "9876543210" are the same recipient.
+  SmsMessage? draftFor(String address) {
+    final key = _addressKey(address);
+    for (final d in drafts) {
+      if (_addressKey(d.address) == key) return d;
+    }
+    return null;
+  }
+
+  /// Deletes [address]'s draft, if one exists. Called after a successful send.
+  Future<void> discardDraftFor(String address) async {
+    final draft = draftFor(address);
+    if (draft == null) return;
+    await _platform.deleteMessages([draft.id]);
+    await refresh();
+  }
+
+  static String _addressKey(String address) {
+    final digits = address.replaceAll(RegExp(r'\D'), '');
+    if (digits.length >= 10) return digits.substring(digits.length - 10);
+    return address.trim().toLowerCase();
   }
 
   /// User-driven correction for when CategorizationService got a message's
@@ -1397,18 +1453,120 @@ class SmsProvider extends ChangeNotifier {
     if (!isDefaultSmsApp) {
       throw StateError('SmartSMS must be the default SMS app to restore messages to the device.');
     }
+    var toRestore = messages;
     if (clearExisting) {
       await _platform.clearAllDeviceMessages();
+    } else {
+      // Merging into a store that already holds some of these messages (for
+      // example a backup taken on this same phone) must not duplicate them.
+      String key(SmsMessage m) => '${m.address}|${m.date.millisecondsSinceEpoch}|${m.body}';
+      final existing = {for (final m in _allMessages) key(m)};
+      toRestore = messages.where((m) => !existing.contains(key(m))).toList();
     }
     final inserted =
-        await _platform.restoreMessagesToDevice(messages.map((m) => m.toPlatformMap()).toList());
-    await refresh();
+        await _platform.restoreMessagesToDevice(toRestore.map((m) => m.toPlatformMap()).toList());
+    if (clearExisting) {
+      // content://sms re-uses _ids once the table is emptied, so every cached
+      // category/transaction, override, star and pin keyed by an old id could
+      // now attach to an unrelated restored message. Drop all of them and
+      // rebuild derived data from scratch, with the same sequence as a manual
+      // "Recalculate categorisation".
+      await _db.clearAllIncludingOverrides();
+      starredMessageIds.clear();
+      pinnedThreadIds.clear();
+      await _saveStarred();
+      await _savePinned();
+      await recalculateAll();
+    } else {
+      await refresh();
+    }
     return inserted;
   }
 
   @override
   void dispose() {
+    _incomingDebounce?.cancel();
     _incomingSub?.cancel();
     super.dispose();
   }
+}
+
+/// Work handed to [_classifyAndParse]. Plain data only (it may be copied to
+/// another isolate): no provider, no closures.
+class _ClassifyInput {
+  /// Messages with no cached category: classify, then parse if relevant.
+  final List<SmsMessage> toClassify;
+
+  /// Messages whose cached category is kept, but whose parsed
+  /// transaction/investment row is missing.
+  final List<SmsMessage> toParse;
+
+  _ClassifyInput(this.toClassify, this.toParse);
+
+  int get size => toClassify.length + toParse.length;
+}
+
+class _ClassifyOutput {
+  final Map<int, SmsCategory> categories;
+  final List<Transaction> transactions;
+  final List<InvestmentEvent> investments;
+
+  _ClassifyOutput(this.categories, this.transactions, this.investments);
+}
+
+/// A first sync (or a post-version-bump rescan) can be thousands of messages
+/// of regex work, so it runs off the UI isolate to keep the app responsive.
+/// Small incremental batches aren't worth the copy. Top-level on purpose: a
+/// closure created inside an instance method could capture `this` (the
+/// provider, with its widget listeners), which can't be sent to an isolate.
+Future<_ClassifyOutput> _runClassification(_ClassifyInput input) {
+  if (input.size > 200) return Isolate.run(() => _classifyAndParse(input));
+  return Future.value(_classifyAndParse(input));
+}
+
+/// Pure classification + parsing, safe to run in a background isolate.
+/// Learned merchant rules are applied afterwards by the provider, on the main
+/// isolate, since they live in provider state.
+_ClassifyOutput _classifyAndParse(_ClassifyInput input) {
+  final categorizer = CategorizationService();
+  final parser = TransactionParserService();
+  final categories = <int, SmsCategory>{};
+  final transactions = <Transaction>[];
+  final investments = <InvestmentEvent>[];
+
+  void parse(SmsMessage m, SmsCategory category) {
+    if (category == SmsCategory.transactional) {
+      // Investment first, generic transaction only as a fallback: a SIP/
+      // mutual-fund/stock-trade confirmation (the AMC or broker's own SMS,
+      // not the bank's separate debit alert for the same money) always also
+      // has an amount, so it would otherwise pass parseTransaction's bare
+      // "has an amount" gate too, recording it as BOTH a generic Transaction
+      // and an InvestmentEvent and double-counting every rupee invested. The
+      // bank-side debit alert for the same payment is a separate SMS with
+      // account/UPI language, so it still comes through as a Transaction.
+      final inv = parser.parseInvestment(m);
+      if (inv != null) {
+        investments.add(inv);
+      } else {
+        final txn = parser.parseTransaction(m);
+        if (txn != null) transactions.add(txn);
+      }
+    } else if (category == SmsCategory.updates) {
+      // A periodic investment value statement (NPS/Protean's "Investment
+      // value ... as on ... is Rs X") — no money moved, but still recorded as
+      // an InvestmentEvent value checkpoint. See parseInvestmentValuation.
+      final valuation = parser.parseInvestmentValuation(m);
+      if (valuation != null) investments.add(valuation);
+    }
+  }
+
+  for (final m in input.toClassify) {
+    final category = categorizer.categorize(m);
+    categories[m.id] = category;
+    parse(m, category);
+  }
+  for (final m in input.toParse) {
+    parse(m, m.category);
+  }
+  return _ClassifyOutput(categories, transactions, investments);
 }

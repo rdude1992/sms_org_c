@@ -26,19 +26,22 @@ class SmsDeliverReceiver : BroadcastReceiver() {
         // on dual-SIM devices (API 22+). Absent on single-SIM devices.
         val subscriptionId = intent.getIntExtra("subscription", -1)
 
-        val id = SmsRepository.insertIncoming(context, address, fullBody, timestamp, subscriptionId)
+        val appContext = context.applicationContext
+        runAsync("SmsDeliverReceiver") {
+            val id = SmsRepository.insertIncoming(appContext, address, fullBody, timestamp, subscriptionId)
 
-        MainActivity.eventSink?.success(
-            mapOf(
-                "id" to id,
-                "address" to address,
-                "body" to fullBody,
-                "date" to timestamp
+            MainActivity.emitEvent(
+                mapOf(
+                    "id" to id,
+                    "address" to address,
+                    "body" to fullBody,
+                    "date" to timestamp
+                )
             )
-        )
 
-        // Runs entirely natively — works even if this receiver fired with
-        // no Flutter engine alive to receive the event above.
-        IncomingSmsNotifier.notify(context, address, fullBody)
+            // Runs entirely natively — works even if this receiver fired with
+            // no Flutter engine alive to receive the event above.
+            IncomingSmsNotifier.notify(appContext, address, fullBody)
+        }
     }
 }

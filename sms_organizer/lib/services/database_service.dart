@@ -4,7 +4,6 @@ import 'package:path/path.dart' as p;
 // below — hidden since this file never references sqflite's directly.
 import 'package:sqflite/sqflite.dart' hide Transaction;
 import '../models/category.dart';
-import '../models/sms_message.dart';
 import '../models/transaction.dart';
 
 /// Local cache layer. The Android SMS provider (content://sms) remains the
@@ -524,5 +523,19 @@ class DatabaseService {
     await db.delete('message_categories', where: 'is_override = 0');
     await db.delete('transactions', where: 'is_override = 0');
     await db.delete('investments', where: 'is_override = 0');
+  }
+
+  /// Like [clearAll] but also drops user overrides. Only for when message ids
+  /// themselves have become meaningless (the device SMS store was wiped and
+  /// re-filled, so ids were re-assigned). An override keyed by an old id would
+  /// otherwise silently re-label whatever unrelated message now holds that id.
+  /// Merchant rules are kept: they are keyed by merchant, not by message id.
+  Future<void> clearAllIncludingOverrides() async {
+    final db = await database;
+    final batch = db.batch()
+      ..delete('message_categories')
+      ..delete('transactions')
+      ..delete('investments');
+    await batch.commit(noResult: true);
   }
 }
