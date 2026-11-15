@@ -13,6 +13,7 @@ import '../services/categorization_service.dart';
 import '../services/contact_service.dart';
 import '../services/database_service.dart';
 import '../services/insights_service.dart';
+import '../services/otp_retention.dart';
 import '../services/investment_dedup_service.dart';
 import '../services/sms_platform_service.dart';
 import '../services/spend_category_detector.dart';
@@ -326,7 +327,81 @@ class SmsProvider extends ChangeNotifier {
     await _backfillSpendCategories();
     await _applyMerchantRulesToUncategorised();
     await _applyMerchantNameRulesToUncorrected();
+    await _loadOtpRetention();
+    await _sweepOldOtps();
     _listenForIncoming();
+  }
+
+  // ---- OTP auto-delete ----
+
+  static const _otpRetentionPrefKey = 'otp_retention_days';
+  static const _lastOtpSweepPrefKey = 'last_otp_sweep_ms';
+  static const _lastOtpSweepCountPrefKey = 'last_otp_sweep_count';
+
+  /// Delete OTPs older than this many days; 0 = off (the default).
+  int otpRetentionDays = 0;
+  DateTime? lastOtpSweep;
+  int lastOtpSweepCount = 0;
+  bool _sweeping = false;
+
+  Future<void> _loadOtpRetention() async {
+    final prefs = await SharedPreferences.getInstance();
+    otpRetentionDays = prefs.getInt(_otpRetentionPrefKey) ?? 0;
+    final ms = prefs.getInt(_lastOtpSweepPrefKey);
+    lastOtpSweep = ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+    lastOtpSweepCount = prefs.getInt(_lastOtpSweepCountPrefKey) ?? 0;
+  }
+
+  /// How many messages turning retention on with [days] would delete now.
+  int otpsDeletableWith(int days) =>
+      selectOtpsToDelete(_allMessages, days: days, starredIds: starredMessageIds, now: DateTime.now()).length;
+
+  /// Saves the setting and, when turning it on, cleans up right away.
+  /// Returns how many messages were deleted.
+  Future<int> setOtpRetentionDays(int days) async {
+    otpRetentionDays = days;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_otpRetentionPrefKey, days);
+    return days > 0 ? _sweepOldOtps(force: true) : 0;
+  }
+
+  /// Deletes OTPs past the retention window, at most once a day (or now when
+  /// [force]). Only works as the default SMS app: Android silently ignores
+  /// deletes from any other app, so it doesn't even try otherwise.
+  Future<int> _sweepOldOtps({bool force = false}) async {
+    if (_sweeping || otpRetentionDays <= 0 || !isDefaultSmsApp) return 0;
+    final now = DateTime.now();
+    if (!force && lastOtpSweep != null && now.difference(lastOtpSweep!) < const Duration(days: 1)) {
+      return 0;
+    }
+    _sweeping = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // Recorded before deleting: the refresh below re-enters here, and the
+      // timestamp is what stops it sweeping again.
+      lastOtpSweep = now;
+      await prefs.setInt(_lastOtpSweepPrefKey, now.millisecondsSinceEpoch);
+      final victims = selectOtpsToDelete(
+        _allMessages,
+        days: otpRetentionDays,
+        starredIds: starredMessageIds,
+        now: now,
+      );
+      var deleted = 0;
+      if (victims.isNotEmpty) {
+        deleted = await _platform.deleteMessages([for (final m in victims) m.id]);
+      }
+      lastOtpSweepCount = deleted;
+      await prefs.setInt(_lastOtpSweepCountPrefKey, deleted);
+      if (deleted > 0) await refresh();
+      notifyListeners();
+      return deleted;
+    } catch (_) {
+      return 0;
+    } finally {
+      _sweeping = false;
+    }
   }
 
   /// Best-effort: an empty result (no permission, single-SIM device) just
@@ -813,6 +888,9 @@ class SmsProvider extends ChangeNotifier {
       error = null;
       _invalidateDerived();
       await _checkBudgetAlerts();
+      // Not awaited: it may call refresh() itself, which would wait on this
+      // very refresh to finish.
+      unawaited(_sweepOldOtps());
     } catch (e) {
       state = LoadState.error;
       error = e.toString();
