@@ -12,6 +12,14 @@ class Formatters {
   static final _fullDate = DateFormat('d MMM yyyy, h:mm a');
   static final _monthYear = DateFormat('MMM yyyy');
   static final _monthOnly = DateFormat('MMM');
+  static final _dayMonthTime = DateFormat('d MMM, h:mm a');
+
+  /// "9:30 PM" when [until] is today, otherwise "22 Nov, 9:30 PM".
+  static String muteUntil(DateTime until, {DateTime? now}) {
+    final n = now ?? DateTime.now();
+    final sameDay = until.year == n.year && until.month == n.month && until.day == n.day;
+    return sameDay ? _timeOfDay.format(until) : _dayMonthTime.format(until);
+  }
   static final _yearOnlyShort = DateFormat('yy');
   static final _units = NumberFormat('#,##0.###', 'en_IN');
 

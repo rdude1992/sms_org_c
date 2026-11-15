@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="notification_body_text">#B3FFFFFF</color>
+    <!-- Black barely shows on a dark shade; use the app accent instead. -->
+    <color name="otp_bubble">#FFC96442</color>
+</resources>

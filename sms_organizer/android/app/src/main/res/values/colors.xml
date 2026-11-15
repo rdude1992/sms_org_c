@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Text inside custom notification layouts (see
+      notification_otp_digits_expanded.xml). A theme attribute such as
+      ?android:attr/textColorSecondary resolves against a default light theme
+      there, giving near-black text on a dark shade. Colour resources with a
+      -night variant are resolved by System UI in its own current mode.
+    -->
+    <color name="notification_body_text">#8A000000</color>
+    <!-- Fill of the OTP code bubble bitmap (IncomingSmsNotifier.buildOtpBubbleBitmap). -->
+    <color name="otp_bubble">#FF000000</color>
+</resources>
