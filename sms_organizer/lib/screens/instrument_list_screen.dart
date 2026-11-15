@@ -89,7 +89,9 @@ class _InstrumentListScreenState extends State<InstrumentListScreen>
                   ? 'No cards or accounts detected in this range'
                   : 'No matches for "$trimmedQuery"',
             )
-          : ListView(
+          : RefreshIndicator(
+              onRefresh: context.read<SmsProvider>().refresh,
+              child: ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
               children: [
                 for (final section in sections)
@@ -99,6 +101,7 @@ class _InstrumentListScreenState extends State<InstrumentListScreen>
                       onTapItem: (s) => _openDrilldown(context, s, liveTransactions),
                     ),
               ],
+            ),
             ),
     );
   }

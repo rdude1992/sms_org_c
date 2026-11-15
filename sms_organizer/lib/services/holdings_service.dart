@@ -107,6 +107,20 @@ class FundHolding {
   }
 
   /// The most recent value statement at or before [asOf], if any.
+  /// Whether any event stated a unit count, so "0 units" means sold out
+  /// rather than "units never reported" (e.g. NPS contributions).
+  bool get _unitsTracked => events.any((e) => e.units != null || e.unitsBalance != null);
+
+  DateTime? _lastRedemptionAsOf(DateTime asOf) {
+    DateTime? last;
+    for (final e in events) {
+      if (e.kind.isRedemption && !e.date.isAfter(asOf) && (last == null || e.date.isAfter(last))) {
+        last = e.date;
+      }
+    }
+    return last;
+  }
+
   ({DateTime date, double value})? _valuationAsOf(DateTime asOf) {
     ({DateTime date, double value})? last;
     for (final v in valuations) {
@@ -133,7 +147,22 @@ class FundHolding {
     final unitsBased = (s.unitsHeld > 0 && s.nav != null) ? s.unitsHeld * s.nav! : null;
     final valuation = _valuationAsOf(asOf);
 
-    if (valuation == null) return unitsBased ?? s.netInvested;
+    // Fully sold: the SMS tracked units and they're now 0. The cost-basis
+    // fallback below would report invested − redeemed, which goes negative
+    // once you redeem at a profit (₹10k in, ₹12k out showed −₹2,000), and
+    // hide the realised gain. The holding is worth nothing; gain/loss
+    // (value − net invested) then comes out as the realised +₹2,000.
+    final lastRedemption = _lastRedemptionAsOf(asOf);
+    if (lastRedemption != null &&
+        s.unitsHeld <= 1e-6 &&
+        _unitsTracked &&
+        (valuation == null || valuation.date.isBefore(lastRedemption))) {
+      return 0;
+    }
+
+    // Cost basis can't be negative: without unit data, redeeming more than
+    // was put in means the gain was realised, not that the holding is in debt.
+    if (valuation == null) return unitsBased ?? (s.netInvested < 0 ? 0 : s.netInvested);
     if (unitsBased != null && s.navDate != null && s.navDate!.isAfter(valuation.date)) {
       return unitsBased;
     }
@@ -243,8 +272,9 @@ List<({DateTime date, double invested, double value})> buildValueTrend(
 /// rather than as of some not-yet-reached future date.
 DateTime _bucketEnd(DateTime bucketStart, TrendGranularity granularity, DateTime cap) {
   final next = switch (granularity) {
-    TrendGranularity.day => bucketStart.add(const Duration(days: 1)),
-    TrendGranularity.week => bucketStart.add(const Duration(days: 7)),
+    // Calendar steps, not add(Duration) — see bucketStartsBetween.
+    TrendGranularity.day => DateTime(bucketStart.year, bucketStart.month, bucketStart.day + 1),
+    TrendGranularity.week => DateTime(bucketStart.year, bucketStart.month, bucketStart.day + 7),
     TrendGranularity.month => DateTime(bucketStart.year, bucketStart.month + 1, 1),
   };
   final end = next.subtract(const Duration(milliseconds: 1));

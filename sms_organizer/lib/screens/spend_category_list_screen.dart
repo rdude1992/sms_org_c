@@ -56,7 +56,9 @@ class SpendCategoryListScreen extends StatelessWidget {
       ),
       body: categories.isEmpty
           ? const EmptyState(icon: Icons.pie_chart_outline, title: 'No spend in this range')
-          : ListView.separated(
+          : RefreshIndicator(
+              onRefresh: context.read<SmsProvider>().refresh,
+              child: ListView.separated(
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
               itemCount: categories.length,
               separatorBuilder: (context, _) => buildRowDivider(context),
@@ -79,6 +81,7 @@ class SpendCategoryListScreen extends StatelessWidget {
                   ),
                 );
               },
+            ),
             ),
     );
   }

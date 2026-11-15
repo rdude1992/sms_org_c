@@ -142,12 +142,17 @@ class InvestmentListScreen extends StatefulWidget {
   /// just not what opens by default.
   final int initialTabIndex;
 
+  /// Range the "By AMC" tab opens on. Insights passes its own selected range
+  /// so its header totals and the tab's donut/rows describe the same period.
+  final InvestmentRange initialAmcRange;
+
   const InvestmentListScreen({
     super.key,
     required this.investments,
     this.allInvestments,
     this.subtitle,
     this.initialTabIndex = 0,
+    this.initialAmcRange = InvestmentRange.allTime,
   });
 
   @override
@@ -372,7 +377,10 @@ class _InvestmentListScreenState extends State<InvestmentListScreen>
                     child: Row(
                       children: [
                         Expanded(
-                          child: TotalStat(label: 'Invested', value: investedTotal, color: scheme.primary),
+                          // Gross money put in during this scope. The By AMC
+                          // tab's figure is *net* (minus redemptions), so the
+                          // labels say which is which.
+                          child: TotalStat(label: 'Total invested', value: investedTotal, color: scheme.primary),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -408,7 +416,11 @@ class _InvestmentListScreenState extends State<InvestmentListScreen>
                   Expanded(
                     child: TabBarView(
                       children: [
-                        _AmcListView(providers: providers, allInvestments: liveAllInvestments),
+                        _AmcListView(
+                          providers: providers,
+                          allInvestments: liveAllInvestments,
+                          initialRange: widget.initialAmcRange,
+                        ),
                         _InvestmentListView(
                           investments: invested,
                           emptyText: 'Nothing invested.',
@@ -651,14 +663,20 @@ class _AmcListView extends StatefulWidget {
   /// everything the range picker and its drilldowns filter from.
   final List<InvestmentEvent> allInvestments;
 
-  const _AmcListView({required this.providers, required this.allInvestments});
+  final InvestmentRange initialRange;
+
+  const _AmcListView({
+    required this.providers,
+    required this.allInvestments,
+    this.initialRange = InvestmentRange.allTime,
+  });
 
   @override
   State<_AmcListView> createState() => _AmcListViewState();
 }
 
 class _AmcListViewState extends State<_AmcListView> {
-  InvestmentRange _range = InvestmentRange.allTime;
+  late InvestmentRange _range = widget.initialRange;
 
   @override
   Widget build(BuildContext context) {
@@ -693,7 +711,7 @@ class _AmcListViewState extends State<_AmcListView> {
             context,
             [
               for (final p in filteredProviders)
-                _ProviderRow(provider: p, allInvestments: widget.allInvestments),
+                _ProviderRow(provider: p, allInvestments: widget.allInvestments, range: _range),
             ],
           ),
         ],
@@ -776,6 +794,7 @@ class _AmcAnalytics extends StatelessWidget {
             providerKey: match.key,
             providerName: match.name,
             allInvestments: allInvestments,
+            initialRange: range,
           ),
         ),
       );
@@ -857,7 +876,7 @@ class _AmcAnalytics extends StatelessWidget {
     String valueAxisLabel(DateTime date) {
       switch (range.trendGranularity) {
         case TrendGranularity.day:
-          return Formatters.dayOnly(date);
+          return date.day == 1 ? Formatters.dayMonth(date) : Formatters.dayOnly(date);
         case TrendGranularity.week:
           return Formatters.dayMonth(date);
         case TrendGranularity.month:
@@ -871,7 +890,7 @@ class _AmcAnalytics extends StatelessWidget {
     String valueTooltipLabel(DateTime date) {
       switch (range.trendGranularity) {
         case TrendGranularity.day:
-          return Formatters.dayOnly(date);
+          return Formatters.dayMonth(date);
         case TrendGranularity.week:
           return Formatters.dayMonth(date);
         case TrendGranularity.month:
@@ -905,6 +924,8 @@ class _AmcAnalytics extends StatelessWidget {
           primaryColor: scheme.primary,
           secondaryColor: const Color(0xFFF59E0B),
           onTapBucket: openBucket,
+          rangeStart: from,
+          rangeEnd: to,
         ),
       ),
       const SizedBox(height: 16),
@@ -912,7 +933,7 @@ class _AmcAnalytics extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Row(
           children: [
-            Expanded(child: TotalStat(label: 'Invested', value: totalInvested, color: scheme.primary)),
+            Expanded(child: TotalStat(label: 'Net invested', value: totalInvested, color: scheme.primary)),
             const SizedBox(width: 12),
             Expanded(
               child: TotalStat(label: 'Est. current value', value: totalValue, color: scheme.onSurface),
@@ -965,7 +986,10 @@ class _ProviderRow extends StatelessWidget {
   /// further every time a provider row is drilled into.
   final List<InvestmentEvent> allInvestments;
 
-  const _ProviderRow({required this.provider, required this.allInvestments});
+  /// The By AMC tab's current range, carried into the detail screen.
+  final InvestmentRange range;
+
+  const _ProviderRow({required this.provider, required this.allInvestments, required this.range});
 
   @override
   Widget build(BuildContext context) {
@@ -987,6 +1011,7 @@ class _ProviderRow extends StatelessWidget {
               providerKey: p.key,
               providerName: p.name,
               allInvestments: allInvestments,
+              initialRange: range,
             ),
           ),
         ),

@@ -12,6 +12,7 @@ import '../services/categorization_service.dart';
 import '../services/contact_service.dart';
 import '../services/database_service.dart';
 import '../services/insights_service.dart';
+import '../services/investment_dedup_service.dart';
 import '../services/sms_platform_service.dart';
 import '../services/spend_category_detector.dart';
 import '../services/transaction_parser_service.dart';
@@ -158,7 +159,14 @@ class SmsProvider extends ChangeNotifier {
   bool isPinned(int threadId) => pinnedThreadIds.contains(threadId);
   bool isStarred(int messageId) => starredMessageIds.contains(messageId);
   List<Transaction> get transactions => _transactions;
-  List<InvestmentEvent> get investments => _investments;
+  /// Investment events with AMC + registrar duplicates of the same
+  /// installment removed (see investment_dedup_service.dart). Everything
+  /// user-facing (totals, holdings, lists) reads this.
+  List<InvestmentEvent> get investments => _dedupedInvestments ??= dedupeInvestments(_investments);
+  List<InvestmentEvent>? _dedupedInvestments;
+
+  /// Every parsed event, duplicates included — for backup/export only.
+  List<InvestmentEvent> get rawInvestments => _investments;
   List<SimInfo> get activeSims => _activeSims;
   bool get hasMultipleSims => _activeSims.length > 1;
 
@@ -231,14 +239,33 @@ class SmsProvider extends ChangeNotifier {
   /// alive) when a notification was tapped. Subscribe once at startup.
   Stream<int> get onNotificationThreadTapped => _platform.onNotificationThreadTapped;
 
+  // InsightsScreen asks for up to three summaries per rebuild, and every
+  // provider notification rebuilds it (even off-screen, it's kept alive).
+  // Each build() filters, de-duplicates and groups every transaction, so
+  // results are cached until the next notifyListeners(), which every data
+  // change goes through. `to` is keyed to the minute because the presets
+  // end at "now", which differs on every call; anything that arrives in the
+  // meantime triggers a refresh, and with it a notify that clears this.
+  final Map<String, InsightsSummary> _summaryCache = {};
+
+  @override
+  void notifyListeners() {
+    _summaryCache.clear();
+    _dedupedInvestments = null;
+    super.notifyListeners();
+  }
+
   InsightsSummary insightsSummary({
     DateTime? from,
     DateTime? to,
     TrendGranularity granularity = TrendGranularity.month,
   }) {
-    return _insights.build(
+    final key = '${from?.microsecondsSinceEpoch}|'
+        '${to == null ? '' : to.millisecondsSinceEpoch ~/ Duration.millisecondsPerMinute}|'
+        '${granularity.name}';
+    return _summaryCache[key] ??= _insights.build(
       transactions: _transactions,
-      investments: _investments,
+      investments: investments,
       from: from,
       to: to,
       granularity: granularity,

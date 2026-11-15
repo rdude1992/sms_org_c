@@ -345,7 +345,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
       await provider.backup.exportAndShare(
         messages: provider.allMessages,
         transactions: provider.transactions,
-        investments: provider.investments,
+        investments: provider.rawInvestments,
       );
     } catch (e) {
       if (context.mounted) {

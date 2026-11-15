@@ -83,7 +83,9 @@ class _MerchantListScreenState extends State<MerchantListScreen>
                   ? 'No merchants detected in this range'
                   : 'No matches for "$trimmedQuery"',
             )
-          : ListView.separated(
+          : RefreshIndicator(
+              onRefresh: context.read<SmsProvider>().refresh,
+              child: ListView.separated(
               padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: sorted.length,
               separatorBuilder: (context, _) => buildRowDivider(context),
@@ -91,6 +93,7 @@ class _MerchantListScreenState extends State<MerchantListScreen>
                 summary: sorted[index],
                 onTap: () => _openDrilldown(context, sorted[index], liveTransactions),
               ),
+            ),
             ),
     );
   }

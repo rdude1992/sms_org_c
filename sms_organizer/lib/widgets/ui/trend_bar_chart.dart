@@ -22,6 +22,13 @@ class TrendBarChart extends StatelessWidget {
   final Color secondaryColor;
   final ValueChanged<DateTime> onTapBucket;
 
+  /// The range the buckets were cut from, when bounded. Used only so the
+  /// "Avg / bucket" caption ignores partial buckets: a week that starts
+  /// before [rangeStart], or the still-running bucket that ends after
+  /// [rangeEnd] (defaults to now). Null means unbounded on that side.
+  final DateTime? rangeStart;
+  final DateTime? rangeEnd;
+
   const TrendBarChart({
     super.key,
     required this.dates,
@@ -33,13 +40,15 @@ class TrendBarChart extends StatelessWidget {
     required this.primaryColor,
     required this.secondaryColor,
     required this.onTapBucket,
+    this.rangeStart,
+    this.rangeEnd,
   });
 
-  /// Full-year form — used for the tooltip header, which has room for it.
+  /// Tooltip header, which has room for the month too.
   String _bucketLabel(DateTime date) {
     switch (granularity) {
       case TrendGranularity.day:
-        return Formatters.dayOnly(date);
+        return Formatters.dayMonth(date);
       case TrendGranularity.week:
         return Formatters.dayMonth(date);
       case TrendGranularity.month:
@@ -59,7 +68,9 @@ class TrendBarChart extends StatelessWidget {
   String _axisLabel(DateTime date) {
     switch (granularity) {
       case TrendGranularity.day:
-        return Formatters.dayOnly(date);
+        // Bare day numbers ("30 31 1 2") hide where a month changes; name the
+        // month on the 1st and on the first bucket.
+        return (date.day == 1 || date == dates.first) ? Formatters.dayMonth(date) : Formatters.dayOnly(date);
       case TrendGranularity.week:
         return Formatters.dayMonth(date);
       case TrendGranularity.month:
@@ -76,6 +87,16 @@ class TrendBarChart extends StatelessWidget {
       case TrendGranularity.month:
         return 'month';
     }
+  }
+
+  bool _isCompleteBucket(DateTime start) {
+    final next = switch (granularity) {
+      TrendGranularity.day => DateTime(start.year, start.month, start.day + 1),
+      TrendGranularity.week => DateTime(start.year, start.month, start.day + 7),
+      TrendGranularity.month => DateTime(start.year, start.month + 1, 1),
+    };
+    if (rangeStart != null && start.isBefore(rangeStart!)) return false;
+    return !next.isAfter(rangeEnd ?? DateTime.now());
   }
 
   static const _axisLabelStyle = TextStyle(fontSize: 10);
@@ -100,8 +121,16 @@ class TrendBarChart extends StatelessWidget {
       for (var i = 0; i < dates.length; i++) primaryValues[i] + secondaryValues[i],
     ].fold<double>(0, (a, b) => a > b ? a : b);
     final maxY = maxVal == 0 ? 1.0 : maxVal * 1.2;
-    final avgPrimary = primaryValues.reduce((a, b) => a + b) / primaryValues.length;
-    final avgSecondary = secondaryValues.reduce((a, b) => a + b) / secondaryValues.length;
+    // Average over complete buckets only, so a 6-day first week or today's
+    // half-finished day doesn't drag the figure down. Falls back to every
+    // bucket when none is complete (e.g. a range shorter than one bucket).
+    final complete = [
+      for (var i = 0; i < dates.length; i++)
+        if (_isCompleteBucket(dates[i])) i,
+    ];
+    final avgIdx = complete.isEmpty ? [for (var i = 0; i < dates.length; i++) i] : complete;
+    final avgPrimary = avgIdx.fold<double>(0, (a, i) => a + primaryValues[i]) / avgIdx.length;
+    final avgSecondary = avgIdx.fold<double>(0, (a, i) => a + secondaryValues[i]) / avgIdx.length;
 
     // Widest y-axis tick label actually reachable at this interval — a
     // stretch of large-amount buckets (₹ lakhs/crores) needs a visibly
@@ -168,7 +197,10 @@ class TrendBarChart extends StatelessWidget {
                   final plotWidth = (constraints.maxWidth - leftReservedSize - _rightReservedSize)
                       .clamp(1.0, double.infinity);
                   final labelSlot = xLabelWidth + 14;
-                  final maxLabels = (plotWidth / labelSlot).floor().clamp(2, dates.length);
+                  // Lower bound 1, not 2: clamp() throws when its lower bound exceeds the
+                  // upper one, and a range with a single bucket (the 1st of the
+                  // month, January on "This year") has dates.length == 1.
+                  final maxLabels = (plotWidth / labelSlot).floor().clamp(1, dates.length);
                   final labelInterval = (dates.length / maxLabels).ceil().clamp(1, dates.length);
 
                   return BarChart(
