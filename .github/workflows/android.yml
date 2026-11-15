@@ -1,9 +1,11 @@
 name: Android build
 
+# Every push and PR builds signed APKs. A push to main whose pubspec.yaml
+# version has no Release yet also publishes one (tag v<version>, created by
+# GitHub on the built commit), so a release is just "bump the version, merge".
 on:
   push:
     branches: ['**']
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -21,12 +23,34 @@ jobs:
     defaults:
       run:
         working-directory: sms_organizer
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_release: ${{ steps.version.outputs.should_release }}
     env:
-      # On a release tag the Gradle build refuses to fall back to the debug
-      # key — a debug-signed APK must never be published as a release.
-      CI_REQUIRE_RELEASE_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') && 'true' || 'false' }}
+      # On main the Gradle build refuses to fall back to the debug key, so a
+      # debug-signed APK can never be published as a release.
+      CI_REQUIRE_RELEASE_SIGNING: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+          fetch-depth: 0
+
+      - name: Decide whether this push is a release
+        id: version
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//; s/+.*//')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          SHOULD_RELEASE=false
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+              echo "v$VERSION is already released; building only. Bump version: in pubspec.yaml to release."
+            else
+              SHOULD_RELEASE=true
+              echo "Will publish release v$VERSION."
+            fi
+          fi
+          echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@v4
         with:
@@ -117,7 +141,7 @@ jobs:
           retention-days: 30
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.build.outputs.should_release == 'true'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -139,5 +163,10 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ needs.build.outputs.version }}
+          name: SmartSMS ${{ needs.build.outputs.version }}
+          # The tag doesn't exist yet; it is created on exactly the commit
+          # this run built and tested.
+          target_commitish: ${{ github.sha }}
           files: dist/*
           generate_release_notes: true

@@ -479,11 +479,13 @@ be installed over an existing install.
 Without the secrets, branch and PR builds fall back to the debug key, and the
 artifact is named `smartsms-apks-unsigned-preview`.
 
-**Releases.** Pushing a `v*` tag (e.g. `git tag v2.1.4 && git push origin v2.1.4`)
-also publishes a GitHub Release with the signed APKs and `SHA256SUMS.txt`.
-Release builds never fall back to the debug key: the workflow sets
-`CI_REQUIRE_RELEASE_SIGNING=true`, and Gradle fails if `android/key.properties`
-is missing.
+**Releases.** A push to `main` whose `version:` in `pubspec.yaml` hasn't been
+released yet publishes a GitHub Release `v<version>` with the signed APKs and
+`SHA256SUMS.txt`. GitHub creates the tag on the built commit, so nobody has to
+push tags. To ship: bump `version:` on a branch, then merge its PR. Pushes to
+`main` without a version bump only build. Builds on `main` never fall back to
+the debug key: the workflow sets `CI_REQUIRE_RELEASE_SIGNING=true`, and Gradle
+fails if `android/key.properties` is missing.
 
 For a local signed build, create `android/key.properties` (git-ignored):
 
