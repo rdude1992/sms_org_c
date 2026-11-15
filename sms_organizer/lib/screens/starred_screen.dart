@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import '../models/category.dart';
 import '../providers/sms_provider.dart';
@@ -35,7 +35,7 @@ class StarredScreen extends StatelessWidget {
                     return ListTile(
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                       leading: CircleAvatar(
-                        backgroundColor: m.category.color.withOpacity(0.15),
+                        backgroundColor: m.category.color.withValues(alpha: 0.15),
                         child: Icon(m.category.icon, color: m.category.color, size: 18),
                       ),
                       title: Text(

@@ -1,12 +1,12 @@
 import 'dart:math' as math;
 import 'package:fl_chart/fl_chart.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../../services/insights_service.dart' show TrendGranularity;
 import '../../utils/formatters.dart';
 import 'chart_label_sizing.dart';
 
 /// Stacked bar chart of two values (e.g. credited/debited, invested/
-/// redeemed) per date bucket, with an "Avg X / Y per <bucket>" caption and
+/// redeemed) per date bucket, with an "Avg X / Y per `<bucket>`" caption and
 /// a tap-to-drilldown callback. Bucket labels and the caption's unit both
 /// adapt to [granularity] (day/week/month) — shared by the Insights trend
 /// chart and the Investments "by AMC" trend chart, which both need this
@@ -323,7 +323,7 @@ class TrendBarChart extends StatelessWidget {
                         drawVerticalLine: false,
                         horizontalInterval: maxY / 4,
                         getDrawingHorizontalLine: (_) =>
-                            FlLine(color: scheme.outlineVariant.withOpacity(0.5), strokeWidth: 1),
+                            FlLine(color: scheme.outlineVariant.withValues(alpha: 0.5), strokeWidth: 1),
                       ),
                       borderData: FlBorderData(show: false),
                     ),

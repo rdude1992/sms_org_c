@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// A bordered card wrapping a column of rows (typically [ListTile]s or
 /// [SwitchListTile]s) — groups a settings-style section visually instead

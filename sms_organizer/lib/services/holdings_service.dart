@@ -267,7 +267,7 @@ List<({DateTime date, double units})> unitsHistory(FundHolding holding) => [
     ];
 
 /// A detected recurring monthly contribution — surfaced as "Monthly SIP
-/// ₹X · live since <date>" even for holdings whose SMS never explicitly
+/// ₹X · live since `<date>`" even for holdings whose SMS never explicitly
 /// tagged themselves as a SIP (TransactionParserService only sets
 /// InvestmentKind.mutualFundSip when the SMS itself says "SIP"; plenty of
 /// SIP debit SMS just read as a plain purchase).

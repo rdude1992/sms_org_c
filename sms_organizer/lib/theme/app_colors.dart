@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Warm "stone" neutral scale and semantic tokens styled after Claude's
 /// (claude.ai) UI: a paper/cream canvas rather than cool gray, hairline

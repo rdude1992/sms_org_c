@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../models/transaction.dart';
 import '../providers/sms_provider.dart';
 
@@ -273,7 +273,7 @@ class _TransactionEditSheetState extends State<_TransactionEditSheet> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<InstrumentType>(
-                value: _instrument,
+                initialValue: _instrument,
                 decoration: const InputDecoration(labelText: 'Instrument'),
                 items: const [
                   DropdownMenuItem(value: InstrumentType.debitCard, child: Text('Debit Card')),
@@ -305,7 +305,7 @@ class _TransactionEditSheetState extends State<_TransactionEditSheet> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<SpendCategory?>(
-                value: _spendCategory,
+                initialValue: _spendCategory,
                 decoration: const InputDecoration(labelText: 'Spend category'),
                 items: [
                   const DropdownMenuItem(value: null, child: Text('Uncategorised')),
@@ -433,7 +433,7 @@ class _BulkTransactionEditSheetState extends State<_BulkTransactionEditSheet> {
               ),
               const SizedBox(height: 20),
               DropdownButtonFormField<TxnDirection?>(
-                value: _direction,
+                initialValue: _direction,
                 decoration: const InputDecoration(labelText: 'Type'),
                 items: const [
                   DropdownMenuItem(value: null, child: Text('No change')),
@@ -445,7 +445,7 @@ class _BulkTransactionEditSheetState extends State<_BulkTransactionEditSheet> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<InstrumentType?>(
-                value: _instrument,
+                initialValue: _instrument,
                 decoration: const InputDecoration(labelText: 'Instrument'),
                 items: const [
                   DropdownMenuItem(value: null, child: Text('No change')),
@@ -476,7 +476,7 @@ class _BulkTransactionEditSheetState extends State<_BulkTransactionEditSheet> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<Object?>(
-                value: _spendCategory,
+                initialValue: _spendCategory,
                 decoration: const InputDecoration(labelText: 'Spend category'),
                 items: [
                   const DropdownMenuItem(value: keepSpendCategory, child: Text('No change')),

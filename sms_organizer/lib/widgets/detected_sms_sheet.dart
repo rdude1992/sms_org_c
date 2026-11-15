@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import '../utils/formatters.dart';
 
@@ -158,7 +158,7 @@ void showDetectedSmsSheet(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: scheme.surfaceVariant.withOpacity(0.5),
+                  color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: SelectableText(

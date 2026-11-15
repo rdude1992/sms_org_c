@@ -69,7 +69,7 @@ class SearchPreviewText extends StatelessWidget {
           matchStyle: baseStyle.copyWith(
             color: matchColor,
             fontWeight: FontWeight.bold,
-            backgroundColor: matchColor.withOpacity(0.12),
+            backgroundColor: matchColor.withValues(alpha: 0.12),
           ),
         ),
       ),

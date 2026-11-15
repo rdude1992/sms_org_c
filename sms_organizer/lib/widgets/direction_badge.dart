@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Small badge showing whether a message was received (down-left arrow) or
 /// sent (up-right arrow) — used to disambiguate direction in flat list views
@@ -30,7 +30,7 @@ class DirectionBadge extends StatelessWidget {
       ),
       child: Container(
         padding: EdgeInsets.all(padding),
-        decoration: BoxDecoration(color: color.withOpacity(0.2), shape: BoxShape.circle),
+        decoration: BoxDecoration(color: color.withValues(alpha: 0.2), shape: BoxShape.circle),
         child: Icon(
           isIncoming ? Icons.south_west : Icons.north_east,
           size: iconSize,

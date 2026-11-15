@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 import 'package:fl_chart/fl_chart.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'chart_label_sizing.dart';
 
 /// One line's worth of data for [TrendLineChart] — index-aligned with the
@@ -253,7 +253,7 @@ class TrendLineChart extends StatelessWidget {
                         drawVerticalLine: false,
                         horizontalInterval: yInterval,
                         getDrawingHorizontalLine: (_) =>
-                            FlLine(color: scheme.outlineVariant.withOpacity(0.5), strokeWidth: 1),
+                            FlLine(color: scheme.outlineVariant.withValues(alpha: 0.5), strokeWidth: 1),
                       ),
                       borderData: FlBorderData(show: false),
                     ),

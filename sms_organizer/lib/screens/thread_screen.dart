@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
@@ -512,7 +512,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
                   child: Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.4),
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -603,9 +603,9 @@ class _ThreadTitle extends StatelessWidget {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.normal,
-                color: scheme.onSurface.withOpacity(0.7),
+                color: scheme.onSurface.withValues(alpha: 0.7),
                 decoration: TextDecoration.underline,
-                decorationColor: scheme.onSurface.withOpacity(0.35),
+                decorationColor: scheme.onSurface.withValues(alpha: 0.35),
               ),
             ),
           ),

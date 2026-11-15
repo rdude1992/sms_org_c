@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// `reversal` is new (ported from getTransactionType in the source regex
 /// file): covers "reversed"/"declined"/"failed" transactions, which

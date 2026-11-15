@@ -1,5 +1,5 @@
 import 'package:fl_chart/fl_chart.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../../utils/formatters.dart';
 
 /// Tappable donut + legend breakdown of pre-bucketed slices — shared by

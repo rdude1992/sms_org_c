@@ -9,7 +9,7 @@ import '../models/transaction.dart';
 ///
 /// Deliberately conservative: every rule below is a merchant name or a
 /// category-specific keyword that's very unlikely to show up in an
-/// unrelated SMS. Ambiguous purchases (a generic "paid to <name>" UPI
+/// unrelated SMS. Ambiguous purchases (a generic "paid to `<name>`" UPI
 /// transfer with no other context) are left null ("Uncategorised") rather
 /// than guessed — a wrong auto-tag is worse than none, since Insights'
 /// spend-by-category totals would silently misattribute real money.

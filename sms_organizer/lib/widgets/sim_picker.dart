@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../models/sim_info.dart';
 
 /// Fixed accent per SIM slot, since Android exposes no colour of its own
@@ -64,9 +64,9 @@ class SimPicker extends StatelessWidget {
             height: 40,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.14),
+              color: color.withValues(alpha: 0.14),
               shape: BoxShape.circle,
-              border: Border.all(color: color.withOpacity(0.6)),
+              border: Border.all(color: color.withValues(alpha: 0.6)),
             ),
             child: Text(
               '${selected.slotIndex + 1}',

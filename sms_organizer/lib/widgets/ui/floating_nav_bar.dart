@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class FloatingNavItem {
   final IconData icon;
@@ -74,7 +74,7 @@ class _NavButton extends StatelessWidget {
           curve: Curves.easeOut,
           padding: EdgeInsets.symmetric(horizontal: selected ? 16 : 12, vertical: 10),
           decoration: BoxDecoration(
-            color: selected ? scheme.primary.withOpacity(0.12) : Colors.transparent,
+            color: selected ? scheme.primary.withValues(alpha: 0.12) : Colors.transparent,
             borderRadius: BorderRadius.circular(24),
           ),
           child: Row(

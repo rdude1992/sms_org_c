@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Adds a toggleable search field to an AppBar — tap the search icon to
 /// swap the title for a text field, tap close to go back to the plain

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// General-purpose navigator key for MaterialApp. Not currently required by
 /// any specific feature — notification-tap navigation is handled directly

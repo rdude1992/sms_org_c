@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../../utils/formatters.dart';
 
 /// Shared between the Investments dashboard's aggregate gain/loss and

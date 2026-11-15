@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../models/category.dart';
 import '../models/sms_message.dart';
 import '../providers/sms_provider.dart';

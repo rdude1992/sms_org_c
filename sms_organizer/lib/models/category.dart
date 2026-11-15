@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Mirrors the 5-category model from the ported classifier (see
 /// lib/services/categorization_service.dart): the original 4-category
