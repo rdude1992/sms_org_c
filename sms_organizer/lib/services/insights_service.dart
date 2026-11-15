@@ -189,9 +189,28 @@ class SpendCategorySummary {
   String get displayName => category?.label ?? 'Uncategorised spend';
 }
 
+/// Debits that move money between your own pots rather than spending it:
+/// paying a card bill (the card purchases were already counted), transfers
+/// to your own accounts, and investment debits. Excluded from
+/// [InsightsSummary.totalSpend]; still part of [InsightsSummary.totalDebit].
+const Set<SpendCategory> kNonSpendCategories = {
+  SpendCategory.creditCardPayment,
+  SpendCategory.transfer,
+  SpendCategory.investment,
+};
+
+/// Whether [t] counts as spending in [InsightsSummary.totalSpend].
+bool isSpend(Transaction t) =>
+    t.direction == TxnDirection.debit && !kNonSpendCategories.contains(t.spendCategory);
+
 class InsightsSummary {
   final double totalCredit;
   final double totalDebit;
+
+  /// Debits minus [kNonSpendCategories]. Raw [totalDebit] counts a card
+  /// purchase twice once the card bill is paid from the bank, plus every
+  /// self-transfer and SIP debit.
+  final double totalSpend;
   final int transactionCount;
   final List<InstrumentSummary> byInstrument;
   final List<MerchantSummary> byMerchant;
@@ -205,6 +224,7 @@ class InsightsSummary {
   InsightsSummary({
     required this.totalCredit,
     required this.totalDebit,
+    required this.totalSpend,
     required this.transactionCount,
     required this.byInstrument,
     required this.byMerchant,
@@ -243,6 +263,7 @@ class InsightsService {
 
     double totalCredit = 0;
     double totalDebit = 0;
+    double totalSpend = 0;
     final Map<String, TrendPoint> trendMap = {};
 
     for (final t in deduped) {
@@ -250,6 +271,7 @@ class InsightsService {
         totalCredit += t.amount;
       } else if (t.direction == TxnDirection.debit) {
         totalDebit += t.amount;
+        if (isSpend(t)) totalSpend += t.amount;
       }
 
       final bucketStart = trendBucketStart(t.date, granularity);
@@ -289,6 +311,7 @@ class InsightsService {
     return InsightsSummary(
       totalCredit: totalCredit,
       totalDebit: totalDebit,
+      totalSpend: totalSpend,
       transactionCount: deduped.length,
       byInstrument: instrumentList,
       byMerchant: merchantList,
@@ -408,8 +431,9 @@ DateTime trendBucketStart(DateTime date, TrendGranularity granularity) {
     case TrendGranularity.day:
       return DateTime(date.year, date.month, date.day);
     case TrendGranularity.week:
-      final dayOnly = DateTime(date.year, date.month, date.day);
-      return dayOnly.subtract(Duration(days: date.weekday - 1));
+      // Calendar arithmetic, not Duration: subtracting N*24h from a local
+      // midnight lands on 23:00 or 01:00 across a daylight-saving change.
+      return DateTime(date.year, date.month, date.day - (date.weekday - 1));
     case TrendGranularity.month:
       return DateTime(date.year, date.month);
   }
@@ -429,8 +453,11 @@ List<DateTime> bucketStartsBetween(DateTime start, DateTime end, TrendGranularit
   while (!current.isAfter(endBucket)) {
     result.add(current);
     current = switch (granularity) {
-      TrendGranularity.day => current.add(const Duration(days: 1)),
-      TrendGranularity.week => current.add(const Duration(days: 7)),
+      // Calendar steps, not add(Duration): 24h/168h drifts off local
+      // midnight across a daylight-saving change, after which no bucket key
+      // matches its data and every later bucket silently reads zero.
+      TrendGranularity.day => DateTime(current.year, current.month, current.day + 1),
+      TrendGranularity.week => DateTime(current.year, current.month, current.day + 7),
       TrendGranularity.month => DateTime(current.year, current.month + 1, 1),
     };
   }

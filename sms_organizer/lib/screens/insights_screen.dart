@@ -165,7 +165,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
   (DateTime?, DateTime?) _boundsFor(DateTime now) {
     final custom = _customRange;
     if (_range == InsightsRange.custom && custom != null) {
-      final end = DateTime(custom.end.year, custom.end.month, custom.end.day, 23, 59, 59);
+      // The very last instant of the end day: 23:59:59.000 missed a message
+      // stamped 23:59:59.400. (Range checks use isAfter(to), so inclusive.)
+      final end = DateTime(custom.end.year, custom.end.month, custom.end.day + 1)
+          .subtract(const Duration(microseconds: 1));
       return (custom.start, end);
     }
     return _range.boundsFrom(now);
@@ -254,7 +257,12 @@ class _InsightsScreenState extends State<InsightsScreen> {
             // rather than one end trailing "now" mid-period, so there's no
             // partial-period ambiguity here to distort the comparison.
             final length = (to ?? now).difference(from);
-            previousSummary = provider.insightsSummary(from: from.subtract(length), to: from);
+            // `to` stops just before `from` so a transaction at exactly
+            // `from` isn't counted in both periods.
+            previousSummary = provider.insightsSummary(
+              from: from.subtract(length),
+              to: from.subtract(const Duration(microseconds: 1)),
+            );
           }
         }
 
@@ -309,18 +317,36 @@ class _InsightsScreenState extends State<InsightsScreen> {
                 onSelected: _selectRange,
               ),
               Expanded(
-                child: provider.transactions.isEmpty
-                    ? const EmptyState(
-                        icon: Icons.insights_outlined,
-                        title: 'No insights yet',
-                        message: 'No transaction SMS detected yet. Once bank/card alerts arrive '
-                            '(or after the first sync), spend and investment insights will show up here.',
+                // Empty states are still pull-to-refresh lists, and keep the
+                // Investments card when there is investment data: it used to
+                // vanish with them, leaving holdings unreachable (e.g. "This
+                // month" before any spend).
+                child: provider.transactions.isEmpty || filteredTransactions.isEmpty
+                    ? RefreshIndicator(
+                        onRefresh: provider.refresh,
+                        child: ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.all(16),
+                          children: [
+                            provider.transactions.isEmpty
+                                ? const EmptyState(
+                                    icon: Icons.insights_outlined,
+                                    title: 'No insights yet',
+                                    message: 'No transaction SMS detected yet. Once bank/card alerts arrive '
+                                        '(or after the first sync), spend and investment insights will show up here.',
+                                  )
+                                : const EmptyState(
+                                    icon: Icons.filter_alt_off_outlined,
+                                    title: 'No transactions in this range',
+                                  ),
+                            if (provider.investments.isNotEmpty)
+                              _InvestmentCard(
+                                summary: summary,
+                                onTap: () => _openInvestments(context, provider, filteredInvestments),
+                              ),
+                          ],
+                        ),
                       )
-                    : filteredTransactions.isEmpty
-                        ? const EmptyState(
-                            icon: Icons.filter_alt_off_outlined,
-                            title: 'No transactions in this range',
-                          )
                         : RefreshIndicator(
                             onRefresh: provider.refresh,
                             child: ListView(
@@ -376,6 +402,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
                               const SizedBox(height: 12),
                               _TrendChart(
                                 summary: summary,
+                                rangeStart: from,
+                                rangeEnd: to,
                                 onTapBucket: (bucketStart) => _openTrendDrilldown(
                                   context,
                                   granularity: summary.trendGranularity,
@@ -585,18 +613,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
                               const SizedBox(height: 24),
                               _InvestmentCard(
                                 summary: summary,
-                                onTap: filteredInvestments.isEmpty
+                                onTap: provider.investments.isEmpty
                                     ? null
-                                    : () => Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => InvestmentListScreen(
-                                              investments: filteredInvestments,
-                                              allInvestments: provider.investments,
-                                              subtitle: _effectiveLabel,
-                                            ),
-                                          ),
-                                        ),
+                                    : () => _openInvestments(context, provider, filteredInvestments),
                               ),
                             ],
                             ),
@@ -608,6 +627,33 @@ class _InsightsScreenState extends State<InsightsScreen> {
       },
     );
   }
+
+  /// Opens Investments scoped to the selected range. If that range has no
+  /// investment activity (no SIP yet this month), it opens all-time instead
+  /// of being a dead card. The By AMC tab starts on the matching range.
+  void _openInvestments(BuildContext context, SmsProvider provider, List<InvestmentEvent> inRange) {
+    final useAll = inRange.isEmpty;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => InvestmentListScreen(
+          investments: useAll ? provider.investments : inRange,
+          allInvestments: provider.investments,
+          subtitle: useAll ? 'All time' : _effectiveLabel,
+          initialAmcRange: useAll ? InvestmentRange.allTime : _amcRangeFor(_range),
+        ),
+      ),
+    );
+  }
+
+  /// Nearest By AMC range for an Insights range. A custom range has no
+  /// equivalent chip, so it opens on all time.
+  static InvestmentRange _amcRangeFor(InsightsRange r) => switch (r) {
+        InsightsRange.thisMonth => InvestmentRange.thisMonth,
+        InsightsRange.last3Months => InvestmentRange.last3Months,
+        InsightsRange.thisYear => InvestmentRange.thisYear,
+        InsightsRange.allTime || InsightsRange.custom => InvestmentRange.allTime,
+      };
 
   void _openDrilldown(
     BuildContext context, {
@@ -706,14 +752,21 @@ class _TotalsRow extends StatelessWidget {
         ),
         const SizedBox(width: 12),
         Expanded(
+          // "Spent" leaves out card-bill payments, self-transfers and
+          // investment debits (kNonSpendCategories): raw debits count a card
+          // purchase a second time when the bill is paid. The raw figure is
+          // still shown underneath whenever the two differ.
           child: _TotalCard(
-            label: 'Debited',
-            value: summary.totalDebit,
-            previousValue: previous?.totalDebit,
+            label: 'Spent',
+            value: summary.totalSpend,
+            previousValue: previous?.totalSpend,
             color: const Color(0xFFEF4444),
             icon: Icons.arrow_upward,
             // For spend, going up is bad.
             increaseIsGood: false,
+            footnote: (summary.totalDebit - summary.totalSpend).abs() >= 1
+                ? 'Debited ${Formatters.currency(summary.totalDebit)} incl. card bills, transfers & investments'
+                : null,
             onTap: () => onTapDirection(TxnDirection.debit),
           ),
         ),
@@ -730,6 +783,7 @@ class _TotalCard extends StatelessWidget {
   final IconData icon;
   final bool increaseIsGood;
   final VoidCallback onTap;
+  final String? footnote;
 
   const _TotalCard({
     required this.label,
@@ -739,6 +793,7 @@ class _TotalCard extends StatelessWidget {
     required this.icon,
     required this.increaseIsGood,
     required this.onTap,
+    this.footnote,
   });
 
   @override
@@ -770,6 +825,13 @@ class _TotalCard extends StatelessWidget {
               if (previousValue != null) ...[
                 const SizedBox(height: 6),
                 _TrendBadge(current: value, previous: previousValue!, increaseIsGood: increaseIsGood),
+              ],
+              if (footnote != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  footnote!,
+                  style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
               ],
             ],
           ),
@@ -828,7 +890,9 @@ class _TrendBadge extends StatelessWidget {
 class _TrendChart extends StatelessWidget {
   final InsightsSummary summary;
   final ValueChanged<DateTime> onTapBucket;
-  const _TrendChart({required this.summary, required this.onTapBucket});
+  final DateTime? rangeStart;
+  final DateTime? rangeEnd;
+  const _TrendChart({required this.summary, required this.onTapBucket, this.rangeStart, this.rangeEnd});
 
   static const _creditColor = Color(0xFF10B981);
   static const _debitColor = Color(0xFFEF4444);
@@ -845,6 +909,8 @@ class _TrendChart extends StatelessWidget {
       primaryColor: _creditColor,
       secondaryColor: _debitColor,
       onTapBucket: onTapBucket,
+      rangeStart: rangeStart,
+      rangeEnd: rangeEnd,
     );
   }
 }

@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:provider/provider.dart';
 import '../models/transaction.dart';
+import '../providers/sms_provider.dart';
 import '../services/holdings_service.dart';
 import '../services/insights_service.dart';
 import '../utils/formatters.dart';
@@ -31,20 +33,28 @@ class AmcDetailScreen extends StatefulWidget {
     required this.providerKey,
     required this.providerName,
     required this.allInvestments,
+    this.initialRange = InvestmentRange.allTime,
   });
+
+  /// Range the screen opens on (the By AMC tab's current one).
+  final InvestmentRange initialRange;
 
   @override
   State<AmcDetailScreen> createState() => _AmcDetailScreenState();
 }
 
 class _AmcDetailScreenState extends State<AmcDetailScreen> {
-  InvestmentRange _range = InvestmentRange.allTime;
+  late InvestmentRange _range = widget.initialRange;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // Live from the provider, not the constructor snapshot: an edit made in
+    // a screen pushed from here (or a new SMS) must show up when you come
+    // back, as on every other drilldown.
+    final sms = context.watch<SmsProvider>();
     final providerEvents =
-        widget.allInvestments.where((i) => i.providerGroupKey == widget.providerKey).toList()
+        sms.investments.where((i) => i.providerGroupKey == widget.providerKey).toList()
           ..sort((a, b) => a.date.compareTo(b.date));
 
     final holdings = computeFundHoldings(providerEvents);
@@ -84,7 +94,10 @@ class _AmcDetailScreenState extends State<AmcDetailScreen> {
           ),
         ],
       ),
-      body: ListView(
+      body: RefreshIndicator(
+        onRefresh: sms.refresh,
+        child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(bottom: 24),
         children: [
           Container(
@@ -93,7 +106,7 @@ class _AmcDetailScreenState extends State<AmcDetailScreen> {
             color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
             child: Row(
               children: [
-                Expanded(child: TotalStat(label: 'Invested', value: totalInvested, color: scheme.primary)),
+                Expanded(child: TotalStat(label: 'Net invested', value: totalInvested, color: scheme.primary)),
                 const SizedBox(width: 12),
                 Expanded(
                   child: TotalStat(label: 'Est. current value', value: totalValue, color: scheme.onSurface),
@@ -148,6 +161,7 @@ class _AmcDetailScreenState extends State<AmcDetailScreen> {
             ),
         ],
       ),
+      ),
     );
   }
 }
@@ -155,7 +169,7 @@ class _AmcDetailScreenState extends State<AmcDetailScreen> {
 String _bucketLabel(DateTime date, TrendGranularity granularity) {
   switch (granularity) {
     case TrendGranularity.day:
-      return Formatters.dayOnly(date);
+      return Formatters.dayMonth(date);
     case TrendGranularity.week:
       return Formatters.dayMonth(date);
     case TrendGranularity.month:
@@ -166,7 +180,8 @@ String _bucketLabel(DateTime date, TrendGranularity granularity) {
 String _axisLabel(DateTime date, TrendGranularity granularity) {
   switch (granularity) {
     case TrendGranularity.day:
-      return Formatters.dayOnly(date);
+      // Name the month where it changes, so "30 31 1 2" reads as such.
+      return date.day == 1 ? Formatters.dayMonth(date) : Formatters.dayOnly(date);
     case TrendGranularity.week:
       return Formatters.dayMonth(date);
     case TrendGranularity.month:
@@ -271,7 +286,7 @@ class _HoldingSection extends StatelessWidget {
                   children: [
                     Expanded(
                       child:
-                          TotalStat(label: 'Invested', value: holding.netInvested, color: scheme.primary),
+                          TotalStat(label: 'Net invested', value: holding.netInvested, color: scheme.primary),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
